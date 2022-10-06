@@ -64,7 +64,7 @@
 
     # Find commits by author message
 
-    chm = "!f() { \
+    cha = "!f() { \
         git log --pretty=custom --decorate --date=short --author=\"$1\"; \
     }; f"
 

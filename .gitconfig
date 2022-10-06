@@ -54,17 +54,17 @@
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    # Find commits by author
+    # Find commits by author message
 
-    cha = "!f() { \
+    chm = "!f() { \
         git log --pretty=custom --decorate --date=short --grep=\"$1\"; \
     }; f"
 
 	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    # Find commits by author message
+    # Find commits by author
 
-    chm = "!f() { \
+    cha = "!f() { \
         git log --pretty=custom --decorate --date=short --author=\"$1\"; \
     }; f"
 

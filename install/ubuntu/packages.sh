@@ -1,12 +1,10 @@
 #!bin/bash
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update 
-sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd
 	
 # Install fish
 curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher && fisher install jorgebucaran/nvm.fish
-
-
 
 # mongodb install
 sudo apt-get install gnupg
@@ -18,7 +16,7 @@ sudo apt-get update
 sudo apt-get install -y mongodb-org
 
 # Install Starship
-curl -sS https://starship.rs/install.sh | sh
+curl -sS https://starship.rs/install.sh | sh -y
 
 function getAppAndInstall() {
 	TEMP_DEB="$(mktemp)" &&
@@ -34,4 +32,6 @@ for i in ${appUrls[@]}; do
 	getAppAndInstall $i 
 done
 
+
+# Install snap applications spotify, slack
 

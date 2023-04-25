@@ -7,8 +7,8 @@ set -U fish_user_paths $HOME/.local/bin $HOME/Applications $fish_user_paths
 ### EXPORT ###
 set -g -x fish_greeting			#Supress fish greeting
 set TERM "xterm-256color"		# Sets the terminal type
-set EDITOR "emacsclient -t -a ''"                 # $EDITOR use Emacs in terminal
-set VISUAL "emacsclient -c -a emacs"              # $VISUAL use Emacs in GUI mode
+set EDITOR "nvim"                 # $EDITOR use Emacs in terminal
+set VISUAL "nvim"              # $VISUAL use Emacs in GUI mode
 
 
 ### "bat" as manpager
@@ -49,20 +49,6 @@ else
   bind '$' __history_previous_command_arguments
 end
 
-
-# Function for org-agenda
-function org-search -d "send a search string to org-mode"
-    set -l output (/usr/bin/emacsclient -a "" -e "(message \"%s\" (mapconcat #'substring-no-properties \
-        (mapcar #'org-link-display-format \
-        (org-ql-query \
-        :select #'org-get-heading \
-        :from  (org-agenda-files) \
-        :where (org-ql--query-string-to-sexp \"$argv\"))) \
-        \"
-    \"))")
-    printf $output
-end
-
 ### END OF FUNCTIONS ###
 
 # navigation
@@ -82,8 +68,19 @@ alias cp="cp -i"
 alias mv='mv -i'
 alias rm='rm -i'
 
+alias vim='nvim'
+
+# Changing "ls" to "exa"
+alias ls='exa -al --color=always --group-directories-first' # my preferred listing
+alias la='exa -a --color=always --group-directories-first'  # all files and dirs
+alias ll='exa -l --color=always --group-directories-first'  # long format
+alias lt='exa -aT --color=always --group-directories-first' # tree listing
+alias l.='exa -a | egrep "^\."'
+
+
 # bare git repo alias for dotfiles
 alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
+
 
 starship init fish | source
 

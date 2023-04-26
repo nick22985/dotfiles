@@ -146,3 +146,4 @@ export NVM_DIR="$HOME/.nvm"
 
 
 eval "$(starship init bash)"
+PATH=~/.console-ninja/.bin:$PATH

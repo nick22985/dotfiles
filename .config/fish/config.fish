@@ -81,6 +81,7 @@ alias l.='exa -a | egrep "^\."'
 # bare git repo alias for dotfiles
 alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
+nvm use latest
 
 starship init fish | source
 

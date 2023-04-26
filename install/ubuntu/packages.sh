@@ -1,7 +1,7 @@
 #!bin/bash
-# sudo add-apt-repository ppa:neovim-ppa/unstable -y
-# sudo apt update 
-# sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd
+sudo add-apt-repository ppa:neovim-ppa/unstable -y
+sudo apt update 
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop
 	
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then
@@ -70,7 +70,7 @@ fi
 if ! fc-list | grep -lq 'Nerd Font'; then
 	echo "Installing nerd-fonts"
 	TEMP_DIR="$(mktemp)" &&
-		git clone git@github.com:ryanoasis/nerd-fonts.git
+		git clone https://github.com/ryanoasis/nerd-fonts.git 
 		sudo "$TEMP_DIR/install.sh"
 			rm -rf "$TEMP_DIR"
 fi

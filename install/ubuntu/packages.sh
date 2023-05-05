@@ -30,6 +30,10 @@ if ! [ -x "$(command -v starship)" ]; then
 	curl -sS https://starship.rs/install.sh | sh -y
 fi
 
+# install oh-my-zsh
+echo "Installing oh-my-zsh"
+sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+
 function getAppAndInstall() {
 	TEMP_DEB="$(mktemp)" &&
 		wget -O "$TEMP_DEB" $1 &&

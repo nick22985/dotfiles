@@ -11,3 +11,13 @@ do `config checkout`
 # Submodule Updating
 
 git submodule update
+
+For submodule updates
+config submodule update --remote --merge
+
+If git history is scuffed
+cd .config/nvim
+git fetch --all
+config submodule update --remote --merge
+
+config add .config/nvim

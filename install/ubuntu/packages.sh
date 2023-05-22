@@ -9,7 +9,6 @@ if ! [ -x "$(command -v fish)" ]; then
 	curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher && fisher install jorgebucaran/nvm.fish
 fi
 
-
 # mongodb install
 # check if mongodb is installed
 if ! [ -x "$(command -v mongod)" ]; then
@@ -33,6 +32,8 @@ fi
 # install oh-my-zsh
 echo "Installing oh-my-zsh"
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+
+# install git lfs https://git-lfs.com/
 
 function getAppAndInstall() {
 	TEMP_DEB="$(mktemp)" &&

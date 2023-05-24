@@ -127,6 +127,9 @@ foreach ($key in $keys) {
 	}
 }
 
+# Set Environment Variables
+[Environment]::SetEnvironmentVariable("MXDG_CONFIG_HOME", "$env:USERPROFILE\.config", "User")
+[Environment]::SetEnvironmentVariable("HOME", "$env:USERPROFILE", "User")
 
 # Not in winget
 # https://www.mysql.com/products/workbench/

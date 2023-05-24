@@ -1,8 +1,8 @@
 #!bin/bash
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
-sudo apt update 
+sudo apt update
 sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop
-	
+
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then
 	echo "Installing fish shell"
@@ -52,7 +52,7 @@ if ! [ -x "$(command -v 1password)" ]; then
 	getAppAndInstall "https://downloads.1password.com/linux/debian/amd64/stable/1password-latest.deb"
 fi
 
-if ! [ -x "$(command -v cloudflared)" ]; then 
+if ! [ -x "$(command -v cloudflared)" ]; then
 	echo "Installing cloudflared"
 	getAppAndInstall "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"
 fi
@@ -75,7 +75,7 @@ fi
 if ! fc-list | grep -lq 'Nerd Font'; then
 	echo "Installing nerd-fonts"
 	TEMP_DIR="$(mktemp)" &&
-		git clone https://github.com/ryanoasis/nerd-fonts.git 
+		git clone https://github.com/ryanoasis/nerd-fonts.git
 		sudo "$TEMP_DIR/install.sh"
 			rm -rf "$TEMP_DIR"
 fi

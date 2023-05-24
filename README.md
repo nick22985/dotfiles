@@ -23,11 +23,16 @@ config submodule update --remote --merge
 
 If git history is scuffed
 cd .config/nvim
+
 git fetch --all
 config submodule update --remote --merge
 
 config add .config/nvim
 
-# Windows Upgrade winget
 
+# Windows Alias in CMD
+git --git-dir=%userprofile%/.dotfiles/ --work-tree=%userprofile% checkout
+
+# Windows Upgrade winget
 winget upgrade --all --include-unknown
+

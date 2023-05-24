@@ -2,7 +2,6 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
-
 function wingetApplication {
 	param(
 		$applicationId

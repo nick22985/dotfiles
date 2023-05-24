@@ -131,6 +131,12 @@ foreach ($key in $keys) {
 [Environment]::SetEnvironmentVariable("MXDG_CONFIG_HOME", "$env:USERPROFILE\.config", "User")
 [Environment]::SetEnvironmentVariable("HOME", "$env:USERPROFILE", "User")
 
+# setup Windows Terminal Settings
+$currentDir = Get-Location
+Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$currentDir\windowsTerminal\settings.json" -Force
+
+# Create the necessary system links .minecraft screenshots to onedrive. onedrive backed up projects to ~/projects
+
 # Not in winget
 # https://www.mysql.com/products/workbench/
 # https://sourceforge.net/projects/equalizerapo/

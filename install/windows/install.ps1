@@ -107,6 +107,26 @@ if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
 Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
 
+# add ssh keys
+$KEY_URL = "https://github.com/nick22985.keys"
+$AUTHORIZED_KEYS_FILE = "$HOME\.ssh\authorized_keys"
+$response = Invoke-WebRequest -Uri $KEY_URL
+$keys = $response.Content -split "`n"
+foreach ($key in $keys) {
+	$key = $key.Trim()
+	if (-not [string]::IsNullOrWhiteSpace($key)) {
+		$existingKeys = Get-Content -Path $AUTHORIZED_KEYS_FILE
+		$keyExists = $existingKeys -contains $key
+		if ($keyExists) {
+			Write-Host "Key already exists in $AUTHORIZED_KEYS_FILE"
+		}
+		else {
+			Add-Content -Path $AUTHORIZED_KEYS_FILE -Value $key
+			Write-Host "Key added to $AUTHORIZED_KEYS_FILE"
+		}
+	}
+}
+
 
 # Not in winget
 # https://www.mysql.com/products/workbench/

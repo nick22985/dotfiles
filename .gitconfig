@@ -193,8 +193,14 @@
 [init]
 	defaultBranch = master
 
-[include]
 
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+	
+[include]
     # Load local configs
     # https://git-scm.com/docs/git-config#_includes
     #
@@ -203,8 +209,3 @@
     #       by the local ones
 
     path = ~/.gitconfig.local
-[filter "lfs"]
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
-	required = true

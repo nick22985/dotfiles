@@ -2,6 +2,32 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
+# Install git first
+winget install -e --id=Git.Git
+
+$USERPROFILE = Get-Content $PROFILE
+
+$checkConfig = '& "$env:ProgramFiles\Git\bin\git.exe" --git-dir="$env:userprofile/.dotfiles/" --work-tree="$env:userprofile/" $args'
+
+$configFunction = "function config {$checkConfig}"
+
+
+if ($USERPROFILE -contains $checkConfig) {
+	Write-host "config function already exists"
+} else {
+	Write-host "Installing config function"
+	Add-Content -Path $PROFILE -Value $configFunction
+}
+
+. $PROFILE
+
+config checkout
+
+config submodule update --init --recursive
+
+config --local status.showUntrackedFiles no
+
+
 function wingetApplication {
 	param(
 		$applicationId
@@ -35,7 +61,6 @@ $packages = [string[]](
 	'Microsoft.Office',
 	'GnuWin32.Make',
 	'Neovim.Neovim.Nightly',
-	'Git.Git',
 	'NordSecurity.NordVPN',
 	'Adobe.Acrobat.Reader.64-bit',
 	'SlackTechnologies.Slack',
@@ -89,13 +114,14 @@ $packages = [string[]](
 
 wingetApplication -applicationId $packages
 
+$Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
 # Allows starship to work in cmd with clink
 $content = ':read(\"*a\"))()'
 $content1 = "load(io.popen('starship init cmd')$content"
 New-Item "$env:LocalAppData\clink\starship.lua" -ItemType File -Value $content1
 
 # checks if powershell profile has starship init
-$USERPROFILE = Get-Content $PROFILE
 if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 	Write-host "Starship profile for ps1 already exists"
 } else {

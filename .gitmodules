@@ -2,3 +2,6 @@
 [submodule ".config/nvim"]
 	path = .config/nvim
 	url = git@github.com:nick22985/init.lua.git
+[submodule "install/configs/private"]
+	path = install/configs/private
+	url = git@github.com:nick22985/private-dotfiles.git

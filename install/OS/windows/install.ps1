@@ -2,31 +2,16 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
-# Install git first
-winget install -e --id=Git.Git
-
 $USERPROFILE = Get-Content $PROFILE
 
-$checkConfig = '& "$env:ProgramFiles\Git\bin\git.exe" --git-dir="$env:userprofile/.dotfiles/" --work-tree="$env:userprofile/" $args'
+$configFunction = 'function config {& "$env:ProgramFiles\Git\bin\git.exe" --git-dir="$env:userprofile/.dotfiles/" --work-tree="$env:userprofile/" $args}'
 
-$configFunction = "function config {$checkConfig}"
-
-
-if ($USERPROFILE -contains $checkConfig) {
+if ($USERPROFILE -contains $configFunction) {
 	Write-host "config function already exists"
 } else {
 	Write-host "Installing config function"
-	Add-Content -Path $PROFILE -Value $configFunction
+	Add-Content -Path $PROFILE -Value "`n$configFunction"
 }
-
-. $PROFILE
-
-config checkout
-
-config submodule update --init --recursive
-
-config --local status.showUntrackedFiles no
-
 
 function wingetApplication {
 	param(
@@ -126,7 +111,7 @@ if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 	Write-host "Starship profile for ps1 already exists"
 } else {
 	Write-host "Installing Starship profile for ps1"
-	Add-Content -Path $PROFILE -Value "Invoke-Expression (&starship init powershell)"
+	Add-Content -Path $PROFILE -Value "`nInvoke-Expression (&starship init powershell)"
 }
 
 # install nerd fonts
@@ -158,8 +143,11 @@ foreach ($key in $keys) {
 [Environment]::SetEnvironmentVariable("HOME", "$env:USERPROFILE", "User")
 
 # setup Windows Terminal Settings
-$currentDir = Get-Location
-Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$currentDir\windowsTerminal\settings.json" -Force
+Push-Location ../../configs/
+$sshConfig = Get-Location
+Pop-Location
+
+Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$sshConfig\windowsTerminal\settings.json" -Force
 
 # Create the necessary system links .minecraft screenshots to onedrive. onedrive backed up projects to ~/projects
 

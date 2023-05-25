@@ -2,3 +2,6 @@
 [submodule ".config/nvim"]
 	path = .config/nvim
 	url = git@github.com:nick22985/init.lua.git
+[submodule ".ssh"]
+	path = .ssh
+	url = git@github.com:nick22985/.ssh.git

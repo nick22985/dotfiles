@@ -99,6 +99,7 @@ $packages = [string[]](
 
 wingetApplication -applicationId $packages
 
+# Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 # Allows starship to work in cmd with clink
@@ -145,7 +146,6 @@ foreach ($key in $keys) {
 
 Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
-# Create the necessary system links .minecraft screenshots to onedrive. onedrive backed up projects to ~/projects
 
 # Not in winget
 # https://www.mysql.com/products/workbench/

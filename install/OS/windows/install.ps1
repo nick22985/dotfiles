@@ -142,12 +142,8 @@ foreach ($key in $keys) {
 [Environment]::SetEnvironmentVariable("MXDG_CONFIG_HOME", "$env:USERPROFILE\.config", "User")
 [Environment]::SetEnvironmentVariable("HOME", "$env:USERPROFILE", "User")
 
-# setup Windows Terminal Settings
-Push-Location ../../configs/
-$sshConfig = Get-Location
-Pop-Location
 
-Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$sshConfig\windowsTerminal\settings.json" -Force
+Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
 # Create the necessary system links .minecraft screenshots to onedrive. onedrive backed up projects to ~/projects
 

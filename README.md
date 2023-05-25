@@ -1,3 +1,9 @@
+# Auto install
+
+## Windows
+
+`cmd /V /C "curl -o script.ps1 https://raw.githubusercontent.com/nick22985/dotfiles/master/scripts/install.ps1 & powershell.exe -ExecutionPolicy Bypass -File script.ps1"`
+
 # How to clone the repo
 
 Need to configure this as an alias to be able to checkout the bare repo into

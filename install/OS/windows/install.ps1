@@ -94,7 +94,8 @@ $packages = [string[]](
 	'Ubisoft.Connect',
 	'Microsoft.WindowsSDK',
 	'WinFsp.WinFsp',
-	'Unity.UnityHub'
+	'Unity.UnityHub',
+	'ActivityWatch.ActivityWatch'
 )
 
 wingetApplication -applicationId $packages
@@ -102,7 +103,6 @@ wingetApplication -applicationId $packages
 # Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
-# Allows starship to work in cmd with clink
 $content = ':read(\"*a\"))()'
 $content1 = "load(io.popen('starship init cmd')$content"
 New-Item "$env:LocalAppData\clink\starship.lua" -ItemType File -Value $content1

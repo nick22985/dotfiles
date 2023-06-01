@@ -1,7 +1,7 @@
 #!bin/bash
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
-sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server
 
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then

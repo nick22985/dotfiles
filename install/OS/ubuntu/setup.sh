@@ -1,5 +1,9 @@
 #!/bin/bash
 source ./packages.sh
+
+# Enable and start the mysql service 
+sudo systemctl enable --now mysql.service
+
 # pull https://github.com/nick22985.keys from github if the key does not exists in ~.ssh/authorized_keys then add it
 if ! [ -f ~/.ssh/authorized_keys ]; then
 	echo "Adding ssh dir"

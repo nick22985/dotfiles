@@ -57,3 +57,23 @@ program = C:\\Users\\username\\gpg-no-tty.sh
 ## whever the location is of GPG program
 
 git config --global gpg.program "%PROGRAMFILES(x86)%\GnuPG\bin\gpg.exe"
+
+
+# TODO
+## Windows
+Issue 1 no winget
+Issue 2 need to /y on the winget installs
+Issue 3 for some reason script fails if auto admin launched
+Issue 4 Git path does not refresh
+Issue 5 'C:\Users\nick\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1' does not exist (no Folders do)
+Issue 6 Installing AngileBits.1Password No package found matching input criteria. (No 1Password?)
+Issue 7 No Battle.net install
+Issue 8 Some apps need to be installed as non admin
+Issue 9 Equalizer APO needs to be insalled
+Issue 10 need to set: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned
+Issue 11 Need to instal gcc https://www.digitalocean.com/community/tutorials/c-compiler-windows-gcc and add to path C:\Program Files\CodeBlocks\MinGW\bin
+Issue 12 Add C:\Program Files (x86)\GnuWin32\bin to path
+Issue 13 C:\Users\nick\OneDrive\Documents\WindowsPowerShell Also need powershell settings here
+Issue 14 need to install npcap https://npcap.com/
+Issue 15 need to do wsl --update after wsl is installed
+Issue 16 install postgreSQL

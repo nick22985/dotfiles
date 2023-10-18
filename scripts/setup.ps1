@@ -27,7 +27,7 @@ Remove-Item "Setup.msix"
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory
 Set-Location -Path "$env:USERPROFILE"
 
-winget install -e --id=Git.Git
+winget install -e --id=Git.Git --force
 
 if (Test-Path -Path "$env:userprofile\.dotfiles" -PathType Container) {
 	Write-Host ".dotfiles already exists"

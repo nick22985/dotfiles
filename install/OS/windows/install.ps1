@@ -2,6 +2,24 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
+
+# Install winget
+# get latest download url
+$URL = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+$URL = (Invoke-WebRequest -Uri $URL).Content | ConvertFrom-Json |
+        Select-Object -ExpandProperty "assets" |
+        Where-Object "browser_download_url" -Match '.msixbundle' |
+        Select-Object -ExpandProperty "browser_download_url"
+
+# download
+Invoke-WebRequest -Uri $URL -OutFile "Setup.msix" -UseBasicParsing
+
+# install
+Add-AppxPackage -Path "Setup.msix"
+
+# delete file
+Remove-Item "Setup.msix"
+
 $USERPROFILE = Get-Content $PROFILE
 
 $configFunction = 'function config {& "$env:ProgramFiles\Git\bin\git.exe" --git-dir="$env:userprofile/.dotfiles/" --work-tree="$env:userprofile/" $args}'
@@ -11,6 +29,8 @@ if ($USERPROFILE -contains $configFunction) {
 } else {
 	Write-host "Installing config function"
 	Add-Content -Path $PROFILE -Value "`n$configFunction"
+ 	# Refreshes the path variable without needing to restart powershell
+	$Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 }
 
 function wingetApplication {
@@ -19,12 +39,13 @@ function wingetApplication {
 	)
 	$applicationId | ForEach-Object {
 		Write-host "Installing $_"
-		$application = winget install --id=$_ -e
+		$application = winget install --id=$_ -e --force
 		Write-Host $application
 	}
 }
 
 $packages = [string[]](
+	'Obsidian.Obsidian',
 	'OBSProject.OBSStudio',
 	'Notepad++.Notepad++',
 	'OpenJS.NodeJS',
@@ -95,7 +116,12 @@ $packages = [string[]](
 	'Microsoft.WindowsSDK',
 	'WinFsp.WinFsp',
 	'Unity.UnityHub',
-	'ActivityWatch.ActivityWatch'
+	'ActivityWatch.ActivityWatch',
+ 	'gstreamerproject.gstreamer',
+  	'gnupg.Gpg4win',
+   	'Codeblocks.Codeblocks', #gcc
+    	'Insecure.Npcap',
+     	'GlassWire.GlassWire'
 )
 
 wingetApplication -applicationId $packages
@@ -146,12 +172,4 @@ foreach ($key in $keys) {
 
 Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
-
-# Not in winget
-# https://www.mysql.com/products/workbench/
-# https://sourceforge.net/projects/equalizerapo/
-
-# IDK if i need
-# GStreamer
-# 'RiotGames.LeagueOfLegends.OC1',
-# 'BitSum.ProcessLasso'
+wsl --update

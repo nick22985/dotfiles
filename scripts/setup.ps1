@@ -1,4 +1,4 @@
-# cmd /V /C "curl -o script.ps1 https://raw.githubusercontent.com/nick22985/dotfiles/master/scripts/install.ps1 & powershell.exe -ExecutionPolicy Bypass -File script.ps1"
+# cmd /V /C "curl -o script.ps1 https://raw.githubusercontent.com/nick22985/dotfiles/master/scripts/setup.ps1 & powershell.exe -ExecutionPolicy Bypass -File script.ps1"
 
 # Check for admin privileges
 if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {

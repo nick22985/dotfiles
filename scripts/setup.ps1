@@ -46,6 +46,8 @@ if ($USERPROFILE -contains $configFunction) {
 	Write-host "Installing config function"
 	Add-Content -Path $PROFILE -Value "`n$configFunction"
 }
+# Refreshes the path variable without needing to restart powershell
+$Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 . $PROFILE
 

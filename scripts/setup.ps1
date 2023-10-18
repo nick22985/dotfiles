@@ -6,6 +6,24 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Exit
 }
 
+# Install winget
+# get latest download url
+$URL = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+$URL = (Invoke-WebRequest -Uri $URL).Content | ConvertFrom-Json |
+        Select-Object -ExpandProperty "assets" |
+        Where-Object "browser_download_url" -Match '.msixbundle' |
+        Select-Object -ExpandProperty "browser_download_url"
+
+# download
+Invoke-WebRequest -Uri $URL -OutFile "Setup.msix" -UseBasicParsing
+
+# install
+Add-AppxPackage -Path "Setup.msix"
+
+# delete file
+Remove-Item "Setup.msix"
+
+
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory
 Set-Location -Path "$env:USERPROFILE"
 

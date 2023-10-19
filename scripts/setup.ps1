@@ -17,6 +17,9 @@ if (Test-Path -Path (Get-Command winget -ErrorAction SilentlyContinue)) {
 	Add-AppxPackage Microsoft.VCLibs.x64.14.00.Desktop.appx
 	Add-AppxPackage Microsoft.UI.Xaml.2.7.x64.appx
 	Add-AppxPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+ 	Remove-Item Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+  	Remove-Item Microsoft.UI.Xaml.2.7.x64.appx
+   	Remove-Item Microsoft.VCLibs.x64.14.00.Desktop.appx
 }
 
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory

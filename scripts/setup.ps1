@@ -26,7 +26,7 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 Set-Location -Path "$env:USERPROFILE"
 if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "Git is installed."
-} esle {   
+} else {   
 	Write-Host "Installing GIT."
 	winget install -e --id=Git.Git --force
 }

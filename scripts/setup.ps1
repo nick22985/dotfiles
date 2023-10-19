@@ -5,7 +5,7 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
-if (Test-Path -Path (Get-Command winget -ErrorAction SilentlyContinue)) {
+if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "winget is installed."
 } else {
 	Write-Host "winget is not installed."

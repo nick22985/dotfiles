@@ -126,10 +126,6 @@ if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 	Add-Content -Path $PROFILE -Value "`nInvoke-Expression (&starship init powershell)"
 }
 
-# install nerd fonts
-git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
-Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
-
 # add ssh keys
 $KEY_URL = "https://github.com/nick22985.keys"
 $AUTHORIZED_KEYS_FILE = "$HOME\.ssh\authorized_keys"
@@ -157,4 +153,8 @@ foreach ($key in $keys) {
 
 Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
+# install nerd fonts
+git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
+Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
 wsl --update
+

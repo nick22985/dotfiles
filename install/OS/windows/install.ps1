@@ -5,8 +5,18 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 
 $USERPROFILE = Get-Content $PROFILE
 
-# Define an array of application names you want to install
-$applications = @(
+function wingetApplication {
+	param(
+		$applicationId
+	)
+	$applicationId | ForEach-Object {
+		Write-host "Installing $_"
+		$application = winget install --id=$_ -e --force --accept-package-agreements
+		Write-Host $application
+	}
+}
+
+$packages = [string[]](
 	'Obsidian.Obsidian',
 	'OBSProject.OBSStudio',
 	'Notepad++.Notepad++',
@@ -86,53 +96,7 @@ $applications = @(
      	'GlassWire.GlassWire'
 )
 
-# Create a script block for installing an application
-$installScript = {
-    param (
-        [string]$appName
-    )
-    Write-Host "Installing $appName..."
-    winget install -e --id $appName --accept-source-agreements --accept-package-agreements
-    Write-Host "$appName installation complete."
-}
-
-# Create jobs for installing applications in parallel
-$jobs = @()
-foreach ($app in $applications) {
-    $jobs += Start-Job -ScriptBlock $installScript -ArgumentList $app
-}
-
-# Monitor job progress and display messages
-$completedJobs = @()
-while ($jobs.Count -gt 0) {
-    foreach ($job in $jobs) {
-        if ($job.State -eq 'Completed') {
-            $completedJobs += $job
-        }
-    }
-
-    # Remove completed jobs from the $jobs array
-    $completedJobs | ForEach-Object {
-        $jobs.Remove($_)
-    }
-
-    # Clear the completedJobs array for the next iteration
-    $completedJobs = @()
-
-    # Display progress
-    Write-Host "Progress: $($jobs.Count) out of $($applications.Count) remaining."
-
-    # Sleep for a moment to avoid excessive resource usage
-    Start-Sleep -Seconds 1
-}
-
-# Display job results and remove the completed jobs
-$completedJobs | ForEach-Object {
-    Receive-Job $_
-    Remove-Job $_
-}
-
-Write-Host "All installations are complete."
+wingetApplication -applicationId $packages
 
 # Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
@@ -148,6 +112,10 @@ if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 	Write-host "Installing Starship profile for ps1"
 	Add-Content -Path $PROFILE -Value "`nInvoke-Expression (&starship init powershell)"
 }
+
+# install nerd fonts
+git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
+Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
 
 # add ssh keys
 $KEY_URL = "https://github.com/nick22985.keys"
@@ -176,8 +144,4 @@ foreach ($key in $keys) {
 
 Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
-# install nerd fonts
-git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
-Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
 wsl --update
-

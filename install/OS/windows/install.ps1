@@ -11,7 +11,7 @@ function wingetApplication {
 	)
 	$applicationId | ForEach-Object {
 		Write-host "Installing $_"
-		$application = winget install --id=$_ -e --force
+		$application = winget install --id=$_ -e --force --accept-package-agreements
 		Write-Host $application
 	}
 }

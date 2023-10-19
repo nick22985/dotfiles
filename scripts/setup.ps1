@@ -28,7 +28,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     Write-Host "Git is installed."
 } else {   
 	Write-Host "Installing GIT."
-	winget install -e --id=Git.Git --force --accept-package-agreements
+	winget install -e --id=Git.Git --force --accept-source-agreements --accept-package-agreements
 }
 
 # Ensure the directory path exists

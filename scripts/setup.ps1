@@ -20,7 +20,17 @@ Set-Location -Path "$env:USERPROFILE"
 
 winget install -e --id=Git.Git --force
 
+# Ensure the directory path exists
+$directory = [System.IO.Path]::GetDirectoryName($PROFILE)
+if (-not (Test-Path -Path $directory)) {
+    New-Item -ItemType Directory -Path $directory -Force
+}
 
+# Create the profile file if it doesn't exist
+if (-not (Test-Path -Path $PROFILE)) {
+    # You can use New-Item to create the file, and you can add content to it if needed.
+    New-Item -Path $PROFILE -ItemType File
+}
 
 $USERPROFILE = Get-Content $PROFILE
 

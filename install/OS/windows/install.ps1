@@ -11,7 +11,7 @@ function wingetApplication {
 	)
 	$applicationId | ForEach-Object {
 		Write-host "Installing $_"
-		$application = winget install --id=$_ -e --force --accept-package-agreements
+		$application = winget install --id=$_ -e --force --accept-source-agreements --accept-package-agreements
 		Write-Host $application
 	}
 }
@@ -93,7 +93,16 @@ $packages = [string[]](
   	'gnupg.Gpg4win',
    	'Codeblocks.Codeblocks', #gcc
     	'Insecure.Npcap',
-     	'GlassWire.GlassWire'
+     	'GlassWire.GlassWire',
+      	'Samsung.SamsungMagician',
+       'JetBrains.IntelliJIDEA.Community',
+       'MongoDB.Compass.Full',
+       'Malwarebytes.Malwarebytes',
+       'JetBrains.PyCharm.Community',
+       'JetBrains.IntelliJIDEA.Community',
+       'LabyMediaGmbH.LabyModLauncher',
+       'wez.wezterm',
+       
 )
 
 wingetApplication -applicationId $packages
@@ -145,3 +154,6 @@ foreach ($key in $keys) {
 Copy-Item -Path "$Env:LocalAppData\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json" -Destination "$env:USERPROFILE\windowsTerminal\settings.json" -Force
 
 wsl --update
+
+# https://www.memurai.com/get-memurai
+# https://redis.com/redis-enterprise/redis-insight/

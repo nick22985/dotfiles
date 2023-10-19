@@ -20,12 +20,7 @@ Set-Location -Path "$env:USERPROFILE"
 
 winget install -e --id=Git.Git --force
 
-if (Test-Path -Path "$env:userprofile\.dotfiles" -PathType Container) {
-	Write-Host ".dotfiles already exists"
-} else {
-	Write-Host ".dotfiles does not exists"
-	git clone --bare git@github.com:nick22985/dotfiles.git $HOME/.dotfiles
-}
+
 
 $USERPROFILE = Get-Content $PROFILE
 
@@ -42,6 +37,12 @@ $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";"
 
 . $PROFILE
 
+if (Test-Path -Path "$env:userprofile\.dotfiles" -PathType Container) {
+	Write-Host ".dotfiles already exists"
+} else {
+	Write-Host ".dotfiles does not exists"
+	git clone --bare git@github.com:nick22985/dotfiles.git $HOME/.dotfiles
+}
 config checkout
 
 config submodule update --init --recursive

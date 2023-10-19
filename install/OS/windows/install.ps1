@@ -101,7 +101,7 @@ $packages = [string[]](
        'JetBrains.PyCharm.Community',
        'JetBrains.IntelliJIDEA.Community',
        'LabyMediaGmbH.LabyModLauncher',
-       'wez.wezterm',
+       'wez.wezterm'
        
 )
 

@@ -24,7 +24,7 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory
 Set-Location -Path "$env:USERPROFILE"
-if (Get-Command winget -ErrorAction SilentlyContinue) {
+if (Get-Command git -ErrorAction SilentlyContinue) {
     Write-Host "Git is installed."
 } else {   
 	Write-Host "Installing GIT."

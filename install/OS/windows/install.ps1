@@ -24,7 +24,7 @@ $packages = [string[]](
 	'Discord.Discord',
 	'Microsoft.WindowsTerminal',
 	'PuTTY.PuTTY',
-	'AngileBits.1Password',
+	'AgileBits.1Password',
 	'AgileBits.1Password.CLI',
 	'Microsoft.VisualStudioCode',
 	'Microsoft.VisualStudio.2022.Community.Preview',

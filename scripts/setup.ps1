@@ -52,10 +52,6 @@ if ($USERPROFILE -contains $configFunction) {
 	Write-host "Installing config function"
 	Add-Content -Path $PROFILE -Value "`n$configFunction"
 }
-# Refreshes the path variable without needing to restart powershell
-$Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
-. $PROFILE
 
 $sshDirectory = [System.IO.Path]::Combine($env:USERPROFILE, ".ssh")
 $knownHostsFile = [System.IO.Path]::Combine($sshDirectory, "known_hosts")
@@ -96,6 +92,10 @@ if (Test-Path -Path $knownHostsFile -PathType Leaf) {
     $newHostKeys | Out-File -FilePath $knownHostsFile -Force
     Write-Host "Created $knownHostsFile and added host keys."
 }
+# Refreshes the path variable without needing to restart powershell
+$Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+. $PROFILE
 
 if (Test-Path -Path "$env:userprofile\.dotfiles" -PathType Container) {
 	Write-Host ".dotfiles already exists"

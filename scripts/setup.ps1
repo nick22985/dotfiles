@@ -24,8 +24,12 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory
 Set-Location -Path "$env:USERPROFILE"
-
-winget install -e --id=Git.Git --force
+if (Get-Command winget -ErrorAction SilentlyContinue) {
+    Write-Host "Git is installed."
+} esle {   
+	Write-Host "Installing GIT."
+	winget install -e --id=Git.Git --force
+}
 
 # Ensure the directory path exists
 $directory = [System.IO.Path]::GetDirectoryName($PROFILE)

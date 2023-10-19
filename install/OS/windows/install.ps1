@@ -5,18 +5,18 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 
 $USERPROFILE = Get-Content $PROFILE
 
-function wingetApplication {
-	param(
-		$applicationId
-	)
-	$applicationId | ForEach-Object {
-		Write-host "Installing $_"
-		$application = winget install --id=$_ -e --force --accept-package-agreements
-		Write-Host $application
-	}
+# Create a script block for installing an application
+$installScript = {
+    param (
+        [string]$appName
+    )
+    Write-Host "Installing $appName..."
+    winget install -e --id $appName
+    Write-Host "$appName installation complete."
 }
 
-$packages = [string[]](
+# Define an array of application names you want to install
+$applications = @(
 	'Obsidian.Obsidian',
 	'OBSProject.OBSStudio',
 	'Notepad++.Notepad++',
@@ -96,7 +96,20 @@ $packages = [string[]](
      	'GlassWire.GlassWire'
 )
 
-wingetApplication -applicationId $packages
+# Create jobs for installing applications in parallel
+$jobs = @()
+foreach ($app in $applications) {
+    $jobs += Start-Job -ScriptBlock $installScript -ArgumentList $app
+}
+
+# Wait for all jobs to complete
+$jobs | Wait-Job
+
+# Display job results, and remove the completed jobs
+$jobs | ForEach-Object {
+    Receive-Job $_
+    Remove-Job $_
+}
 
 # Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")

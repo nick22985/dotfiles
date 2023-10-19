@@ -53,45 +53,6 @@ if ($USERPROFILE -contains $configFunction) {
 	Add-Content -Path $PROFILE -Value "`n$configFunction"
 }
 
-$sshDirectory = [System.IO.Path]::Combine($env:USERPROFILE, ".ssh")
-$knownHostsFile = [System.IO.Path]::Combine($sshDirectory, "known_hosts")
-
-if (-not (Test-Path -Path $sshDirectory -PathType Container)) {
-    New-Item -Path $sshDirectory -ItemType Directory
-}
-# Define the new host keys (add your host keys here)
-$newHostKeys = @"
-github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
-github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
-github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
-"@
-
-# Check if the known_hosts file exists
-if (Test-Path -Path $knownHostsFile -PathType Leaf) {
-    # Read the existing known_hosts file
-    $existingHostKeys = Get-Content -Path $knownHostsFile
-    $existingKeysArray = $existingHostKeys -split "`n"
-
-    # Check if any of the new host keys are already in the known_hosts file
-    $keysToAdd = @()
-    foreach ($newKey in ($newHostKeys -split "`n")) {
-        if (-not ($existingKeysArray -contains $newKey)) {
-            $keysToAdd += $newKey
-        }
-    }
-
-    if ($keysToAdd.Count -gt 0) {
-        # Append the new keys to the known_hosts file
-        $keysToAdd | Out-File -FilePath $knownHostsFile -Append
-        Write-Host "Added new host keys to $knownHostsFile."
-    } else {
-        Write-Host "No new host keys were added."
-    }
-} else {
-    # Create the known_hosts file and add the new keys
-    $newHostKeys | Out-File -FilePath $knownHostsFile -Force
-    Write-Host "Created $knownHostsFile and added host keys."
-}
 # Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 

@@ -7,22 +7,21 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 }
 
 # Install winget
-# get latest download url
-$URL = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
-$URL = (Invoke-WebRequest -Uri $URL).Content | ConvertFrom-Json |
-        Select-Object -ExpandProperty "assets" |
-        Where-Object "browser_download_url" -Match '.msixbundle' |
-        Select-Object -ExpandProperty "browser_download_url"
+$hasPackageManager = Get-AppPackage -name 'Microsoft.DesktopAppInstaller'
 
-# download
-Invoke-WebRequest -Uri $URL -OutFile "Setup.msix" -UseBasicParsing
+if(!$hasPackageManager)
+{
+    Add-AppxPackage -Path 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx'
 
-# install
-Add-AppxPackage -Path "Setup.msix"
+    $releases_url = 'https://api.github.com/repos/microsoft/winget-cli/releases/latest'
 
-# delete file
-Remove-Item "Setup.msix"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $releases = Invoke-RestMethod -uri $releases_url
+    $latestRelease = $releases.assets | Where { $_.browser_download_url.EndsWith('msixbundle') } | Select -First 1
 
+    "Installing winget from $($latestRelease.browser_download_url)"
+    Add-AppxPackage -Path $latestRelease.browser_download_url
+}
 
 # Running as admin puts us in C:\Windows\System32 by default so we need to change to the user's home directory
 Set-Location -Path "$env:USERPROFILE"

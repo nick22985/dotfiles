@@ -108,12 +108,19 @@ while ($jobs.Count -gt 0) {
     foreach ($job in $jobs) {
         if ($job.State -eq 'Completed') {
             $completedJobs += $job
-            $jobs.Remove($job)
         }
     }
 
+    # Remove completed jobs from the $jobs array
+    $completedJobs | ForEach-Object {
+        $jobs.Remove($_)
+    }
+
+    # Clear the completedJobs array for the next iteration
+    $completedJobs = @()
+
     # Display progress
-    Write-Host "Progress: $($completedJobs.Count) out of $($applications.Count) completed."
+    Write-Host "Progress: $($jobs.Count) out of $($applications.Count) remaining."
 
     # Sleep for a moment to avoid excessive resource usage
     Start-Sleep -Seconds 1

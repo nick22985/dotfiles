@@ -11,7 +11,7 @@ $installScript = {
         [string]$appName
     )
     Write-Host "Installing $appName..."
-    winget install -e --id $appName
+    winget install -e --id $appName --accept-source-agreements --accept-package-agreements
     Write-Host "$appName installation complete."
 }
 

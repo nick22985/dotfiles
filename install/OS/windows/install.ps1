@@ -5,16 +5,6 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 
 $USERPROFILE = Get-Content $PROFILE
 
-# Create a script block for installing an application
-$installScript = {
-    param (
-        [string]$appName
-    )
-    Write-Host "Installing $appName..."
-    winget install -e --id $appName --accept-source-agreements --accept-package-agreements
-    Write-Host "$appName installation complete."
-}
-
 # Define an array of application names you want to install
 $applications = @(
 	'Obsidian.Obsidian',
@@ -96,20 +86,46 @@ $applications = @(
      	'GlassWire.GlassWire'
 )
 
+# Create a script block for installing an application
+$installScript = {
+    param (
+        [string]$appName
+    )
+    Write-Host "Installing $appName..."
+    winget install -e --id $appName --accept-source-agreements --accept-package-agreements
+    Write-Host "$appName installation complete."
+}
+
 # Create jobs for installing applications in parallel
 $jobs = @()
 foreach ($app in $applications) {
     $jobs += Start-Job -ScriptBlock $installScript -ArgumentList $app
 }
 
-# Wait for all jobs to complete
-$jobs | Wait-Job
+# Monitor job progress and display messages
+$completedJobs = @()
+while ($jobs.Count -gt 0) {
+    foreach ($job in $jobs) {
+        if ($job.State -eq 'Completed') {
+            $completedJobs += $job
+            $jobs.Remove($job)
+        }
+    }
 
-# Display job results, and remove the completed jobs
-$jobs | ForEach-Object {
+    # Display progress
+    Write-Host "Progress: $($completedJobs.Count) out of $($applications.Count) completed."
+
+    # Sleep for a moment to avoid excessive resource usage
+    Start-Sleep -Seconds 1
+}
+
+# Display job results and remove the completed jobs
+$completedJobs | ForEach-Object {
     Receive-Job $_
     Remove-Job $_
 }
+
+Write-Host "All installations are complete."
 
 # Refreshes the path variable without needing to restart powershell
 $Env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")

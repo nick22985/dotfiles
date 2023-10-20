@@ -66,3 +66,7 @@ Issue 12 Add C:\Program Files (x86)\GnuWin32\bin to path
 Issue 14 need to install npcap https://npcap.com/
 Issue 15 need to do wsl --update after wsl is installed
 Issue 16 install postgreSQL
+
+CMAKE in path
+GNUWIN32 in path
+

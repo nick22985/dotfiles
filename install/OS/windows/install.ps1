@@ -80,7 +80,6 @@ $packages = [string[]](
 	'WiresharkFoundation.Wireshark',
 	'RARLab.WinRAR',
 	'Nvidia.GeForceExperience',
-	'9NF8H0H7WMLT', # NVIDIA Control Panel
 	'Spotify.Spotify',
 	'CoreyButler.NVMforWindows',
 	'Postman.Postman',

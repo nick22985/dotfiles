@@ -75,7 +75,6 @@ fi
 if ! fc-list | grep -lq 'Nerd Font'; then
 	echo "Installing nerd-fonts"
 	TEMP_DIR="$(mktemp)" &&
-		git clone https://github.com/ryanoasis/nerd-fonts.git
  		git clone --filter=blob:none --sparse git@github.com:ryanoasis/nerd-fonts
 		sudo "$TEMP_DIR/install.sh"
 			rm -rf "$TEMP_DIR"

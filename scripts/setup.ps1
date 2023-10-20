@@ -2,7 +2,7 @@
 
 # Check for admin privileges
 if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {
-	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
+	Start-Process -FilePath PowerShell.exe -Verb Runas -ArgumentList "-noexit", "-ExecutionPolicy Bypass", "-File `"$($MyInvocation.MyCommand.Path)`"  `"$($MyInvocation.MyCommand.UnboundArguments)`""
 	Exit
 }
 if (Get-Command winget -ErrorAction SilentlyContinue) {

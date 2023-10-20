@@ -19,6 +19,7 @@ function wingetApplication {
 }
 
 $packages = [string[]](
+	'Valve.Steam',
 	'Obsidian.Obsidian',
 	'OBSProject.OBSStudio',
 	'Notepad++.Notepad++',

@@ -69,11 +69,12 @@ config checkout
 config submodule update --init --recursive
 
 config config status.showUntrackedFiles no
+
+# Run install script
+Invoke-Expression "$env:USERPROFILE/install/OS/windows/install.ps1"
+
 if (Test-Path -Path "$env:USERPROFILE/install/configs/private/" -PathType Container) {
 	Invoke-Expression "$env:USERPROFILE/install/configs/private/scripts/private-install.ps1"
 } else {
 	Write-Host "No Private install detected"
 }
-# Run install script
-Invoke-Expression "$env:USERPROFILE/install/OS/windows/install.ps1"
-

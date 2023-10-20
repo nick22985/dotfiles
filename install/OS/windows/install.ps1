@@ -124,7 +124,8 @@ if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {
 }
 
 # install nerd fonts
-git clone https://github.com/ryanoasis/nerd-fonts.git "$env:USERPROFILE/Downloads/nerd-fonts"
+git clone --filter=blob:none --sparse git@github.com:ryanoasis/nerd-fonts "$env:USERPROFILE/Downloads/nerd-fonts"
+
 Invoke-Expression "$env:USERPROFILE/Downloads/nerd-fonts/install.ps1"
 
 # add ssh keys

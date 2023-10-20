@@ -3,6 +3,8 @@ if(!([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]:
 	Exit
 }
 
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned
+
 $USERPROFILE = Get-Content $PROFILE
 
 function wingetApplication {

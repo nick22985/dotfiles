@@ -116,14 +116,26 @@ $content = ':read(\"*a\"))()'
 $content1 = "load(io.popen('starship init cmd')$content"
 New-Item "$env:LocalAppData\clink\starship.lua" -ItemType File -Value $content1
 
-# FIXME: Add to profile automatically 2
-# Shows navigable menu of all options when hitting Tab
-# Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete
+Install-Module -Name Terminal-Icons -Repository PSGallery
+if ($USERPROFILE -contains "Import-Module -Name Terminal-Icons") {
+} else {
+	Add-Content -Path $PROFILE -Value "Import-Module -Name Terminal-Icons"
+}
 
-# Autocompletion for arrow keys
-# Set-PSReadlineKeyHandler -Key UpArrow -Function HistorySearchBackward
-# Set-PSReadlineKeyHandler -Key DownArrow -Function HistorySearchForward
 
+if ($USERPROFILE -contains "Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete") {
+} else {
+	Add-Content -Path $PROFILE -Value "Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete"
+}
+if ($USERPROFILE -contains "Set-PSReadlineKeyHandler -Key UpArrow -Function HistorySearchBackward") {
+} else {
+	Add-Content -Path $PROFILE -Value "Set-PSReadlineKeyHandler -Key UpArrow -Function HistorySearchBackward"
+}
+
+if ($USERPROFILE -contains "Set-PSReadlineKeyHandler -Key DownArrow -Function HistorySearchForward") {
+} else {
+	Add-Content -Path $PROFILE -Value "Set-PSReadlineKeyHandler -Key DownArrow -Function HistorySearchForward"
+}
 
 # checks if powershell profile has starship init
 if ($USERPROFILE -contains "Invoke-Expression (&starship init powershell)") {

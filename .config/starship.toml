@@ -125,9 +125,9 @@ disabled = false
 ## SECOND LINE/ROW: Prompt
 # Somethere at the beginning
 [battery]
-full_symbol = " "
-charging_symbol = " "
-discharging_symbol = " "
+full_symbol = "󰁹 "
+charging_symbol = "󰂄 "
+discharging_symbol = "󰂃 "
 disabled = true
 
 [[battery.display]]  # "bold red" style when capacity is between 0% and 10%
@@ -159,8 +159,9 @@ error_symbol = " [╰─×](bold red)"
 
 [shell]
 format = '[$indicator]($style) '
-fish_indicator = ''
+fish_indicator = '󰈺'
 powershell_indicator = '_'
 unknown_indicator = ''
 style = 'cyan bold'
 disabled = false 
+

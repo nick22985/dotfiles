@@ -122,6 +122,12 @@ if ($USERPROFILE -contains "Import-Module -Name Terminal-Icons") {
 	Add-Content -Path $PROFILE -Value "Import-Module -Name Terminal-Icons"
 }
 
+Install-Module PowerType -AllowPrerelease
+if ($USERPROFILE -contains "Import-Module -Name Terminal-Icons") {
+} else {
+	Add-Content -Path $PROFILE -Value "Enable-PowerType"
+ 	Add-Content -Path $PROFILE -Value "Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle ListView # Optional"
+}
 
 if ($USERPROFILE -contains "Set-PSReadlineKeyHandler -Key Tab -Function MenuComplete") {
 } else {

@@ -1,7 +1,8 @@
 #!bin/bash
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
+sudo add-apt-repository ppa:flatpak/stable -y
 sudo apt update
-sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server flatpak
 
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then
@@ -33,6 +34,10 @@ fi
 echo "Installing oh-my-zsh"
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
+flatpak install flathub com.spotify.Client
+flatpak install flathub com.discordapp.Discord
+flatpak install flathub com.visualstudio.code
+
 # install git lfs https://git-lfs.com/
 
 function getAppAndInstall() {
@@ -42,11 +47,6 @@ function getAppAndInstall() {
 			rm -f "$TEMP_DEB"
 }
 
-if ! [ -x "$(command -v discord)" ]; then
-	echo "Installing discord"
-	getAppAndInstall "https://discord.com/api/download?platform=linux&format=deb"
-fi
-
 if ! [ -x "$(command -v 1password)" ]; then
 	echo "Installing 1password"
 	getAppAndInstall "https://downloads.1password.com/linux/debian/amd64/stable/1password-latest.deb"
@@ -55,21 +55,6 @@ fi
 if ! [ -x "$(command -v cloudflared)" ]; then
 	echo "Installing cloudflared"
 	getAppAndInstall "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"
-fi
-
-if ! [ -x "$(command -v spotify)" ]; then
-	echo "Installing spotify"
-	sudo snap install spotify
-fi
-
-if ! [ -x "$(command -v slack)" ]; then
-	echo "Installing slack"
-	sudo snap install slack --classic
-fi
-
-if ! [ -x "$(command -v code)" ]; then
-	echo "Installing vscode"
-	sudo snap install code --classic
 fi
 
 if ! fc-list | grep -lq 'Nerd Font'; then

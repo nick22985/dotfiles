@@ -81,7 +81,11 @@ alias l.='exa -a | egrep "^\."'
 # bare git repo alias for dotfiles
 alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
-nvm use latest
+# nvm use latest >/dev/null
 
 starship init fish | source
 
+
+# bun
+set --export BUN_INSTALL "$HOME/.bun"
+set --export PATH $BUN_INSTALL/bin $PATH

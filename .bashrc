@@ -120,6 +120,9 @@ alias rm='rm -i'
 # dotfiles
 alias config='/usr/bin/git --git-dir=$HOME/dotfiles/ --work-tree=$HOME'
 
+# Wezterm
+alias wezterm='flatpak run org.wezfurlong.wezterm'
+
 # Alias definitions.
 # You may want to put all your additions into a separate file like
 # ~/.bash_aliases, instead of adding them here directly.

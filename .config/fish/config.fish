@@ -81,6 +81,9 @@ alias l.='exa -a | egrep "^\."'
 # bare git repo alias for dotfiles
 alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
+# wezterm
+alias wezterm='flatpak run org.wezfurlong.wezterm'
+
 # nvm use latest >/dev/null
 
 starship init fish | source

@@ -3,7 +3,7 @@ sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo add-apt-repository ppa:flatpak/stable -y
 sudo add-apt-repository ppa:redislabs/redis -y
 sudo apt update
-sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server flatpak redis
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server flatpak redis-server
 
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then

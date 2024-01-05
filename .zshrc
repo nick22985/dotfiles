@@ -104,4 +104,10 @@ export NVM_DIR=~/.nvm
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 eval "$(starship init zsh)"
 
+path+=("$HOME/.local/bin")
+
+export PATH
+
+alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
+
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh

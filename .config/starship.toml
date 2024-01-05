@@ -82,6 +82,7 @@ $status\
 $os\
 $container\
 $character"""
+command_timeout = 1000
 
 ## FIRST LINE/ROW: Info & Status
 # First param ─┌
@@ -128,7 +129,7 @@ disabled = false
 full_symbol = "󰁹 "
 charging_symbol = "󰂄 "
 discharging_symbol = "󰂃 "
-disabled = true
+disabled =  true
 
 [[battery.display]]  # "bold red" style when capacity is between 0% and 10%
 threshold = 15
@@ -138,7 +139,7 @@ disabled = true
 [[battery.display]]  # "bold yellow" style when capacity is between 10% and 30%
 threshold = 50
 style = "bold yellow"
-disabled = true
+disabled =  true
 
 [[battery.display]]  # "bold green" style when capacity is between 10% and 30%
 threshold = 80
@@ -163,5 +164,5 @@ fish_indicator = '󰈺'
 powershell_indicator = '_'
 unknown_indicator = ''
 style = 'cyan bold'
-disabled = false 
+disabled = false
 

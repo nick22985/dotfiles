@@ -3,14 +3,47 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$(find ~/projects ~/projects/work ~/projects/personal  -mindepth 1 -maxdepth 3 -type d | fzf)
+    find_command=()
+    declare -a default_paths=(
+        "$HOME/projects"
+        "$HOME"
+        "$HOME/.config"
+        "$HOME/projects/work"
+        "$HOME/projects/personal"
+    )
+
+    # Function to add paths to the find_command array
+    add_to_find_command() {
+        local path=$1
+        local mindepth=${2:-1}  # Default to 1 if not provided
+        local maxdepth=${3:-1}  # Default to 1 if not provided
+			  path="${path/\$HOME/$HOME}"
+				local results=$(find "$path" -mindepth $mindepth -maxdepth $maxdepth -type d 2>/dev/null)
+				# Add results if not empty
+				if [ ! -z "$results" ]; then
+					 find_command+=("$results")
+				fi
+			}
+
+    # Add default paths to find_command
+    for path_info in "${default_paths[@]}"; do
+        IFS=' ' read -r path mindepth maxdepth <<< "$path_info"
+        add_to_find_command "$path" "$mindepth" "$maxdepth"
+    done
+
+    # Add paths from external file to find_command
+    if [ -f "$HOME/install/configs/private/.find_paths.txt" ]; then
+        while IFS=' ' read -r path mindepth maxdepth; do
+            add_to_find_command "$path" "$mindepth" "$maxdepth"
+        done < "$HOME/install/configs/private/.find_paths.txt"
+    fi
+
+    selected=$(printf "%s\n" "${find_command[@]}" | fzf)
 fi
 
 if [[ -z $selected ]]; then
     exit 0
 fi
-
-echo "here" $selected
 
 selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
@@ -25,3 +58,30 @@ if ! tmux has-session -t=$selected_name 2> /dev/null; then
 fi
 
 tmux switch-client -t $selected_name
+
+#
+# if [[ $# -eq 1 ]]; then
+#     selected=$1
+# else
+#     selected=$(find ~/projects ~/ ~/.config ~/projects/work ~/projects/personal  -mindepth 1 -maxdepth 3 -type d | fzf)
+# fi
+#
+# if [[ -z $selected ]]; then
+#     exit 0
+# fi
+#
+#
+# selected_name=$(basename "$selected" | tr . _)
+# tmux_running=$(pgrep tmux)
+#
+# if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+#     tmux new-session -s $selected_name -c $selected
+#     exit 0
+# fi
+#
+# if ! tmux has-session -t=$selected_name 2> /dev/null; then
+#     tmux new-session -ds $selected_name -c $selected
+# fi
+#
+# tmux switch-client -t $selected_name
+

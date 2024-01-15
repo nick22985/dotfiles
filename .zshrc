@@ -107,7 +107,7 @@ eval "$(starship init zsh)"
 export GPG_TTY=$(tty)
 
 path+=("$HOME/.local/bin")
-
+path+=("$HOME/install/configs/private/.local/bin")
 export PATH
 
 alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'

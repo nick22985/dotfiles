@@ -150,9 +150,11 @@ export NVM_DIR="$HOME/.nvm"
 
 
 eval "$(starship init bash)"
-PATH=~/.console-ninja/.bin:$PATH
+
 . "$HOME/.cargo/env"
 GPG_TTY=$(tty)
 export GPG_TTY
 
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
+
+eval "$(zoxide init bash)"

@@ -13,11 +13,8 @@
 	rebase = false
 
 [push]
-
-    # Make `git push` automatically push relevant
-    # annotated tags when pushing branches out
-
     followTags = true
+	default = current
 
 [apply]
 
@@ -26,6 +23,7 @@
 
 [branch]
 	sort = -committerdate
+	autoSetupRemote = always
 
 [alias]
 
@@ -147,7 +145,7 @@
 
     abbrev = 12
     attributesfile = ~/.gitattributes
-	autocrlf = input
+	autocrlf = false
     editor = code
     excludesfile = ~/.gitignore
 	untrackedCache = true

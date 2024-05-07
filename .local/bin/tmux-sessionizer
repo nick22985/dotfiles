@@ -15,15 +15,14 @@ else
     # Function to add paths to the find_command array
     add_to_find_command() {
         local path=$1
-        local mindepth=${2:-1}  # Default to 1 if not provided
-        local maxdepth=${3:-1}  # Default to 1 if not provided
-			  path="${path/\$HOME/$HOME}"
-				local results=$(find "$path" -mindepth $mindepth -maxdepth $maxdepth -type d 2>/dev/null)
-				# Add results if not empty
-				if [ ! -z "$results" ]; then
-					 find_command+=("$results")
-				fi
-			}
+        local mindepth=${2:-1}
+        local maxdepth=${3:-1}
+        path="${path/\$HOME/$HOME}"
+        local results=$(find "$path" -mindepth $mindepth -maxdepth $maxdepth -type d 2>/dev/null)
+        if [ ! -z "$results" ]; then
+            find_command+=("$results")
+        fi
+    }
 
     # Add default paths to find_command
     for path_info in "${default_paths[@]}"; do
@@ -38,23 +37,44 @@ else
         done < "$HOME/install/configs/private/.find_paths.txt"
     fi
 
-    selected=$(printf "%s\n" "${find_command[@]}" | fzf)
+    # Extract SSH hosts
+    ssh_hosts=($(grep -E '^Host\s+' ~/.ssh/config | grep -v 'HostName' | awk '{print "ssh/"$2}'))
+
+    # Combine directory paths and SSH hosts, then use fzf to select
+    selected=$(printf "%s\n" "${find_command[@]}" "${ssh_hosts[@]}" | fzf)
 fi
 
+# Exit if nothing is selected
 if [[ -z $selected ]]; then
     exit 0
 fi
 
+# Handle SSH and directory selections
 selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
 
-if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-    tmux new-session -s $selected_name -c $selected
-    exit 0
-fi
+# Check if the selected item is an SSH host
+if [[ $selected == ssh/* ]]; then
+    ssh_host=${selected#ssh/}
+    selected_name="ssh-$selected_name"  # Prefix for SSH sessions
 
-if ! tmux has-session -t=$selected_name 2> /dev/null; then
-    tmux new-session -ds $selected_name -c $selected
+    if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+        tmux new-session -s $selected_name "ssh $ssh_host"
+				tmux set-environment -t $selected_name TMUX_SSH_HOST $ssh_host
+        exit 0
+    elif ! tmux has-session -t=$selected_name 2> /dev/null; then
+        tmux new-session -ds $selected_name "ssh $ssh_host"
+        tmux set-environment -t $selected_name TMUX_SSH_HOST $ssh_host
+    fi
+else
+    # Handle directory selection
+    if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+        tmux new-session -s $selected_name -c $selected
+        exit 0
+    elif ! tmux has-session -t=$selected_name 2> /dev/null; then
+        tmux new-session -ds $selected_name -c $selected
+    fi
 fi
 
 tmux switch-client -t $selected_name
+

@@ -94,6 +94,8 @@ set --export BUN_INSTALL "$HOME/.bun"
 set --export PATH $BUN_INSTALL/bin $PATH
 
 # Vpn connect
-
 alias vpncon='sudo nmcli con up id'
 alias vpndis='sudo nmcli con down id'
+
+zoxide init fish | source
+

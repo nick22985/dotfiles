@@ -5,3 +5,13 @@
 [submodule "install/configs/private"]
 	path = install/configs/private
 	url = git@github.com:nick22985/private-dotfiles.git
+[submodule ".tmux/plugins/tpm"]
+	path = .tmux/plugins/tpm
+	url = https://github.com/tmux-plugins/tpm
+[submodule ".config/entr"]
+	path = .config/entr
+	url = git@github.com:eradman/entr.git
+[submodule ".config/treesitterCustom/tree-sitter-vue"]
+	path = .config/treesitterCustom/tree-sitter-vue
+	url = https://github.com/nick22985/tree-sitter-vue
+	branch = main

@@ -3,7 +3,11 @@ sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo add-apt-repository ppa:flatpak/stable -y
 sudo add-apt-repository ppa:redislabs/redis -y
 sudo apt update
-sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server flatpak redis-server
+sudo apt-get install -y zsh exa neovim gh git snapd-xdg-open snapd ripgrep neofetch htop nvtop mysql-server flatpak redis-server fswatch fd
+
+# install yq
+sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+sudo chmod +x /usr/bin/yq
 
 # Install fish
 if ! [ -x "$(command -v fish)" ]; then

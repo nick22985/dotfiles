@@ -30,3 +30,7 @@ done
 	 echo "Setting max_user_watches to 9999999"
 	 echo fs.inotify.max_user_watches=9999999 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
  fi
+ if ! grep -lq 'fs.inotify.max_queued_events=9999999' /etc/sysctl.conf; then
+	 echo "Setting max_queued_events to 9999999"
+	 echo fs.inotify.max_queued_events=9999999 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
+ fi

@@ -31,10 +31,10 @@ else
     done
 
     # Add paths from external file to find_command
-    if [ -f "$HOME/install/configs/private/.find_paths.txt" ]; then
+    if [ -f "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt" ]; then
         while IFS=' ' read -r path mindepth maxdepth; do
             add_to_find_command "$path" "$mindepth" "$maxdepth"
-        done < "$HOME/install/configs/private/.find_paths.txt"
+        done < "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
     fi
 
     # Extract SSH hosts

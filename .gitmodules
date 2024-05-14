@@ -2,9 +2,6 @@
 [submodule ".config/nvim"]
 	path = .config/nvim
 	url = git@github.com:nick22985/init.lua.git
-[submodule "install/configs/private"]
-	path = install/configs/private
-	url = git@github.com:nick22985/private-dotfiles.git
 [submodule ".tmux/plugins/tpm"]
 	path = .tmux/plugins/tpm
 	url = https://github.com/tmux-plugins/tpm
@@ -15,3 +12,9 @@
 	path = .config/treesitterCustom/tree-sitter-vue
 	url = https://github.com/nick22985/tree-sitter-vue
 	branch = main
+[submodule ".config/.nickInstall/install/configs/private"]
+	path = .config/.nickInstall/install/configs/private
+	url = git@github.com:nick22985/private-dotfiles.git
+[submodule ".config/docker-compose"]
+	path = .config/docker-compose
+	url = git@github.com:nick22985/docker-compose.git

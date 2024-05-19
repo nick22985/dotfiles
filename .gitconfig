@@ -25,6 +25,9 @@
 	sort = -committerdate
 	autoSetupRemote = always
 
+[rerere]
+    enabled = true
+
 [alias]
 
     a   = commit --amend

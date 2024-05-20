@@ -1,0 +1,54 @@
+# set shortcut windows
+# "C:\Program Files\Alacritty\alacritty.exe" --config-file %userprofile%\.alacritty.toml
+
+import = [
+  # uncomment the flavour you want below:
+  # "~/.config/alacritty/catppuccin-latte.toml"
+  # "~/.config/alacritty/catppuccin-frappe.toml"
+  # "~/.config/alacritty/catppuccin-macchiato.toml"
+  "~/.config/alacritty/catppuccin-mocha.toml"
+]
+# for windows
+# [shell]
+# program = "pwsh"
+
+
+[env]
+TERM = "xterm-256color"
+
+
+[window]
+# opacity = 0.9
+
+padding.x = 0
+padding.y = 0
+
+decorations = "full"
+decorations_theme_variant = "Dark" # "Dark"
+startup_mode = "Maximized"
+
+[font]
+normal.family = "MesloLgs Nerd Font"
+bold.family = "MesloLgs Nerd Font"
+italic.family = "MesloLgs Nerd Font"
+bold_italic.family = "MesloLgs Nerd Font"
+
+size = 12.0
+
+
+[scrolling]
+history = 100000
+
+[terminal]
+osc52 = "CopyPaste"
+
+[keyboard]
+bindings = [
+  { key = "V", mods = "Control", action = "Paste" },
+  { key = "C", mods = "Control", action = "Copy" },
+]
+
+[cursor]
+style = { shape = "Beam", blinking = "On" }
+ 
+

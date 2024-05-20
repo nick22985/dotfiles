@@ -34,3 +34,8 @@ done
 	 echo "Setting max_queued_events to 9999999"
 	 echo fs.inotify.max_queued_events=9999999 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
  fi
+
+ 
+# Needs to be added to /etc/security/limits.conf
+# *               soft    nofile            10000
+# *               hard    nofile            10000 

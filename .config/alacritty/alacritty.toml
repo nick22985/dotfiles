@@ -44,8 +44,20 @@ osc52 = "CopyPaste"
 
 [keyboard]
 bindings = [
-  { key = "V", mods = "Control", action = "Paste" },
-  { key = "C", mods = "Control", action = "Copy" },
+  # { key = "V", mods = "Control", action = "Paste" },
+  # { key = "C", mods = "Control", action = "Copy" },
+  { key = "Slash", mods = "Control", chars = "\u001f" },
+  { key = "Backslash", mods = "Control", chars = "\u001c" }, # broken
+  { key = "1", mods = "Control", chars = "\u0031" },
+  { key = "2", mods = "Control", chars = "\u0000" }, # broken
+  { key = "3", mods = "Control", chars = "\u001b" },
+  { key = "4", mods = "Control", chars = "\u001c" },
+  { key = "5", mods = "Control", chars = "\u001d" },
+  { key = "6", mods = "Control", chars = "\u001e" },
+  { key = "7", mods = "Control", chars = "\u001f" },
+  { key = "8", mods = "Control", chars = "\u007F" },
+  { key = "9", mods = "Control", chars = "\u0039" },
+  { key = "0", mods = "Control", chars = "\u0000" }, # broken
 ]
 
 [cursor]

@@ -104,7 +104,9 @@ export NVM_DIR=~/.nvm
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 eval "$(starship init zsh)"
 
-export GPG_TTY=$(tty)
+
+GPG_TTY=$(tty)
+export GPG_TTY
 
 path+=("$HOME/.local/bin")
 path+=("$HOME/install/configs/private/.local/bin")

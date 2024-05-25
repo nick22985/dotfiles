@@ -1,4 +1,7 @@
 # Auto install
+# software
+- Lazygit
+- Lazydocker
 
 ## Windows
 

@@ -149,7 +149,7 @@
     abbrev = 12
     attributesfile = ~/.gitattributes
 	autocrlf = false
-    editor = code
+	editor = nvim
     excludesfile = ~/.gitignore
 	untrackedCache = true
 

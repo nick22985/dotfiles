@@ -145,10 +145,10 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 eval "$(zoxide init zsh)"
 
 # Download Znap, if it's not there yet.
-[[ -r ~/Repos/znap/znap.zsh ]] ||
-    git clone --depth 1 -- \
-        https://github.com/marlonrichert/zsh-snap.git ~/Repos/znap
-source ~/Repos/znap/znap.zsh  # Start Znap
+# [[ -r ~/Repos/znap/znap.zsh ]] ||
+#     git clone --depth 1 -- \
+#         https://github.com/marlonrichert/zsh-snap.git ~/Repos/znap
+# source ~/Repos/znap/znap.zsh  # Start Znap
 
 # https://github.com/sharkdp/fd
 nvim_config=($(fd --max-depth 1 --glob 'nvim-*' ~/.config))
@@ -156,6 +156,8 @@ for config in $nvim_config; do
   config_name=$(basename $config)
   alias "$config_name"="NVIM_APPNAME=$config_name nvim $@"
 done
+
+source ~/.ntfy_env
 
 vv() {
   # Assumes all configs exist in directories named ~/.config/nvim-*

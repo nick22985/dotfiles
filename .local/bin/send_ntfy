@@ -1,0 +1,76 @@
+#!/bin/bash
+# Source the environment variables from the .env file
+if [ -f ~/.ntfy_env ]; then
+    source ~/.ntfy_env
+else
+    echo "Error: Environment file ~/.ntfy_env not found."
+    exit 1
+fi
+
+# Use environment variables for server and bearer token
+NTFY_SERVER="${NTFY_SERVER}"
+NTFY_BEARER_TOKEN="${NTFY_BEARER_TOKEN}"
+
+# Default values for options
+TOPIC="notify"
+TITLE="Notification"
+PRIORITY="default"
+TAGS=""
+
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 -m MESSAGE [-o TOPIC] [-t TITLE] [-p PRIORITY] [-g TAGS]"
+    echo "  -m MESSAGE: The message to send (required)"
+    echo "  -o TOPIC: The ntfy topic (optional, default: 'your-default-topic')"
+    echo "  -t TITLE: The notification title (optional, default: 'Notification')"
+    echo "  -p PRIORITY: The notification priority (optional, default: 'default')"
+    echo "  -g TAGS: A comma-separated list of tags (optional)"
+    exit 1
+}
+
+# Parse command-line arguments
+while getopts "m:o:t:p:g:" opt; do
+    case $opt in
+        m) MESSAGE="$OPTARG" ;;
+        o) TOPIC="$OPTARG" ;;
+        t) TITLE="$OPTARG" ;;
+        p) PRIORITY="$OPTARG" ;;
+        g) TAGS="$OPTARG" ;;
+        *) usage ;;
+    esac
+done
+
+
+# Check if MESSAGE is provided
+if [ -z "$MESSAGE" ]; then
+    echo "Error: Message is required."
+    usage
+fi
+
+# Construct headers as arguments to the curl command
+CURL_COMMAND=("curl")
+
+# Add Bearer token authorization header
+CURL_COMMAND+=("-H" "\"Authorization: Bearer $NTFY_BEARER_TOKEN\"")
+
+# Add other headers
+if [ -n "$TITLE" ]; then
+    CURL_COMMAND+=("-H" "\"Title: $TITLE\"")
+fi
+
+if [ -n "$PRIORITY" ]; then
+    CURL_COMMAND+=("-H" "\"Priority: $PRIORITY\"")
+fi
+
+if [ -n "$TAGS" ]; then
+    CURL_COMMAND+=("-H" "\"Tags: $TAGS\"")
+fi
+
+# Add the data and URL
+CURL_COMMAND+=("-d" "\"$MESSAGE\"")
+CURL_COMMAND+=("\"$NTFY_SERVER/$TOPIC\"")
+
+# Execute the constructed command
+eval ${CURL_COMMAND[@]}
+

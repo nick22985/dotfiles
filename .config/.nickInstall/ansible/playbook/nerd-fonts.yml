@@ -1,0 +1,69 @@
+---
+- name: Update and upgrade packages on all systems
+  hosts: all
+  become: yes
+
+  tasks:
+    # Linux Tasks for APT
+    - name: Update packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: 'yes'
+
+    - name: Upgrade packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        upgrade: dist
+
+    # Linux Tasks for YUM
+    - name: Update packages with yum
+      when: ansible_pkg_mgr == 'yum'
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+
+    - name: Upgrade packages with yum
+      when: ansible_pkg_mgr == 'yum'
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+        exclude: kernel*
+
+    # Windows Tasks using Chocolatey
+    - name: Ensure Chocolatey is installed
+      when: ansible_facts['os_family'] == 'Windows'
+      win_chocolatey:
+        state: present
+
+    - name: Update all Chocolatey packages
+      when: ansible_facts['os_family'] == 'Windows'
+      win_chocolatey:
+        name: all
+        state: latest
+
+    # Windows Tasks using winget
+    - name: Update all winget packages
+      when: ansible_facts['os_family'] == 'Windows'
+      win_command: winget upgrade --all
+      register: winget_upgrade_result
+
+    - name: Debug winget upgrade output
+      when: ansible_facts['os_family'] == 'Windows' and debug_mode
+      ansible.builtin.debug:
+        var: winget_upgrade_result.stdout
+
+    # Windows System Updates using win_updates
+    - name: Install all available Windows updates
+      when: ansible_facts['os_family'] == 'Windows'
+      win_updates:
+        category_names:
+          - SecurityUpdates
+          - CriticalUpdates
+          - UpdateRollups
+        state: installed
+      register: update_result
+
+    - name: Reboot if Windows updates require it
+      when: ansible_facts['os_family'] == 'Windows' and update_result.reboot_required
+      win_reboot:

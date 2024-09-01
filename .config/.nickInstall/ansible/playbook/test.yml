@@ -1,0 +1,41 @@
+---
+- hosts: archtest
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Wipe the disk
+      command: "sgdisk --zap-all /dev/sda"
+
+    - name: Partition the disk using parted
+      parted:
+        device: "/dev/sda"
+        label: gpt
+        align: optimal
+      changed_when: false
+
+    - name: Create EFI partition
+      parted:
+        device: "/dev/sda"
+        number: 1
+        name: "EFI"
+        part_start: "1048MiB"
+        part_end: "4047MiB"
+        fs_type: fat32
+        label: gpt
+        part_type: primary
+        flags: [boot, esp]
+        # flags: [boot]
+        state: present
+
+    - name: Create swap partition
+      parted:
+        device: "/dev/sda"
+        number: 2
+        label: gpt
+        part_start: "4048MiB"
+        part_end: "8095MiB"
+        fs_type: linux-swap
+        part_type: primary
+        state: present
+

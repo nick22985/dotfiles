@@ -1,0 +1,210 @@
+---
+# not checked
+- name: Ensure Windows environment setup
+  hosts: windows
+  gather_facts: yes
+  tasks:
+    # Ensure running as Administrator
+    - name: Ensure the script is running with Administrator privileges
+      win_user_right:
+        name: SeDebugPrivilege
+        users: "{{ ansible_user }}"
+
+    # Set execution policy to RemoteSigned
+    - name: Set PowerShell execution policy to RemoteSigned
+      win_shell: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force
+
+    # Install applications using winget
+    - name: Install packages using winget
+      win_shell: |
+        $packages = @(
+          'Valve.Steam',
+          'Obsidian.Obsidian',
+          'OBSProject.OBSStudio',
+          'Notepad++.Notepad++',
+          'OpenJS.NodeJS',
+          'Discord.Discord',
+          'Microsoft.WindowsTerminal',
+          'PuTTY.PuTTY',
+          'AgileBits.1Password',
+          'AgileBits.1Password.CLI',
+          'Microsoft.VisualStudioCode',
+          'Microsoft.VisualStudio.2022.Community.Preview',
+          'VB-Audio.Voicemeeter.Potato',
+          'Elgato.StreamDeck',
+          'Microsoft.Teams',
+          'Oracle.JavaRuntimeEnvironment',
+          'Mojang.MinecraftLauncher',
+          'JannisX11.Blockbench',
+          'Kitware.CMake',
+          'BurntSushi.ripgrep.MSVC',
+          'Microsoft.Office',
+          'GnuWin32.Make',
+          'Neovim.Neovim.Nightly',
+          'NordSecurity.NordVPN',
+          'Adobe.Acrobat.Reader.64-bit',
+          'SlackTechnologies.Slack',
+          'Corsair.iCUE.4',
+          'Nota.Gyazo',
+          'Flameshot.Flameshot',
+          'MongoDB.Server',
+          'MongoDB.Compass.Community',
+          'MongoDB.Shell',
+          'MongoDB.DatabaseTools',
+          'Oracle.MySQL',
+          'junegunn.fzf',
+          'GOG.Galaxy',
+          'wez.wezterm',
+          'Starship.Starship',
+          'chrisant996.Clink',
+          'Python.Python.3.11',
+          'WinSCP.WinSCP',
+          'WinDirStat.WinDirStat',
+          'GnuPG.Gpg4win',
+          'GnuPG.GnuPG',
+          'Hex-Rays.IDA.Free',
+          'Rustlang.Rustup',
+          'REALiX.HWiNFO',
+          'Docker.DockerDesktop',
+          'DBBrowserForSQLite.DBBrowserForSQLite',
+          'Cloudflare.cloudflared',
+          'OpenVPNTechnologies.OpenVPN',
+          'VideoLAN.VLC',
+          'KDE.Kdenlive',
+          'GIMP.GIMP',
+          'EaseUS.PartitionMaster',
+          'EaseUS.DataRecovery',
+          'EaseUS.TodoBackup',
+          'EpicGames.EpicGamesLauncher',
+          'Google.Chrome',
+          'Mozilla.Firefox',
+          'BlenderFoundation.Blender',
+          'WiresharkFoundation.Wireshark',
+          'RARLab.WinRAR',
+          'Nvidia.GeForceExperience',
+          'Spotify.Spotify',
+          'CoreyButler.NVMforWindows',
+          'Postman.Postman',
+          'Ubisoft.Connect',
+          'Microsoft.WindowsSDK',
+          'WinFsp.WinFsp',
+          'Unity.UnityHub',
+          'ActivityWatch.ActivityWatch',
+          'gstreamerproject.gstreamer',
+          'gnupg.Gpg4win',
+          'Codeblocks.Codeblocks',
+          'Insecure.Npcap',
+          'GlassWire.GlassWire',
+          'Samsung.SamsungMagician',
+          'JetBrains.IntelliJIDEA.Community',
+          'MongoDB.Compass.Full',
+          'Malwarebytes.Malwarebytes',
+          'JetBrains.PyCharm.Community',
+          'LabyMediaGmbH.LabyModLauncher'
+        )
+        foreach ($package in $packages) {
+          winget install --id=$package -e --force --accept-source-agreements --accept-package-agreements
+        }
+
+    # Set environment variables
+    - name: Set environment variables
+      win_environment:
+        state: present
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        level: user
+      loop:
+        - { name: 'MXDG_CONFIG_HOME', value: '{{ ansible_env.USERPROFILE }}\.config' }
+        - { name: 'HOME', value: '{{ ansible_env.USERPROFILE }}' }
+
+    # Set Windows to dark mode
+    - name: Set Windows to dark mode
+      win_regedit:
+        path: HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize
+        name: SystemUsesLightTheme
+        data: 0
+        type: dword
+      register: system_dark_mode
+
+    - name: Set apps to dark mode
+      win_regedit:
+        path: HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize
+        name: AppsUseLightTheme
+        data: 0
+        type: dword
+
+    # Copy Windows Terminal settings.json
+    - name: Copy Windows Terminal settings.json
+      win_copy:
+        src: "{{ ansible_env.LocalAppData }}\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
+        dest: "{{ ansible_env.USERPROFILE }}\windowsTerminal\settings.json"
+        force: yes
+
+    # Install OpenSSH Client and Server
+    - name: Install OpenSSH Client
+      win_feature:
+        name: OpenSSH.Client
+        state: present
+
+    - name: Install OpenSSH Server
+      win_feature:
+        name: OpenSSH.Server
+        state: present
+
+    # Start and enable sshd service
+    - name: Start sshd service
+      win_service:
+        name: sshd
+        start_mode: auto
+        state: started
+
+    # Configure firewall for SSH
+    - name: Configure firewall rule for SSH
+      win_shell: |
+        if (!(Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+        }
+
+    # Ensure ssh-agent service is enabled and started
+    - name: Set ssh-agent service to start automatically
+      win_service:
+        name: ssh-agent
+        start_mode: auto
+        state: started
+
+    # Install Starship prompt and PowerShell profile customizations
+    - name: Check if Starship prompt is configured
+      win_shell: |
+        if ((Get-Content -Path $PROFILE) -contains "Invoke-Expression (&starship init powershell)") {
+          Write-Host "Starship profile already configured"
+        } else {
+          Add-Content -Path $PROFILE -Value "`nInvoke-Expression (&starship init powershell)"
+        }
+
+    # Add SSH keys from GitHub
+    - name: Add SSH keys from GitHub
+      win_shell: |
+        $KEY_URL = "https://github.com/nick22985.keys"
+        $AUTHORIZED_KEYS_FILE = "$HOME\.ssh\authorized_keys"
+        $response = Invoke-WebRequest -Uri $KEY_URL
+        $keys = $response.Content -split "`n"
+        foreach ($key in $keys) {
+          $key = $key.Trim()
+          if (-not [string]::IsNullOrWhiteSpace($key)) {
+            $existingKeys = Get-Content -Path $AUTHORIZED_KEYS_FILE
+            if ($existingKeys -contains $key) {
+              Write-Host "Key already exists in $AUTHORIZED_KEYS_FILE"
+            } else {
+              Add-Content -Path $AUTHORIZED_KEYS_FILE -Value $key
+              Write-Host "Key added to $AUTHORIZED_KEYS_FILE"
+            }
+          }
+        }
+
+    # Update WSL
+    - name: Update WSL
+      win_shell: wsl --update
+
+    - name: Set WSL default version
+      win_shell: wsl --set-default-version 2
+

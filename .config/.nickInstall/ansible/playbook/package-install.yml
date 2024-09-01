@@ -1,0 +1,231 @@
+---
+- name: Ensure packages and configurations are installed
+  hosts: all
+  become: yes
+  vars:
+    # List of Debian-based packages
+    debian_packages:
+      - zsh
+      - neovim
+      - gh
+      - git
+      - snapd-xdg-open
+      - snapd
+      - ripgrep
+      - neofetch
+      - htop
+      - nvtop
+      - mysql-server
+      - flatpak
+      - redis-server
+      - fswatch
+      - fd-find
+      - gnupg
+      - yq
+
+  tasks:
+    # Add PPAs for specific packages
+    - name: Add Neovim PPA
+      ansible.builtin.apt_repository:
+        repo: ppa:neovim-ppa/unstable
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Add Flatpak PPA
+      ansible.builtin.apt_repository:
+        repo: ppa:flatpak/stable
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Add RedisLabs PPA
+      ansible.builtin.apt_repository:
+        repo: ppa:redislabs/redis
+      when: ansible_pkg_mgr == 'apt'
+
+    # Update APT cache after adding PPAs
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_pkg_mgr == 'apt'
+
+    # Install Debian-based packages
+    - name: Ensure packages are installed on Debian-based systems
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ debian_packages }}"
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # Install yq
+    - name: Check if yq binary is installed
+      stat:
+        path: /usr/bin/yq
+      register: yq_installed
+
+    - name: Install yq binary if not installed
+      ansible.builtin.get_url:
+        url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        dest: /usr/bin/yq
+        mode: '0755'
+      when: not yq_installed.stat.exists
+
+    # Install Fish shell
+    - name: Install Fish shell
+      ansible.builtin.apt:
+        name: fish
+        state: present
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # Install MongoDB
+    - name: Install MongoDB
+      block:
+        - name: Add MongoDB repository key
+          ansible.builtin.apt_key:
+            url: https://pgp.mongodb.com/server-6.0.asc
+            keyring: /usr/share/keyrings/mongodb-server-6.0.gpg
+            state: present
+
+        - name: Add MongoDB repository
+          ansible.builtin.apt_repository:
+            repo: "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse"
+            state: present
+
+        - name: Install MongoDB
+          ansible.builtin.apt:
+            name: mongodb-org
+            state: present
+
+        - name: Enable and start MongoDB service
+          ansible.builtin.systemd:
+            name: mongod
+            enabled: yes
+            state: started
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # Install Starship
+    - name: Check if Starship is installed
+      stat:
+        path: /usr/local/bin/starship
+      register: starship_installed
+
+    - name: Install Starship prompt if not installed
+      shell: curl -sS https://starship.rs/install.sh | sh -y
+      args:
+        executable: /bin/bash
+      when: not starship_installed.stat.exists
+
+    # Install Oh-My-Zsh
+    - name: Check if Oh-My-Zsh is installed
+      stat:
+        path: ~/.oh-my-zsh
+      register: ohmyzsh_installed
+
+    - name: Install Oh-My-Zsh if not installed
+      shell: sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      args:
+        executable: /bin/bash
+      when: not ohmyzsh_installed.stat.exists
+
+    # Install Flatpak applications
+    - name: Check if Spotify is installed via Flatpak
+      command: flatpak list | grep com.spotify.Client
+      register: spotify_installed
+      failed_when: spotify_installed.rc > 1
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install Spotify via Flatpak if not installed
+      ansible.builtin.command: flatpak install flathub com.spotify.Client -y
+      when: spotify_installed.rc != 0
+
+    - name: Check if Discord is installed via Flatpak
+      command: flatpak list | grep com.discordapp.Discord
+      register: discord_installed
+      failed_when: discord_installed.rc > 1
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install Discord via Flatpak if not installed
+      ansible.builtin.command: flatpak install flathub com.discordapp.Discord -y
+      when: discord_installed.rc != 0
+
+    - name: Check if VS Code is installed via Flatpak
+      command: flatpak list | grep com.visualstudio.code
+      register: vscode_installed
+      failed_when: vscode_installed.rc > 1
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install VS Code via Flatpak if not installed
+      ansible.builtin.command: flatpak install flathub com.visualstudio.code -y
+      when: vscode_installed.rc != 0
+
+    # Install 1Password
+    - name: Check if 1Password is installed
+      stat:
+        path: /usr/bin/1password
+      register: onepassword_installed
+
+    - name: Install 1Password if not installed
+      block:
+        - name: Download and install 1Password
+          ansible.builtin.get_url:
+            url: https://downloads.1password.com/linux/debian/amd64/stable/1password-latest.deb
+            dest: /tmp/1password-latest.deb
+
+        - name: Install 1Password package
+          ansible.builtin.apt:
+            deb: /tmp/1password-latest.deb
+          notify:
+            - Clean up 1Password package
+      when: not onepassword_installed.stat.exists
+
+    # Install Cloudflared
+    - name: Check if Cloudflared is installed
+      stat:
+        path: /usr/bin/cloudflared
+      register: cloudflared_installed
+
+    - name: Install Cloudflared if not installed
+      block:
+        - name: Download and install Cloudflared
+          ansible.builtin.get_url:
+            url: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+            dest: /tmp/cloudflared-latest.deb
+
+        - name: Install Cloudflared package
+          ansible.builtin.apt:
+            deb: /tmp/cloudflared-latest.deb
+          notify:
+            - Clean up Cloudflared package
+      when: not cloudflared_installed.stat.exists
+
+    # Install Rust and sshs
+    - name: Check if Rust is installed
+      stat:
+        path: ~/.cargo/bin/rustc
+      register: rust_installed
+
+    - name: Install Rust if not installed
+      shell: curl https://sh.rustup.rs -sSf | sh -s -- -y
+      args:
+        executable: /bin/bash
+      environment:
+        CARGO_HOME: "{{ ansible_env.HOME }}/.cargo"
+      when: not rust_installed.stat.exists
+
+    - name: Install sshs using Cargo if Rust is installed
+      ansible.builtin.shell: "{{ ansible_env.HOME }}/.cargo/bin/cargo install --git https://github.com/quantumsheep/sshs"
+      args:
+        executable: /bin/bash
+      when: rust_installed.stat.exists
+
+  handlers:
+    - name: Clean up 1Password package
+      ansible.builtin.file:
+        path: /tmp/1password-latest.deb
+        state: absent
+
+    - name: Clean up Cloudflared package
+      ansible.builtin.file:
+        path: /tmp/cloudflared-latest.deb
+        state: absent
+

@@ -15,7 +15,7 @@
     username: "nick"  # Replace with your desired username
     password: "your_password_here"  # Replace with your desired password
     root_password: "root_password_here"  # Replace with your desired root password
-    gpu_type: "nvidia"  # Set to "amd" or "nvidia" based on your system
+    gpu_type: "amd"  # Set to "amd" or "nvidia" based on your system
     cpu_type: "intel"
     chroot_path: /mnt  # Path where your system is mounted
     
@@ -408,52 +408,10 @@
       become: true
       become_user: root
 
-    - name: Create a build directory for yay in chroot
-      file:
-        path: /mnt/home/{{ username }}/yay
-        state: directory
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: '0755'
-      become: true
-      become_user: root
-
-    - name: Clone yay AUR repository in chroot
-      command: >
-        arch-chroot /mnt sudo -u {{ username }} git clone https://aur.archlinux.org/yay.git /home/{{ username }}/yay
-      become: true
-      become_user: root
-
-    - name: Build and install yay in chroot
-      command: >
-        arch-chroot /mnt sudo -u {{ username }} bash -c "cd /home/{{ username }}/yay && makepkg -si --noconfirm"
-      become: true
-      become_user: root
-
-    - name: Clean up yay build directory in chroot
-      command: >
-        arch-chroot /mnt rm -rf /home/{{ username }}/yay
-      become: true
-      become_user: root
- 
     # AMD - check if this is correct
     - name: Install AMD GPU proprietary packages in chroot
       command: >
-        arch-chroot /mnt bash -c "yay -S --noconfirm amdgpu-pro-installer && amdgpu-pro-installer --opencl=legacy,pal --headless --no-dkms"
-      when: gpu_type == "amd"
-      become: true
-      become_user: root
-
-    - name: Install proprietary OpenGL implementation in chroot
-      command: >
-        arch-chroot /mnt bash -c "pacman -S --noconfirm amdgpu-pro-oglp lib32-amdgpu-pro-oglp vulkan-amdgpu-pro lib32-vulkan-amdgpu-pro amf-amdgpu-pro"
-      when: gpu_type == "amd"
-      become: true
-      become_user: root
-
-    - name: Install proprietary OpenGL implementation in chroot
-      command: >
-        arch-chroot /mnt bash -c "pacman -S --noconfirm amdgpu-pro-oglp lib32-amdgpu-pro-oglp vulkan-amdgpu-pro lib32-vulkan-amdgpu-pro amf-amdgpu-pro"
+        arch-chroot /mnt bash -c "pacman -S mesa lib32-mesa xf86-video-amdgpu "
       when: gpu_type == "amd"
       become: true
       become_user: root
@@ -606,22 +564,10 @@
         state: present
       become_user: "{{ username }}"
 
-    - name: Check SDDM version available in the repositories
-      command: "pacman -Si sddm | grep Version | awk '{print $3}'"
-      register: sddm_version_check
-      become_user: "{{ username }}"
-
-    - name: Install SDDM stable version if >= 0.20.0
+    - name: Install SDDM
       pacman:
         name: sddm
         state: present
-      when: sddm_version_check.stdout is version_compare('0.20.0', '>=')
-      become_user: "{{ username }}"
-
-    - name: Install SDDM from AUR (sddm-git) if stable version < 0.20.0
-      command: "arch-chroot /mnt bash -c 'yay -S --noconfirm sddm-git'"
-      when: sddm_version_check.stdout is version_compare('0.20.0', '<')
-      become: true
       become_user: "{{ username }}"
 
     - name: Enable SDDM to start on boot

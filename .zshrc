@@ -116,9 +116,9 @@ alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-if [ "$TMUX" = "" ]; then 
-	tmux new-session "bash $HOME/.local/bin/tmux_startup"
-fi
+#if [ "$TMUX" = "" ]; then 
+#	tmux new-session "bash $HOME/.local/bin/tmux_startup"
+#fi
 
 
 # pnpm
@@ -141,6 +141,7 @@ bindkey '^Z' _zsh_cli_fg
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+export PATH=$PATH:/usr/local/go/bin
 
 eval "$(zoxide init zsh)"
 
@@ -157,8 +158,9 @@ for config in $nvim_config; do
   alias "$config_name"="NVIM_APPNAME=$config_name nvim $@"
 done
 
-source ~/.ntfy_env
-
+alias labymod="__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia labymodlauncher"
+alias tmuxls="tmux-sessionizer"
+alias vi="nvim"
 vv() {
   # Assumes all configs exist in directories named ~/.config/nvim-*
   local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)

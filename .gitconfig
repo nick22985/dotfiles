@@ -145,13 +145,19 @@
     untracked = red reverse
 
 [core]
-
-    abbrev = 12
-    attributesfile = ~/.gitattributes
+	abbrev = 12
+	attributesfile = ~/.gitattributes
 	autocrlf = false
 	editor = nvim
-    excludesfile = ~/.gitignore
+	excludesfile = ~/.gitignore
 	untrackedCache = true
+
+
+[merge]
+	conflictStyle = diff3
+
+[diff]
+	colorMoved = default
 
 [diff "bin"]
 

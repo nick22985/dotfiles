@@ -1,0 +1,149 @@
+@import "../colors.rasi"
+
+window {
+    background-color:             @bg;
+    width:                        600px;
+    border:                       2px;
+    border-radius:                10;
+    border-color:                 @primery;
+    padding:                      15px;
+}
+
+mainbox {
+    background-color:             @transparent;
+    border:                       0;
+    padding:                      0;
+}
+
+message {
+    background-color:             @transparent;
+    border:                       1px;
+    border-color:                 @primery;
+    padding:                      1px ;
+}
+
+textbox {
+    text-color:                   @primery;
+    background-color:             @transparent;
+}
+
+listview {
+    background-color:             @transparent;
+    fixed-height:                 0;
+    spacing:                      2px ;
+    scrollbar:                    false;
+    padding:                      20px 0px 0px ;
+}
+
+element {
+    background-color:             @transparent;
+    border:                       0;
+    padding:                      5px  0;
+}
+
+element-icon{
+    background-color:             @transparent;
+}
+
+element-text {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.normal.normal {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.normal.urgent {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.normal.active {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.selected.normal {
+    background-color:             @primery;
+    border-radius:                7;
+    text-color:                   @text;
+}
+
+element.selected.urgent {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.selected.active {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+element.alternate.normal {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+
+element.alternate.urgent {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+element.alternate.active {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+
+scrollbar {
+    width:        1px ;
+    border:       0;
+    handle-width: 8px ;
+    padding:      0;
+}
+mode-switcher {
+    border:                      2px dash 0px 0px ;
+    border-color:                @secondary;
+    background-color:             @transparent;
+}
+button.selected {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+button {
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+inputbar {
+    spacing:                      0;
+    background-color:             @transparent;
+    text-color:                   @primery;
+    padding:    1px ;
+}
+case-indicator {
+    spacing:                      0;
+    background-color:             @transparent;
+    text-color:                   @primery;
+}
+entry {
+    spacing:                      0;
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+prompt {
+    spacing:                      0;
+    background-color:             @transparent;
+    text-color:                   @text;
+}
+inputbar {
+    children:   [ prompt,textbox-prompt-colon,entry,case-indicator ];
+}
+textbox-prompt-colon {
+    expand:     false;
+    background-color:             @transparent;
+    str:        " :";
+    margin:     0px 0.3em 0em 0em ;
+    text-color: @text;
+}
+

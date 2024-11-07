@@ -102,6 +102,7 @@ source $ZSH/oh-my-zsh.sh
 
 export NVM_DIR=~/.nvm
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+source /usr/share/nvm/init-nvm.sh
 eval "$(starship init zsh)"
 
 
@@ -161,6 +162,9 @@ done
 alias labymod="__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia labymodlauncher"
 alias tmuxls="tmux-sessionizer"
 alias vi="nvim"
+
+alias nodekill="lsof -t -i:8080 | xargs -r kill"
+
 vv() {
   # Assumes all configs exist in directories named ~/.config/nvim-*
   local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)
@@ -171,4 +175,5 @@ vv() {
   # Open Neovim with the selected config
   NVIM_APPNAME=$(basename $config) nvim $@
 }
+
 fpath+=${ZDOTDIR:-~}/.zsh_functions

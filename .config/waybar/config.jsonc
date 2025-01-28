@@ -4,7 +4,7 @@
   "modules-left": [
     "custom/logo",
     "clock",
-    "custom/weather",
+    // "custom/weather",
     "disk",
     "memory",
     "cpu",
@@ -87,13 +87,13 @@
     "exec": "~/.config/waybar/scripts/powerdraw.sh",
     "return-type": "json"
   },
-  "custom/weather": {
-    "format": "{}",
-    "return-type": "json",
-    "exec": "~/.config/waybar/scripts/weather.sh",
-    "interval": 10,
-    "on-click": "firefox https://wttr.in"
-  },
+  // "custom/weather": {
+  //   "format": "{}",
+  //   "return-type": "json",
+  //   "exec": "~/.config/waybar/scripts/weather.sh",
+  //   "interval": 10,
+  //   "on-click": "firefox https://wttr.in"
+  // },
   "hyprland/workspaces": {
     // "format": "<span font='18px'>{icon}</span>",
 	  "format": "{icon}",
@@ -281,7 +281,7 @@
     "tooltip-format-wifi": "{essid} ({signalStrength}%)  | {ipaddr}",
     "tooltip-format-ethernet": "{ifname} 🖧 | {ipaddr}",
     "tooltip-format-ethernet": "{bandwidthTotalBytes}",
-    "on-click": "networkmanager_dmenu"
+    "on-click": "bash -c 'networkmanager_dmenu 2>/dev/null'"
   },
   "network#speed": {
     "format": "{bandwidthDownBits}",

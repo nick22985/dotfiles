@@ -164,16 +164,26 @@ alias tmuxls="tmux-sessionizer"
 alias vi="nvim"
 
 alias nodekill="lsof -t -i:8080 | xargs -r kill"
+alias waybarrestart="killall -SIGUSR2 waybar"
 
 vv() {
   # Assumes all configs exist in directories named ~/.config/nvim-*
-  local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)
+  local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | sed '1i ~/.config/nvim' | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)
  
   # If I exit fzf without selecting a config, don't open Neovim
   [[ -z $config ]] && echo "No config selected" && return
- 
+
   # Open Neovim with the selected config
-  NVIM_APPNAME=$(basename $config) nvim $@
+  if [[ $config == *"nvim-"* ]]; then
+    NVIM_APPNAME=$(basename $config) nvim $@
+  else
+    nvim $@
+  fi
 }
 
 fpath+=${ZDOTDIR:-~}/.zsh_functions
+
+set -o allexport
+source ~/.env
+set +o allexport
+

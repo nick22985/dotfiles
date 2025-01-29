@@ -8,7 +8,9 @@ script_path="${config_dir}/${session_name}"
 
 if [ -f "$script_path" ]; then
 	if [ -x "$script_path" ]; then
-		"$script_path" "$session_name" "$session_path"
+		# make a seperate window to be able to execute commands
+		# NOTE: onclose event has to kill the pane manually
+		tmux-windowizer "onclose" "source $script_path $session_name" c-M
 	else
 		logger -t "tmux-on-closed" "Script exists but is not executable: $script_path"
 	fi

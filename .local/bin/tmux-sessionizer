@@ -1,4 +1,4 @@
-#!/usr/bin/env bash 
+#!/usr/bin/env bash
 
 switch_to() {
     if [[ -z $TMUX ]]; then
@@ -24,7 +24,7 @@ hydrate() {
         tmux send-keys -t "$1" "source $HOME/$sessionizer_dir/${project_name} $1 $2" C-m
     # use default home dir
     elif [ -f $HOME/.tmux-sessionizer ]; then
-        tmux send-keys -t $1 "source $HOME/.tmux-sessionizer $1 $2" c-M 
+        tmux send-keys -t $1 "source $HOME/.tmux-sessionizer $1 $2" c-M
     fi
 }
 
@@ -53,7 +53,7 @@ else
         fi
     }
     for path_info in "${default_paths[@]}"; do
-        IFS=' ' read -r path mindepth maxdepth <<< "$path_info"
+        IFS=' ' read -r path mindepth maxdepth <<<"$path_info"
         add_to_find_command "$path" "$mindepth" "$maxdepth"
     done
 
@@ -61,7 +61,7 @@ else
     if [ -f "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt" ]; then
         while IFS=' ' read -r path mindepth maxdepth; do
             add_to_find_command "$path" "$mindepth" "$maxdepth"
-        done < "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
+        done <"$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
     fi
     # Extract SSH hosts
     ssh_hosts=($(grep -E '^Host\s+' ~/.ssh/config | grep -v 'HostName' | awk '{print "ssh/"$2}'))

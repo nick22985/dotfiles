@@ -15,4 +15,3 @@ tmux set-environment -g PREV_SESSION "$PREV_SESSION"
 tmux confirm-before -p "switch and kill session $PREV_SESSION? (y/n)" \
   "run-shell 'tmux switch-client -l; tmux kill-session -t $PREV_SESSION'" \
   2>/dev/null || true
-

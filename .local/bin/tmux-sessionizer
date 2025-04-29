@@ -39,6 +39,7 @@ else
         "$HOME/.config/.nickInstall/install/configs/private"
         "$HOME/projects/work"
         "$HOME/projects/personal"
+				"/home/"
     )
 
     # Function to add paths to the find_command array
@@ -57,9 +58,12 @@ else
         add_to_find_command "$path" "$mindepth" "$maxdepth"
     done
 
+		echo "Adding paths from $HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
     # Add paths from external file to find_command
     if [ -f "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt" ]; then
+			echo "Found $HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
         while IFS=' ' read -r path mindepth maxdepth; do
+						echo "Adding path: $path"
             add_to_find_command "$path" "$mindepth" "$maxdepth"
         done <"$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
     fi

@@ -159,3 +159,5 @@ export GPG_TTY
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 
 eval "$(zoxide init bash)"
+. "/home/nick/.deno/env"
+source /home/nick/.local/share/bash-completion/completions/deno.bash

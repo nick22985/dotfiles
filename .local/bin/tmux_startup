@@ -1,6 +1,7 @@
 #!/bin/bash
-if command -v ./tmux-sessionizer >/dev/null 2>&1; then
-    ./tmux-sessionizer "$(pwd)"
+if command -v tmux-sessionizer >/dev/null 3>&1; then
+	setsid tmux-sessionizer "$(pwd)"
+	kill -STOP $$
 else
-    print -P "%F{red}Alert: tmux-sessionizer not found.%f"
+	print -P "%F{red}Alert: tmux-sessionizer not found.%f"
 fi

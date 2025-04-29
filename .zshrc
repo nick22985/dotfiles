@@ -1,3 +1,5 @@
+# Add deno completions to search path
+if [[ ":$FPATH:" != *":/home/nick/.zsh/completions:"* ]]; then export FPATH="/home/nick/.zsh/completions:$FPATH"; fi
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 
@@ -105,7 +107,6 @@ export NVM_DIR=~/.nvm
 source /usr/share/nvm/init-nvm.sh
 eval "$(starship init zsh)"
 
-
 GPG_TTY=$(tty)
 export GPG_TTY
 
@@ -117,24 +118,21 @@ alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-#if [ "$TMUX" = "" ]; then 
+#if [ "$TMUX" = "" ]; then
 #	tmux new-session "bash $HOME/.local/bin/tmux_startup"
 #fi
-
 
 # pnpm
 export PNPM_HOME="/home/nick/.local/share/pnpm"
 case ":$PATH:" in
-  *":$PNPM_HOME:"*) ;;
-  *) export PATH="$PNPM_HOME:$PATH" ;;
+*":$PNPM_HOME:"*) ;;
+*) export PATH="$PNPM_HOME:$PATH" ;;
 esac
 # pnpm end
-
 
 _zsh_cli_fg() { fg; }
 zle -N _zsh_cli_fg
 bindkey '^Z' _zsh_cli_fg
-
 
 # bun completions
 [ -s "/home/nick/.bun/_bun" ] && source "/home/nick/.bun/_bun"
@@ -155,8 +153,8 @@ eval "$(zoxide init zsh)"
 # https://github.com/sharkdp/fd
 nvim_config=($(fd --max-depth 1 --glob 'nvim-*' ~/.config))
 for config in $nvim_config; do
-  config_name=$(basename $config)
-  alias "$config_name"="NVIM_APPNAME=$config_name nvim $@"
+	config_name=$(basename $config)
+	alias "$config_name"="NVIM_APPNAME=$config_name nvim $@"
 done
 
 alias labymod="__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia labymodlauncher"
@@ -165,20 +163,21 @@ alias vi="nvim"
 
 alias nodekill="lsof -t -i:8080 | xargs -r kill"
 alias waybarrestart="killall -SIGUSR2 waybar"
+# alias tmux="~/.local/bin/tmux_startup"
 
 vv() {
-  # Assumes all configs exist in directories named ~/.config/nvim-*
-  local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | sed '1i ~/.config/nvim' | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)
- 
-  # If I exit fzf without selecting a config, don't open Neovim
-  [[ -z $config ]] && echo "No config selected" && return
+	# Assumes all configs exist in directories named ~/.config/nvim-*
+	local config=$(fd --max-depth 1 --glob 'nvim-*' ~/.config | sed '1i ~/.config/nvim' | fzf --prompt="Neovim Configs > " --height=~50% --layout=reverse --border --exit-0)
 
-  # Open Neovim with the selected config
-  if [[ $config == *"nvim-"* ]]; then
-    NVIM_APPNAME=$(basename $config) nvim $@
-  else
-    nvim $@
-  fi
+	# If I exit fzf without selecting a config, don't open Neovim
+	[[ -z $config ]] && echo "No config selected" && return
+
+	# Open Neovim with the selected config
+	if [[ $config == *"nvim-"* ]]; then
+		NVIM_APPNAME=$(basename $config) nvim $@
+	else
+		nvim $@
+	fi
 }
 
 fpath+=${ZDOTDIR:-~}/.zsh_functions
@@ -186,4 +185,7 @@ fpath+=${ZDOTDIR:-~}/.zsh_functions
 set -o allexport
 source ~/.env
 set +o allexport
-
+. "/home/nick/.deno/env"
+# Initialize zsh completions (added by deno install script)
+autoload -Uz compinit
+compinit

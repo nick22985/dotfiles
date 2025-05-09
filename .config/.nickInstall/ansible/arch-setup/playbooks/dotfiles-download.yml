@@ -1,0 +1,36 @@
+---
+- hosts: all
+  vars:
+   ansible_user: '{{ user_name }}'
+   ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+  tasks:
+   - name: Check if dotfiles directory exists
+     ansible.builtin.stat:
+      path: '{{ ansible_env.HOME }}/.dotfiles'
+     register: dotfiles_dir
+   - name: Remove conflicting files before checkout
+     file:
+      path: '{{ item }}'
+      state: absent
+     loop:
+      - '/home/nick/.bashrc'
+      - '/home/nick/.config/hypr/hyprland.conf'
+   - name: Clone dotfiles repository (bare)
+     ansible.builtin.git:
+      repo: git@github.com:nick22985/dotfiles.git
+      dest: '{{ ansible_env.HOME }}/.dotfiles'
+      bare: yes
+      key_file: '/home/{{ ansible_user }}/.ssh/id_rsa'
+      accept_hostkey: yes
+     when: not dotfiles_dir.stat.exists
+
+   - name: Checkout dotfiles content to home directory
+     ansible.builtin.command:
+      cmd: git --git-dir={{ ansible_env.HOME }}/.dotfiles/ --work-tree={{ ansible_env.HOME }} checkout
+     args:
+      creates: '{{ ansible_env.HOME }}/.gitconfig'
+
+   - name: Configure Git to not show untracked files
+     ansible.builtin.command:
+      cmd: git --git-dir={{ ansible_env.HOME }}/.dotfiles/ --work-tree={{ ansible_env.HOME }} config --local status.showUntrackedFiles no
+     changed_when: false

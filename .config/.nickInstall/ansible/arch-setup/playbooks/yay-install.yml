@@ -1,0 +1,43 @@
+- name: Install yay AUR helper
+  hosts: all
+  become: true
+  vars:
+   ansible_user: '{{ user_name }}'
+   ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+  tasks:
+   - name: Install required packages
+     pacman:
+      name:
+       - git
+       - base-devel
+      state: present
+   - name: Check if yay is already installed
+     command: which yay
+     register: yay_check
+     ignore_errors: true
+     changed_when: false
+   - name: Create temporary directory for yay installation
+     file:
+      path: /home/{{ ansible_user }}/yay-install
+      state: directory
+      mode: '0755'
+      owner: '{{ ansible_user }}'
+      group: '{{ ansible_user }}'
+     when: yay_check.rc != 0
+   - name: Clone yay repository
+     git:
+      repo: https://aur.archlinux.org/yay.git
+      dest: /home/{{ ansible_user }}/yay-install
+      version: master
+     when: yay_check.rc != 0
+     become: no
+
+   - name: Build and install yay
+     shell: cd /home/{{ ansible_user }}/yay-install && makepkg -si --noconfirm
+     when: yay_check.rc != 0
+     become: no
+   - name: Clean up temporary directory
+     file:
+      path: /home/{{ ansible_user }}/yay-install
+      state: absent
+     when: yay_check.rc != 0

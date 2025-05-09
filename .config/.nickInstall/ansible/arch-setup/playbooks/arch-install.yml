@@ -1,0 +1,752 @@
+---
+- hosts: all
+  tasks:
+   # ======== PRE-INSTALLATION CHECKS ========
+   - name: Pre-installation checks
+     block:
+      - name: Abort if the host is not booted from the Arch install media
+        fail:
+         msg: 'This host is not booted from the Arch install media!'
+        when: ansible_nodename != 'archiso'
+        tags:
+         - quick_exit
+
+      - name: Synchronize clock via NTP
+        command: timedatectl set-ntp true
+        tags:
+         - sync_clock
+     tags:
+      - preinstall
+
+   # ======== DISK PREPARATION ========
+   - name: Disk preparation
+     block:
+      - name: Deactivate all LVM volume groups
+        command: vgchange -an
+        ignore_errors: true
+        tags: [wipefs]
+
+      - name: Close LUKS encrypted volumes
+        shell: |
+         for name in $(ls /dev/mapper | grep -v control); do
+           cryptsetup close "$name" || true
+         done
+        ignore_errors: true
+        tags: [wipefs]
+
+      - name: Wipe install drive and all its partitions
+        command: find /dev -wholename "{{ install_drive }}*" -exec wipefs --force --all {} \;
+        tags:
+         - wipefs
+     tags:
+      - disk_prep
+
+   # ======== PARTITIONING ========
+   - name: Partitioning
+     block:
+      - name: Create boot partition
+        parted:
+         device: '{{ install_drive }}'
+         label: gpt
+         number: 1
+         part_end: '{{ boot_part_end }}'
+         name: boot
+         flags: [boot, esp]
+         state: present
+
+      - name: Create root partition (will contain swap as LV)
+        parted:
+         device: '{{ install_drive }}'
+         label: gpt
+         number: 2
+
+         part_start: '{{ boot_part_end }}'
+         name: root
+         flags: [lvm]
+         state: present
+     tags:
+      - repartition
+
+   # ======== LUKS ENCRYPTION SETUP ========
+   - name: LUKS encryption setup
+     no_log: true
+     when: use_luks_encryption | default(false) | bool
+     block:
+      - name: Copy keyfile
+        copy:
+         src: '{{ luks_keyfile }}'
+         dest: /root/keyfile
+
+      - name: Destroy existing LUKS volume
+        luks_device:
+         device: '{{ install_drive }}2'
+         state: absent
+
+      - name: Create and open LUKS volume
+        luks_device:
+         device: '{{ install_drive }}2'
+         keyfile: /root/keyfile
+         name: cryptlvm
+         state: opened
+
+      - name: Get UUID for root LUKS volume
+        command: blkid -s UUID -o value '{{ install_drive }}{{ root_partition_suffix }}'
+        register: root_luks_uuid
+        changed_when: false
+     tags:
+      - luks
+
+   # ======== LVM SETUP ========
+   - name: LVM setup
+     block:
+      - name: Set device path for non-encrypted LVM
+        set_fact:
+         lvm_device: '{{ install_drive }}2'
+        when: not (use_luks_encryption | default(false) | bool)
+
+      - name: Remove existing volume group
+        lvg:
+         vg: VolumeGroup00
+         force: yes
+         state: absent
+
+      - name: Configure volume group with LUKS
+        lvg:
+         vg: VolumeGroup00
+         pvs:
+          - '/dev/mapper/cryptlvm'
+        when: use_luks_encryption | default(false) | bool
+
+      - name: Configure volume group without LUKS
+        lvg:
+         vg: VolumeGroup00
+         pvs:
+          - '{{ install_drive }}2'
+        when: not (use_luks_encryption | default(false) | bool)
+
+      - name: Configure logical volumes
+        lvol:
+         vg: VolumeGroup00
+         lv: '{{ item.lv }}'
+         size: '{{ item.size }}'
+        loop:
+         - { lv: swap, size: '{{ swap_size }}' }
+         - { lv: root, size: '100%FREE' }
+
+      - name: Format swap logical volume
+        filesystem:
+         fstype: swap
+         dev: /dev/VolumeGroup00/swap
+
+      - name: Enable swap
+        command: swapon /dev/VolumeGroup00/swap
+     tags:
+      - lvm
+
+   # ======== FILESYSTEM CREATION ========
+   - name: Filesystem creation
+     block:
+      - name: Create FAT32 filesystem in boot partition
+        filesystem:
+         dev: '{{ install_drive }}{{ boot_partition_suffix }}'
+         fstype: vfat
+         opts: -F32
+         force: yes
+
+      - name: Create ext4 filesystem in root volume
+        filesystem:
+         dev: /dev/VolumeGroup00/root
+         fstype: ext4
+         force: yes
+
+      - name: Get UUID for boot filesystem
+        command: blkid -s UUID -o value '{{ install_drive }}{{ boot_partition_suffix }}'
+        register: boot_uuid
+        changed_when: false
+
+      - name: Get UUID for root filesystem
+        command: blkid -s UUID -o value /dev/VolumeGroup00/root
+        register: root_uuid
+        changed_when: false
+     tags:
+      - create_filesystems
+
+   # ======== MOUNT FILESYSTEMS ========
+   - name: Mount filesystems
+     block:
+      - name: Mount root filesystem
+        mount:
+         path: /mnt
+         src: /dev/VolumeGroup00/root
+         fstype: ext4
+         state: mounted
+
+      - name: Create mountpoint for boot volume
+        file:
+         path: /mnt/boot
+         state: directory
+
+      - name: Mount boot filesystem
+        mount:
+         path: /mnt/boot
+         src: UUID={{ boot_uuid.stdout }}
+         fstype: vfat
+         state: mounted
+     tags:
+      - mount_filesystems
+
+   # ======== PACKAGE INSTALLATION ========
+   - name: Package installation
+     block:
+      - name: Determine CPU microcode package to install
+        set_fact:
+         microcode_package: "{{ 'amd-ucode' if cpu_type == 'amd' else ('intel-ucode' if cpu_type == 'intel' else '') }}"
+        tags:
+         - microcode
+
+      - name: Run pacstrap with base packages (no microcode)
+        command: pacstrap /mnt base base-devel dhclient dhcpcd efibootmgr grub linux linux-firmware lvm2 netctl openssh python reflector sudo
+
+        when: cpu_type is not defined or cpu_type == 'none' or microcode_package == ''
+
+      - name: Run pacstrap with appropriate microcode package
+        command: pacstrap /mnt base base-devel dhclient dhcpcd efibootmgr grub linux linux-firmware lvm2 netctl openssh python reflector sudo {{ microcode_package }}
+        when: cpu_type is defined and cpu_type != 'none' and microcode_package != ''
+     tags:
+      - pacstrap
+
+   # ======== SYSTEM CONFIGURATION ========
+   - name: System configuration
+     block:
+      - name: Restrict reflector to only country mirrors
+        ansible.builtin.lineinfile:
+         insertafter: \# --country
+         line: --country "{{ country }}"
+         path: /mnt/etc/xdg/reflector/reflector.conf
+        tags:
+         - mirrors
+
+      # Filesystem configuration
+      - name: Generate and configure fstab
+        block:
+         - name: Generate blank fstab
+           command: genfstab -U /mnt >> /mnt/etc/fstab
+
+         - name: Add root volume to fstab
+           mount:
+            fstab: /mnt/etc/fstab
+            path: /
+            src: /dev/VolumeGroup00/root
+            fstype: ext4
+            opts: defaults
+            passno: '1'
+            state: present
+
+         - name: Add boot volume to fstab
+           mount:
+            fstab: /mnt/etc/fstab
+            path: /boot
+            src: UUID={{ boot_uuid.stdout }}
+            fstype: vfat
+            opts: defaults
+            passno: '2'
+            state: present
+
+         - name: Add swap volume to fstab
+           mount:
+            fstab: /mnt/etc/fstab
+            path: none
+            src: /dev/VolumeGroup00/swap
+            fstype: swap
+            opts: defaults
+            passno: '0'
+            state: present
+        tags:
+         - fstab
+
+      # LUKS crypttab configuration
+      - name: Configure crypttab (with LUKS)
+        when: use_luks_encryption | default(false) | bool
+        block:
+         - name: Update crypttab for LUKS container
+           no_log: true
+           crypttab:
+            path: /mnt/etc/crypttab
+            backing_device: UUID={{ root_luks_uuid.stdout }}
+            name: cryptlvm
+            password: none
+            opts: luks
+            state: present
+
+         - name: Copy keyfile to the installed system
+           copy:
+            src: '{{ luks_keyfile }}'
+            dest: /mnt/root/keyfile
+            mode: '0400'
+
+         - name: Create a directory for the keyfile in initramfs
+           file:
+            path: /mnt/etc/initcpio/keys
+            state: directory
+            mode: '0700'
+
+         - name: Copy the keyfile to the initramfs directory
+           copy:
+            src: '{{ luks_keyfile }}'
+            dest: /mnt/etc/initcpio/keys/rootkey
+            mode: '0400'
+
+         - name: Add the FILES array to mkinitcpio.conf
+
+           lineinfile:
+            dest: /mnt/etc/mkinitcpio.conf
+            regexp: ^FILES=
+            line: FILES=(/etc/initcpio/keys/rootkey)
+        tags:
+         - crypttab
+         - luks
+
+      # Timezone, locale and hostname configuration
+      - name: Configure timezone and clock
+        block:
+         - name: Set local timezone
+           command: arch-chroot /mnt ln -sf /usr/share/zoneinfo/{{ timezone }} /etc/localtime
+
+         - name: Generate adjtime file
+           command: arch-chroot /mnt hwclock --systohc
+        tags:
+         - timezone
+
+      - name: Configure locales
+        block:
+         - name: Configure locale.gen
+           lineinfile:
+            dest: /mnt/etc/locale.gen
+            regexp: '{{ item.regex }}'
+            line: '{{ item.line }}'
+           loop:
+            - { regex: '{{ locale_lang }}.UTF-8 UTF-8', line: '{{ locale_lang }}.UTF-8 UTF-8' }
+            - { regex: '{{ locale_lang }} ISO-8859-1', line: '{{ locale_lang }} ISO-8859-1' }
+
+         - name: Create locale.conf
+           copy:
+            content: 'LANG={{ locale_lang }}.UTF-8'
+            dest: /mnt/etc/locale.conf
+
+         - name: Generate locales
+           command: arch-chroot /mnt locale-gen
+
+         - name: Export LANG environment variable in chroot
+           shell: |
+            arch-chroot /mnt /bin/bash -c "export LANG=en_AU.UTF-8"
+           become: true
+           become_user: root
+        tags:
+         - locales
+
+      - name: Set hostname
+        copy:
+         content: '{{ inventory_hostname }}'
+         dest: /mnt/etc/hostname
+        tags:
+         - hostname
+
+      - name: Setup Fstrim.timer for SSDs
+        shell: |
+         arch-chroot /mnt /bin/bash -c "systemctl enable fstrim.timer"
+        become: true
+        become_user: root
+        tags:
+         - fstring
+     tags:
+      - system_config
+
+   # ======== PACMAN AND PACKAGE MANAGEMENT ========
+   - name: Pacman and package management
+     block:
+      - name: Uncomment [multilib] in pacman.conf inside chroot
+        shell: |
+         arch-chroot /mnt /bin/bash -c "sed -i 's/^#\\[multilib\\]/\\[multilib\\]/' /etc/pacman.conf"
+        become: true
+        become_user: root
+
+      - name: Uncomment Include line for multilib in pacman.conf inside chroot
+        shell: |
+         arch-chroot /mnt /bin/bash -c "sed -i '/^\[multilib\]/,/^$/ s/^#Include/Include/' /etc/pacman.conf"
+        become: true
+        become_user: root
+
+      - name: Update package database in chroot
+        shell: |
+         arch-chroot /mnt /bin/bash -c "pacman -Sy --noconfirm"
+        become: true
+        become_user: root
+     tags:
+      - pacman
+
+   # ======== GPU CONFIGURATION ========
+   - name: GPU configuration
+     block:
+      - name: Determine GPU packages to install
+        set_fact:
+         gpu_packages: >-
+          {% if gpu_type == 'amd' %}
+          mesa lib32-mesa xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver
+          {% elif gpu_type == 'nvidia' %}
+          nvidia nvidia-utils lib32-nvidia-utils nvidia-settings
+          {% else %}
+          xf86-video-vesa
+          {% endif %}
+        tags:
+         - gpu_drivers
+
+      - name: Install GPU drivers with pacman in chroot
+        command: arch-chroot /mnt pacman -S --noconfirm {{ gpu_packages }}
+        when: gpu_type is defined and gpu_type != 'none'
+        tags:
+         - gpu_drivers
+
+      - name: Configure NVIDIA modules (if NVIDIA GPU)
+        when: gpu_type == 'nvidia'
+        block:
+         - name: Add NVIDIA modules to mkinitcpio.conf
+           lineinfile:
+            dest: /mnt/etc/mkinitcpio.conf
+            regexp: '^MODULES='
+            line: 'MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)'
+
+         - name: Enable DRM kernel mode setting
+           lineinfile:
+            dest: /mnt/etc/default/grub
+            regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+            line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet nvidia-drm.modeset=1"'
+
+         - name: Create NVIDIA Pacman hook directory
+           file:
+            path: /mnt/etc/pacman.d/hooks
+            state: directory
+            mode: '0755'
+
+         - name: Create NVIDIA Pacman hook for initramfs update
+           copy:
+            dest: /mnt/etc/pacman.d/hooks/nvidia.hook
+            content: |
+             [Trigger]
+             Operation=Install
+             Operation=Upgrade
+             Operation=Remove
+             Type=Package
+             Target=nvidia
+             Target=linux
+
+             [Action]
+             Description=Update NVIDIA module in initcpio
+             Depends=mkinitcpio
+             When=PostTransaction
+             Exec=/usr/bin/mkinitcpio -P
+            mode: '0644'
+
+      - name: Configure AMD modules (if AMD GPU)
+        when: gpu_type == 'amd'
+        block:
+         - name: Add AMD modules to mkinitcpio.conf
+           lineinfile:
+            dest: /mnt/etc/mkinitcpio.conf
+            regexp: '^MODULES='
+            line: 'MODULES=(amdgpu radeon)'
+
+         - name: Create directory for X11 configuration
+           file:
+            path: /mnt/etc/X11/xorg.conf.d
+            state: directory
+            mode: '0755'
+
+         - name: Create AMD configuration file for X11
+           copy:
+            dest: /mnt/etc/X11/xorg.conf.d/20-amdgpu.conf
+            content: |
+             Section "Device"
+               Identifier "AMD"
+               Driver "amdgpu"
+               Option "TearFree" "true"
+             EndSection
+            mode: '0644'
+            # prob can just be later on only
+      - name: Recreate initramfs after GPU configuration
+        command: arch-chroot /mnt mkinitcpio -P
+     tags:
+      - gpu_config
+
+   # ======== NETWORK CONFIGURATION ========
+   - name: Network configuration
+     block:
+      - name: Enable dhcpcd
+        command: >
+         arch-chroot /mnt systemctl enable dhcpcd
+
+      - name: Install NetworkManager
+        command: >
+         arch-chroot /mnt pacman -S --noconfirm networkmanager
+        become: true
+        become_user: root
+
+      - name: Enable networkmanager service in chroot
+        command: >
+         arch-chroot /mnt systemctl enable NetworkManager
+
+      - name: Setup temporary static IP for post-reboot SSH access
+        block:
+         - name: Create NetworkManager connection file for static IP
+           copy:
+            dest: /mnt/etc/NetworkManager/system-connections/static-temp.nmconnection
+            content: |
+             [connection]
+             id=static-temp
+             type=ethernet
+             interface-name={{ network_interface | default('eth0') }}
+             autoconnect=true
+
+             [ipv4]
+             method=manual
+             addresses={{ ansible_host }}/{{ static_netmask | default('24') }}
+             gateway={{ static_gateway }}
+             dns={{ static_dns | default(static_gateway) }}
+
+             [ipv6]
+             method=disabled
+            mode: '0600'
+
+         - name: Create network directory if not exists
+           file:
+            path: /mnt/etc/NetworkManager/system-connections
+            state: directory
+            mode: '0755'
+
+         - name: Set permissions for NetworkManager connection file
+           command: arch-chroot /mnt chmod 600 /etc/NetworkManager/system-connections/static-temp.nmconnection
+        tags:
+         - static_ip
+     tags:
+      - network
+
+   # ======== BOOT CONFIGURATION ========
+
+   - name: Boot configuration
+     block:
+      - name: Set up initramfs
+        block:
+         - name: Add mkinitcpio.conf hooks with encryption
+           when: use_luks_encryption | default(false) | bool
+           lineinfile:
+            dest: /mnt/etc/mkinitcpio.conf
+            regexp: ^HOOKS=
+            line: HOOKS=(base udev autodetect keyboard keymap consolefont modconf block encrypt lvm2 filesystems fsck)
+
+         - name: Add mkinitcpio.conf hooks without encryption
+           when: not (use_luks_encryption | default(false) | bool)
+           lineinfile:
+            dest: /mnt/etc/mkinitcpio.conf
+            regexp: ^HOOKS=
+            line: HOOKS=(base udev autodetect keyboard keymap modconf block lvm2 filesystems fsck)
+
+         - name: Create new initramfs
+           command: arch-chroot /mnt mkinitcpio -P
+        tags:
+         - initramfs
+         - mkinitcpio
+
+      - name: Set up grub
+        block:
+         - name: Add commandline information to grub config with encryption
+           when: use_luks_encryption | default(false) | bool
+           lineinfile:
+            dest: /mnt/etc/default/grub
+            regexp: ^GRUB_CMDLINE_LINUX=
+            line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:cryptlvm root=/dev/VolumeGroup00/root cryptkey=rootfs:/etc/initcpio/keys/rootkey"
+
+         - name: Add commandline information to grub config without encryption
+           when: not (use_luks_encryption | default(false) | bool)
+           lineinfile:
+            dest: /mnt/etc/default/grub
+            regexp: ^GRUB_CMDLINE_LINUX=
+            line: GRUB_CMDLINE_LINUX="root=/dev/VolumeGroup00/root"
+
+         - name: Install grub
+           command: arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+
+         - name: Create grub config
+           command: arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+        tags:
+         - grub
+     tags:
+      - boot
+
+   # ======== USER CONFIGURATION ========
+   - name: User configuration
+     block:
+      - name: Setup user account
+        block:
+         - name: Create user account
+           command: arch-chroot /mnt useradd --create-home --user-group --groups wheel {{ user_name }}
+
+         - name: Set user password
+           shell: |
+            echo '{{ user_name }}:{{ user_password }}' | arch-chroot /mnt chpasswd
+
+         - name: Create user's ssh directory
+           file:
+            path: /mnt/home/{{ user_name }}/.ssh
+            state: directory
+
+         - name: Set mode, owner, and group on user's ssh directory
+           command: arch-chroot /mnt {{ item }}
+           loop:
+            - chmod 0700 /home/{{ user_name }}/.ssh
+            - chown {{ user_name }}:{{ user_name }} /home/{{ user_name }}/.ssh
+
+         - name: Create root's ssh directory
+           file:
+            path: /mnt/home/{{ user_name }}/.ssh
+            state: directory
+            mode: '0700'
+
+         - name: Copy over ssh key for nick
+           copy:
+            src: '{{ lookup("env", "HOME") }}/.ssh/id_rsa.pub'
+            dest: /mnt/home/{{ user_name }}/.ssh/authorized_keys
+            mode: '0600'
+
+         - name: Set mode, owner, and group on user's authorized_key file
+           command: arch-chroot /mnt {{ item }}
+           loop:
+            - chmod 0600 /home/{{ user_name }}/.ssh/authorized_keys
+            - chown {{ user_name }}:{{ user_name }} /home/{{ user_name }}/.ssh/authorized_keys
+
+         - name: Copy id_rsa private key for user
+           copy:
+            src: '{{ lookup("env", "HOME") }}/.ssh/id_rsa'
+            dest: /mnt/home/{{ user_name }}/.ssh/id_rsa
+            mode: '0600'
+
+         - name: Set id_rsa perms
+           command: arch-chroot /mnt {{ item }}
+           loop:
+            - chmod 0600 /home/{{ user_name }}/.ssh/id_rsa
+            - chown {{ user_name }}:{{ user_name }} /home/{{ user_name }}/.ssh/id_rsa
+
+         - name: Give passwordless sudo access to wheel group
+           copy:
+            content: '%wheel ALL=(ALL) NOPASSWD: ALL'
+            dest: /mnt/etc/sudoers.d/wheel
+            validate: /usr/sbin/visudo --check --file=%s
+        tags:
+         - user_account
+
+      - name: Setup root account
+        block:
+         - name: Create root's ssh directory
+           file:
+            path: /mnt/root/.ssh
+            state: directory
+            mode: '0700'
+
+         - name: Copy over ssh key for root
+           copy:
+            src: '{{ lookup("env", "HOME") }}/.ssh/id_rsa.pub'
+            dest: /mnt/root/.ssh/authorized_keys
+            mode: '0600'
+
+         - name: Ensure root login is allowed via SSH in arch-chroot
+           command: >
+            arch-chroot /mnt /bin/bash -c "sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config"
+           become: true
+           become_user: root
+
+         - name: Set the root password in chroot
+           shell: |
+            echo -e "{{ root_password }}\n{{ root_password }}" | arch-chroot /mnt /bin/bash -c "passwd"
+           become: true
+           become_user: root
+        tags:
+         - root_account
+     tags:
+      - users
+
+   # ======== SSH CONFIGURATION ========
+   - name: SSH configuration
+     block:
+      - name: Enable sshd
+        command: arch-chroot /mnt /bin/bash -c "systemctl enable sshd && systemctl start sshd"
+        become: true
+        become_user: root
+
+      - name: Configure SSH to disable password authentication in arch-chroot
+        command: >
+         arch-chroot /mnt /bin/bash -c "sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config"
+        become: true
+        become_user: root
+
+      - name: Ensure SSH key authentication is enabled in arch-chroot
+        command: >
+         arch-chroot /mnt /bin/bash -c "sed -i 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config"
+        become: true
+        become_user: root
+
+      - name: Ensure root login is allowed via SSH in arch-chroot (optional)
+        command: >
+         arch-chroot /mnt /bin/bash -c "sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config"
+        when: allow_root_ssh | default(false)
+        become: true
+        become_user: root
+
+      - name: Restart sshd service in arch-chroot
+        command: arch-chroot /mnt /bin/bash -c "systemctl restart sshd"
+        become: true
+        become_user: root
+     tags:
+      - sshd
+
+   # ======== FINALIZATION AND REBOOT ========
+   - name: Finalization and reboot
+     block:
+      - name: Reboot the machine
+        reboot:
+         msg: 'Rebooting the system to apply changes.'
+         pre_reboot_delay: 10
+         reboot_timeout: 300
+         test_command: whoami
+        become: true
+        become_user: root
+        vars:
+         ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+      - name: Check for failed systemd services
+        command: systemctl --failed
+        register: failed_services
+        ignore_errors: yes
+
+      - name: Display failed systemd services if any
+        debug:
+         var: failed_services.stdout
+        when: failed_services.stdout is defined and failed_services.stdout != ""
+     tags:
+      - finalize
+      - reboot
+# ======== POST-REBOOT TASKS ========
+# - hosts: all
+#   become: true
+#   tasks:
+#    - name: Post-reboot configuration
+#      block:
+#       - name: Remove temporary static IP configuration
+#         file:
+#          path: /etc/NetworkManager/system-connections/static-temp.nmconnection
+#          state: absent
+#
+#       - name: Restart NetworkManager to apply IP changes
+#         systemd:
+#          name: NetworkManager
+#          state: restarted
+#      tags:
+#       - post_reboot
+#       - remove_static_ip

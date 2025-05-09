@@ -1,0 +1,139 @@
+---
+- import_playbook: dotfiles-download.yml
+- import_playbook: yay-install.yml
+
+- hosts: all
+  vars:
+   ansible_user: '{{ user_name }}'
+   ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+  tasks:
+   - name: Github SSH KEys
+     block:
+      - name: Ensure .ssh directory exists
+        file:
+         path: '{{ ansible_env.HOME }}/.ssh'
+         state: directory
+         mode: '0700'
+
+      - name: Download GitHub SSH keys
+        uri:
+         url: 'https://github.com/nick22985.keys'
+         return_content: yes
+        register: github_keys
+
+      - name: Ensure authorized_keys file exists
+        file:
+         path: '{{ ansible_env.HOME }}/.ssh/authorized_keys'
+         state: touch
+         mode: '0600'
+
+      - name: Add GitHub keys to authorized_keys if not already present
+        lineinfile:
+         path: '{{ ansible_env.HOME }}/.ssh/authorized_keys'
+         line: '{{ item }}'
+         state: present
+        loop: '{{ github_keys.content.splitlines() }}'
+
+   - name: Display Manager
+     block:
+      - name: Install Wayland, KDE Plasma, and dependencies using yay
+        become: yes
+        community.general.pacman:
+         name:
+          - wayland
+          - extra/xorg-xwayland
+          - xorg-xlsclients
+          - qt5-wayland
+          - glfw-wayland
+          - plasma
+          - kde-applications
+         state: present
+         extra_args: --needed --noconfirm
+        tags:
+         - install
+         - plasma
+      - name: Install Hyprland
+        block:
+         - name: Install Hyprland packages
+           become: no
+           shell: yay -S --needed --noconfirm hyprland xdg-desktop-portal xdg-desktop-portal-hyprland polkit-kde-agent qt6-wayland qt5-wayland swaync
+           args:
+            executable: /bin/bash
+         - name: Enable PipeWire and related services
+           systemd:
+            name: '{{ item }}'
+            enabled: yes
+            state: started
+            scope: user
+           loop:
+            - xdg-desktop-portal
+      - name: Install packages required for either login managers
+        block:
+         - name: Install Hyprland packages
+           become: no
+           shell: yay -S --needed --noconfirm pipewire wireplumber
+           args:
+            executable: /bin/bash
+         - name: Enable PipeWire and related services
+           systemd:
+            name: '{{ item }}'
+            enabled: yes
+            state: started
+            scope: user
+           loop:
+            - pipewire
+            - pipewire-pulse
+            - wireplumber
+        tags:
+         - install
+         - hyprland
+      - name: Install AUR packages (sddm-git)
+        become: no
+        shell: yay -S --needed --noconfirm sddm-git
+        register: yay_result
+        failed_when: yay_result.rc != 0 and "already installed" not in yay_result.stderr
+        ignore_errors: yes
+        args:
+         executable: /bin/bash
+        when: false
+        tags:
+         - install
+         - sddm
+      - name: SDDM
+        block:
+         - name: enable sddm
+           systemd:
+            name: sddm.service
+            enabled: yes
+            state: started
+           become: true
+         - name: Ensure SDDM configuration directory exists
+           file:
+            path: /usr/lib/sddm/sddm.conf.d
+            state: directory
+            mode: '0755'
+           become: true
+
+         - name: Check if SDDM config file exists
+           stat:
+            path: /usr/lib/sddm/sddm.conf.d/default.conf
+           register: sddm_config
+           become: true
+
+         - name: Ensure Theme section exists in SDDM config
+           lineinfile:
+            path: /usr/lib/sddm/sddm.conf.d/default.conf
+            create: yes
+            line: '[Theme]'
+            state: present
+           become: true
+
+         - name: Set SDDM theme to breeze
+           lineinfile:
+            path: /usr/lib/sddm/sddm.conf.d/default.conf
+            regexp: '^Current='
+            line: 'Current=breeze'
+            insertafter: '^\[Theme\]'
+           become: true
+        tags:
+         - sddm

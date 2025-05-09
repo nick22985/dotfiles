@@ -1,0 +1,7 @@
+all:
+ hosts:
+  testinstall:
+  # skynet:
+  #  ansible_host: 192.168.1.16
+  #  ansible_user: nick
+  #  ansible_ssh_private_key_file: /home/nick/.ssh/id_rsa

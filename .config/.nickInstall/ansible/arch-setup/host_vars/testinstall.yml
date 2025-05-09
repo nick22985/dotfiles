@@ -1,0 +1,10 @@
+---
+ansible_host: 192.168.1.158
+# ansible_host: 192.168.1.242
+boot_part_end: 1GB
+swap_size: 1G
+static_gateway: '192.168.1.1'
+network_interface: 'ens18'
+static_netmask: '24'
+root_password: test
+gpu_type: none # amd or nvidia or none

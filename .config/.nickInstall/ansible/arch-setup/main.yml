@@ -1,0 +1,9 @@
+---
+- import_playbook: playbooks/arch-install.yml
+  tags: arch-install
+
+- import_playbook: playbooks/yay-install.yml
+  tags: setup
+
+- import_playbook: playbooks/setup.yml
+  tags: setup

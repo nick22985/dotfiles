@@ -1,20 +1,35 @@
 ---
 - hosts: all
+  become: yes # ensure privilege escalation is used for package installation
   vars:
    ansible_user: '{{ user_name }}'
    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
   tasks:
+   - name: Check if Git is installed
+     ansible.builtin.command: git --version
+     register: git_check
+     ignore_errors: yes
+
+   - name: Install Git if not present
+     ansible.builtin.package:
+      name: git
+      state: present
+     when: git_check.rc != 0
+
    - name: Check if dotfiles directory exists
      ansible.builtin.stat:
       path: '{{ ansible_env.HOME }}/.dotfiles'
      register: dotfiles_dir
+
    - name: Remove conflicting files before checkout
-     file:
+     ansible.builtin.file:
       path: '{{ item }}'
       state: absent
      loop:
       - '/home/nick/.bashrc'
       - '/home/nick/.config/hypr/hyprland.conf'
+
    - name: Clone dotfiles repository (bare)
      ansible.builtin.git:
       repo: git@github.com:nick22985/dotfiles.git

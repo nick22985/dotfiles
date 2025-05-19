@@ -49,6 +49,10 @@
           - kde-applications
          state: present
          extra_args: --needed --noconfirm
+        register: install_result
+        retries: 5
+        delay: 30
+        until: install_result is success
         tags:
          - install
          - plasma
@@ -56,7 +60,7 @@
         block:
          - name: Install Hyprland packages
            become: no
-           shell: yay -S --needed --noconfirm hyprland xdg-desktop-portal xdg-desktop-portal-hyprland polkit-kde-agent qt6-wayland qt5-wayland swaync
+           shell: yay -S --needed --noconfirm hyprland xdg-desktop-portal xdg-desktop-portal-hyprland polkit-kde-agent qt6-wayland qt5-wayland swaync kwalletd5 nm-applet hypridle waybar wl-paste kitty dolphin rofi-wayland hyprlock hyperpaper
            args:
             executable: /bin/bash
          - name: Enable PipeWire and related services
@@ -101,12 +105,6 @@
          - sddm
       - name: SDDM
         block:
-         - name: enable sddm
-           systemd:
-            name: sddm.service
-            enabled: yes
-            state: started
-           become: true
          - name: Ensure SDDM configuration directory exists
            file:
             path: /usr/lib/sddm/sddm.conf.d
@@ -134,6 +132,12 @@
             regexp: '^Current='
             line: 'Current=breeze'
             insertafter: '^\[Theme\]'
+           become: true
+         - name: enable sddm
+           systemd:
+            name: sddm.service
+            enabled: yes
+            state: started
            become: true
         tags:
          - sddm

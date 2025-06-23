@@ -29,7 +29,6 @@
 	enabled = true
 
 [alias]
-
     a   = commit --amend
     br  = branch
     c   = commit
@@ -160,13 +159,10 @@
 	colorMoved = default
 
 [diff "bin"]
-
     # Use `hexdump` to diff binary files
-
     textconv = hexdump -v -C
 
 [pretty]
-
     custom = "%C(magenta)%h%C(red)%d %C(yellow)%ar %C(green)%s %C(yellow)(%an)"
     #                     │        │            │            │             └─ author name
     #                     │        │            │            └─ message
@@ -178,23 +174,19 @@
 # URL shorthands
 
 [url "git@github.com:"]
-
 	insteadOf = "gh:"
 	pushInsteadOf = "github:"
 	pushInsteadOf = "git://github.com/"
 
 [url "git://github.com/"]
-
 	insteadOf = "github:"
 
 [url "git@gist.github.com:"]
-
 	insteadOf = "gst:"
 	pushInsteadOf = "gist:"
 	pushInsteadOf = "git://gist.github.com/"
 
 [url "git://gist.github.com/"]
-
 	insteadOf = "gist:"
 
 [init]
@@ -206,7 +198,7 @@
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
 	required = true
-	
+
 [include]
     # Load local configs
     # https://git-scm.com/docs/git-config#_includes

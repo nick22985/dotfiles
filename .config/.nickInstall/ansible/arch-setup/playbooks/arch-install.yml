@@ -18,30 +18,7 @@
      tags:
       - preinstall
 
-   # ======== DISK PREPARATION ========
-   - name: Disk preparation
-     block:
-      - name: Deactivate all LVM volume groups
-        command: vgchange -an
-        ignore_errors: true
-        tags: [wipefs]
-
-      - name: Close LUKS encrypted volumes
-        shell: |
-         for name in $(ls /dev/mapper | grep -v control); do
-           cryptsetup close "$name" || true
-         done
-        ignore_errors: true
-        tags: [wipefs]
-
-      - name: Wipe install drive and all its partitions
-        command: find /dev -wholename "{{ install_drive }}*" -exec wipefs --force --all {} \;
-        tags:
-         - wipefs
-     tags:
-      - disk_prep
-
-   # ======== PARTITIONING ========
+   # ======== PARTITIONING ========over
    - name: Partitioning
      block:
       - name: Create boot partition
@@ -76,7 +53,6 @@
 
    # ======== LUKS ENCRYPTION SETUP ========
    - name: LUKS encryption setup
-     no_log: true
      when: use_luks_encryption | default(false) | bool
      block:
       - name: Copy keyfile
@@ -84,10 +60,10 @@
          src: '{{ luks_keyfile }}'
          dest: /root/keyfile
 
-      - name: Destroy existing LUKS volume
-        luks_device:
-         device: '{{ install_drive }}2'
-         state: absent
+      # - name: Destroy existing LUKS volume
+      #   luks_device:
+      #    device: '{{ install_drive }}2'
+      #    state: absent
 
       - name: Create and open LUKS volume
         luks_device:
@@ -215,7 +191,6 @@
         command: pacstrap /mnt base base-devel dhclient dhcpcd efibootmgr grub linux linux-firmware lvm2 netctl openssh python reflector sudo
 
         when: cpu_type is not defined or cpu_type == 'none' or microcode_package == ''
-
       - name: Run pacstrap with appropriate microcode package
         command: pacstrap /mnt base base-devel dhclient dhcpcd efibootmgr grub linux linux-firmware lvm2 netctl openssh python reflector sudo {{ microcode_package }}
         when: cpu_type is defined and cpu_type != 'none' and microcode_package != ''
@@ -276,7 +251,6 @@
         when: use_luks_encryption | default(false) | bool
         block:
          - name: Update crypttab for LUKS container
-           no_log: true
            crypttab:
             path: /mnt/etc/crypttab
             backing_device: UUID={{ root_luks_uuid.stdout }}
@@ -538,7 +512,6 @@
       - network
 
    # ======== BOOT CONFIGURATION ========
-
    - name: Boot configuration
      block:
       - name: Set up initramfs
@@ -884,21 +857,22 @@
         tags:
          - sddm
 
+- import_playbook: arch-package-install.yml
 # ======== POST-REBOOT TASKS ========
-- hosts: all
-  become: true
-  tasks:
-   - name: Post-reboot configuration
-     block:
-      - name: Remove temporary static IP configuration
-        file:
-         path: /etc/NetworkManager/system-connections/static-temp.nmconnection
-         state: absent
-
-      - name: Restart NetworkManager to apply IP changes
-        systemd:
-         name: NetworkManager
-         state: restarted
-     tags:
-      - post_reboot
-      - remove_static_ip
+# - hosts: all
+#   become: true
+#   tasks:
+#    - name: Post-reboot configuration
+#      block:
+#       - name: Remove temporary static IP configuration
+#         file:
+#          path: /etc/NetworkManager/system-connections/static-temp.nmconnection
+#          state: absent
+#
+#       - name: Restart NetworkManager to apply IP changes
+#         systemd:
+#          name: NetworkManager
+#          state: restarted
+#      tags:
+#       - post_reboot
+#       - remove_static_ip

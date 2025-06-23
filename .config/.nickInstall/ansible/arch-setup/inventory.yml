@@ -1,9 +1,10 @@
 all:
  hosts:
+  overlord:
   # arch:
   # arch-test:
   # arch-win-test:
-  testinstall:
+  # testinstall:
   # win: win-arch-test
   # skynet:
   #  ansible_host: 192.168.1.16

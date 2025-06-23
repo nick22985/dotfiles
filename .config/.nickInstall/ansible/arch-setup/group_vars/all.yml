@@ -1,17 +1,17 @@
 ---
-ansible_user: root
-ansible_ssh_pass: testpassword
-install_drive: /dev/sda
-wired_interface: enp1s0
-boot_partition_suffix: '1'
-root_partition_suffix: '2'
-luks_keyfile: ../testinstall-keyfile
-timezone: Australia/Brisbane
-country: Australia
-locale_lang: en_AU
-gpu_type: none # amd or nvidia or none
-cpu_type: none # amd or intel
-user_name: nick
-user_password: test
-allow_root_ssh: true
-use_luks_encryption: true
+# ansible_user: root
+# ansible_ssh_pass: testpassword
+# install_drive: /dev/sda
+# wired_interface: enp1s0
+# boot_partition_suffix: '1'
+# root_partition_suffix: '2'
+# luks_keyfile: ../testinstall-keyfile
+# timezone: Australia/Brisbane
+# country: Australia
+# locale_lang: en_AU
+# gpu_type: none # amd or nvidia or none
+# cpu_type: none # amd or intel
+# user_name: nick
+# user_password: test
+# allow_root_ssh: true
+# use_luks_encryption: true

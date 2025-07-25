@@ -144,20 +144,29 @@ if ! shopt -oq posix; then
 fi
 
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+# NVM configuration removed - handled by installer
 
-export $(grep -v '^#' ~/.ntfy_env | xargs)
+# Load ntfy environment if it exists
+[ -f ~/.ntfy_env ] && export $(grep -v '^#' ~/.ntfy_env | xargs)
 
-eval "$(starship init bash)"
+# Initialize starship prompt
+command -v starship >/dev/null && eval "$(starship init bash)"
 
-. "$HOME/.cargo/env"
+# Load Rust environment if it exists
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+# Set GPG TTY
 GPG_TTY=$(tty)
 export GPG_TTY
 
+# Load fzf if it exists
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 
-eval "$(zoxide init bash)"
-. "/home/nick/.deno/env"
-source /home/nick/.local/share/bash-completion/completions/deno.bash
+# Initialize zoxide if available
+command -v zoxide >/dev/null && eval "$(zoxide init bash)"
+
+# Load Deno environment if it exists
+[ -f "$HOME/.deno/env" ] && . "$HOME/.deno/env"
+
+# Load Deno bash completion if it exists
+[ -f "$HOME/.local/share/bash-completion/completions/deno.bash" ] && source "$HOME/.local/share/bash-completion/completions/deno.bash"

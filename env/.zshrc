@@ -74,7 +74,7 @@ ZSH_THEME="robbyrussell"
 # Add wisely, as too many plugins slow down shell startup.
 plugins=(git zsh-autosuggestions history-substring-search zsh-syntax-highlighting)
 
-source $ZSH/oh-my-zsh.sh
+[ -f "$ZSH/oh-my-zsh.sh" ] && source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
@@ -102,9 +102,7 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
-export NVM_DIR=~/.nvm
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-source /usr/share/nvm/init-nvm.sh
+# NVM configuration removed - handled by installer
 eval "$(starship init zsh)"
 
 GPG_TTY=$(tty)
@@ -182,10 +180,14 @@ vv() {
 
 fpath+=${ZDOTDIR:-~}/.zsh_functions
 
-set -o allexport
-source ~/.env
-set +o allexport
-. "/home/nick/.deno/env"
+[ -f ~/.env ] && {
+    set -o allexport
+    source ~/.env
+    set +o allexport
+}
+[ -f "/home/nick/.deno/env" ] && . "/home/nick/.deno/env"
 # Initialize zsh completions (added by deno install script)
 autoload -Uz compinit
 compinit
+# opencode
+export PATH=/home/nick/.opencode/bin:$PATH

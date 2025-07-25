@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+
+set -e
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Setting up JavaScript runtimes (NVM + Bun + Deno)..."
+
+if ! command_exists curl && ! command_exists wget; then
+    log "❌ Neither curl nor wget is available. Run the 'packages' script first."
+    exit 1
+fi
+
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+if [[ -d "$NVM_DIR" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    log "✓ NVM already installed at $NVM_DIR"
+
+    source "$NVM_DIR/nvm.sh"
+    current_version=$(nvm --version 2>/dev/null || echo "unknown")
+    log "→ Current NVM version: $current_version"
+
+    if [[ "${UPDATE_NVM:-no}" == "yes" ]]; then
+        log "→ Updating NVM to latest version..."
+        if [[ $DRY_RUN == "0" ]]; then
+            if command_exists curl; then
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+            else
+                wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+            fi
+        fi
+        log "✓ NVM updated"
+    fi
+else
+    log "→ Installing NVM..."
+    if [[ $DRY_RUN == "0" ]]; then
+        if command_exists curl; then
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+        else
+            wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+        fi
+
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && source "$NVM_DIR/bash_completion"
+    else
+        log "Would install NVM from https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
+    fi
+    log "✓ NVM installed"
+fi
+
+if [[ $DRY_RUN == "0" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+fi
+
+if [[ $DRY_RUN == "0" ]] && command -v nvm &> /dev/null; then
+    log "→ Installing Node.js versions..."
+
+    log "→ Installing Node.js LTS..."
+    nvm install --lts
+    nvm use --lts
+    nvm alias default lts/*
+
+    log "→ Installing Node.js latest..."
+    nvm install node
+
+    log "✓ Installed Node.js versions:"
+    nvm list
+
+    log "→ Installing global npm packages..."
+    global_packages=()
+
+    for package in "${global_packages[@]}"; do
+        log "→ Installing $package..."
+        npm install -g "$package" &> /dev/null || log "⚠ Failed to install $package"
+    done
+
+    log "✓ Global npm packages installed"
+
+elif [[ $DRY_RUN == "1" ]]; then
+    log "Would install Node.js LTS and latest versions"
+    log "Would install global packages: yarn pnpm typescript @angular/cli @vue/cli create-react-app next nuxt eslint prettier nodemon pm2 serve http-server live-server json-server"
+fi
+
+log "→ Configuring shell profiles for NVM..."
+
+add_nvm_to_profile() {
+    local profile_file="$1"
+    local profile_name="$2"
+
+    if [[ -f "$profile_file" ]]; then
+        if ! grep -q "# NVM (Node Version Manager)" "$profile_file" 2>/dev/null; then
+            log "→ Adding NVM to $profile_name"
+            if [[ $DRY_RUN == "0" ]]; then
+                cat >> "$profile_file" << 'EOF'
+
+# NVM (Node Version Manager)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+EOF
+            fi
+        else
+            log "✓ NVM already configured in $profile_name"
+        fi
+    else
+        log "→ $profile_name not found, skipping"
+    fi
+}
+
+add_nvm_to_profile "$HOME/.bashrc" ".bashrc"
+add_nvm_to_profile "$HOME/.zshrc" ".zshrc"
+add_nvm_to_profile "$HOME/.profile" ".profile"
+
+if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
+    fish_config="$HOME/.config/fish/config.fish"
+    if [[ -f "$fish_config" ]]; then
+        if ! grep -q "# NVM (Node Version Manager)" "$fish_config" 2>/dev/null; then
+            log "→ Adding NVM to fish config"
+            if [[ $DRY_RUN == "0" ]]; then
+                echo "" >> "$fish_config"
+                echo "# NVM (Node Version Manager)" >> "$fish_config"
+                echo "function nvm" >> "$fish_config"
+                echo "    bass source ~/.nvm/nvm.sh --no-use ';' nvm \$argv" >> "$fish_config"
+                echo "end" >> "$fish_config"
+            fi
+        else
+            log "✓ NVM already configured in fish config"
+        fi
+    fi
+fi
+
+log "→ Installing Bun..."
+
+if command_exists bun; then
+    current_bun_version=$(bun --version 2>/dev/null || echo "unknown")
+    log "✓ Bun already installed (version: $current_bun_version)"
+
+    if [[ "${UPDATE_BUN:-no}" == "yes" ]]; then
+        log "→ Updating Bun to latest version..."
+        if [[ $DRY_RUN == "0" ]]; then
+            bun upgrade || log "⚠ Failed to upgrade Bun"
+        fi
+        log "✓ Bun updated"
+    fi
+else
+    log "→ Installing Bun from official installer..."
+    if [[ $DRY_RUN == "0" ]]; then
+        if command_exists curl; then
+            curl -fsSL https://bun.sh/install | bash
+        else
+            log "⚠ curl not available, cannot install Bun"
+        fi
+
+        export PATH="$HOME/.bun/bin:$PATH"
+    else
+        log "Would install Bun from https://bun.sh/install"
+    fi
+    log "✓ Bun installed"
+fi
+
+log "→ Configuring shell profiles for Bun..."
+
+add_bun_to_profile() {
+    local profile_file="$1"
+    local profile_name="$2"
+
+    if [[ -f "$profile_file" ]]; then
+        if ! grep -q "# Bun" "$profile_file" 2>/dev/null; then
+            log "→ Adding Bun to $profile_name"
+            if [[ $DRY_RUN == "0" ]]; then
+                cat >> "$profile_file" << 'EOF'
+
+# Bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+EOF
+            fi
+        else
+            log "✓ Bun already configured in $profile_name"
+        fi
+    else
+        log "→ $profile_name not found, skipping"
+    fi
+}
+
+add_bun_to_profile "$HOME/.bashrc" ".bashrc"
+add_bun_to_profile "$HOME/.zshrc" ".zshrc"
+add_bun_to_profile "$HOME/.profile" ".profile"
+
+if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
+    fish_config="$HOME/.config/fish/config.fish"
+    if [[ -f "$fish_config" ]]; then
+        if ! grep -q "# Bun" "$fish_config" 2>/dev/null; then
+            log "→ Adding Bun to fish config"
+            if [[ $DRY_RUN == "0" ]]; then
+                echo "" >> "$fish_config"
+                echo "# Bun" >> "$fish_config"
+                echo "set -gx BUN_INSTALL \"\$HOME/.bun\"" >> "$fish_config"
+                echo "set -gx PATH \"\$BUN_INSTALL/bin\" \$PATH" >> "$fish_config"
+            fi
+        else
+            log "✓ Bun already configured in fish config"
+        fi
+    fi
+fi
+
+if [[ $DRY_RUN == "0" ]] && command_exists bun; then
+    log "→ Installing global packages with Bun..."
+    bun_global_packages=()
+
+    for package in "${bun_global_packages[@]}"; do
+        log "→ Installing $package with Bun..."
+        bun add -g "$package" &> /dev/null || log "⚠ Failed to install $package with Bun"
+    done
+
+    log "✓ Global Bun packages installed"
+elif [[ $DRY_RUN == "1" ]]; then
+    log "Would install global packages with Bun: typescript prettier eslint @biomejs/biome vite vitest tsx"
+fi
+
+log "→ Installing Deno..."
+
+if command_exists deno; then
+    current_deno_version=$(deno --version 2>/dev/null | head -n1 | cut -d' ' -f2 || echo "unknown")
+    log "✓ Deno already installed (version: $current_deno_version)"
+
+    if [[ "${UPDATE_DENO:-no}" == "yes" ]]; then
+        log "→ Updating Deno to latest version..."
+        if [[ $DRY_RUN == "0" ]]; then
+            deno upgrade || log "⚠ Failed to upgrade Deno"
+        fi
+        log "✓ Deno updated"
+    fi
+else
+    log "→ Installing Deno from official installer..."
+    if [[ $DRY_RUN == "0" ]]; then
+        if command_exists curl; then
+            curl -fsSL https://deno.land/install.sh | sh
+        else
+            log "⚠ curl not available, cannot install Deno"
+        fi
+
+        export PATH="$HOME/.deno/bin:$PATH"
+    else
+        log "Would install Deno from https://deno.land/install.sh"
+    fi
+    log "✓ Deno installed"
+fi
+
+log "→ Configuring shell profiles for Deno..."
+
+add_deno_to_profile() {
+    local profile_file="$1"
+    local profile_name="$2"
+
+    if [[ -f "$profile_file" ]]; then
+        if ! grep -q "# Deno" "$profile_file" 2>/dev/null; then
+            log "→ Adding Deno to $profile_name"
+            if [[ $DRY_RUN == "0" ]]; then
+                cat >> "$profile_file" << 'EOF'
+
+# Deno
+export DENO_INSTALL="$HOME/.deno"
+export PATH="$DENO_INSTALL/bin:$PATH"
+EOF
+            fi
+        else
+            log "✓ Deno already configured in $profile_name"
+        fi
+    else
+        log "→ $profile_name not found, skipping"
+    fi
+}
+
+add_deno_to_profile "$HOME/.bashrc" ".bashrc"
+add_deno_to_profile "$HOME/.zshrc" ".zshrc"
+add_deno_to_profile "$HOME/.profile" ".profile"
+
+if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
+    fish_config="$HOME/.config/fish/config.fish"
+    if [[ -f "$fish_config" ]]; then
+        if ! grep -q "# Deno" "$fish_config" 2>/dev/null; then
+            log "→ Adding Deno to fish config"
+            if [[ $DRY_RUN == "0" ]]; then
+                echo "" >> "$fish_config"
+                echo "# Deno" >> "$fish_config"
+                echo "set -gx DENO_INSTALL \"\$HOME/.deno\"" >> "$fish_config"
+                echo "set -gx PATH \"\$DENO_INSTALL/bin\" \$PATH" >> "$fish_config"
+            fi
+        else
+            log "✓ Deno already configured in fish config"
+        fi
+    fi
+fi
+
+log "✓ JavaScript runtimes setup complete"

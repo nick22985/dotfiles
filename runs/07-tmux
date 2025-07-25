@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Setting up Tmux..."
+
+if ! command_exists tmux; then
+    log "⚠ Tmux is not installed. Run the 'packages' script first."
+    exit 1
+fi
+
+tpm_dir="$HOME/.tmux/plugins/tpm"
+if [[ ! -d "$tpm_dir" ]]; then
+    log "→ Installing TPM (Tmux Plugin Manager)..."
+    if [[ $DRY_RUN == "0" ]]; then
+        git clone https://github.com/tmux-plugins/tpm "$tpm_dir"
+    fi
+    log "✓ TPM installed"
+else
+    log "✓ TPM already installed"
+
+    log "→ Updating TPM..."
+    if [[ $DRY_RUN == "0" ]]; then
+        (cd "$tpm_dir" && git pull --quiet) || log "→ TPM update skipped (no internet or git issues)"
+    fi
+fi
+
+if [[ -d "$HOME/.local/bin" ]]; then
+    log "→ Making tmux scripts executable..."
+    tmux_scripts=$(find "$HOME/.local/bin" -name "tmux*" -type f 2>/dev/null || true)
+    if [[ -n "$tmux_scripts" ]]; then
+        if [[ $DRY_RUN == "0" ]]; then
+            echo "$tmux_scripts" | xargs chmod +x
+        fi
+        log "✓ Tmux scripts are executable"
+    else
+        log "→ No tmux scripts found in ~/.local/bin (will be available after running 'dotfiles')"
+    fi
+else
+    log "→ ~/.local/bin not found (will be available after running 'dotfiles')"
+fi
+
+tmux_config_found=false
+if [[ -f "$HOME/.config/tmux/tmux.conf" ]]; then
+    tmux_config_path="$HOME/.config/tmux/tmux.conf"
+    tmux_config_found=true
+elif [[ -f "$HOME/.tmux.conf" ]]; then
+    tmux_config_path="$HOME/.tmux.conf"
+    tmux_config_found=true
+fi
+
+if [[ $tmux_config_found == true ]]; then
+    log "✓ Tmux configuration found at $tmux_config_path"
+
+    if [[ -d "$tpm_dir" ]]; then
+        log "→ Installing/updating tmux plugins automatically..."
+        if [[ $DRY_RUN == "0" ]]; then
+            if [[ -f "$tpm_dir/scripts/install_plugins.sh" ]]; then
+                log "→ Running TPM plugin installation..."
+                bash "$tpm_dir/scripts/install_plugins.sh" 2>/dev/null && log "✓ Tmux plugins installed/updated" || log "⚠ Some plugins may have failed to install"
+            else
+                log "⚠ TPM install script not found"
+            fi
+
+            if [[ -f "$tpm_dir/scripts/update_plugin.sh" ]]; then
+                log "→ Updating all tmux plugins..."
+                bash "$tpm_dir/scripts/update_plugin.sh" all 2>/dev/null && log "✓ All tmux plugins updated" || log "⚠ Some plugins may have failed to update"
+            else
+                log "⚠ TPM update script not found"
+            fi
+        else
+            log "Would automatically install and update tmux plugins"
+        fi
+    fi
+else
+    log "→ Tmux configuration not found (will be available after running 'dotfiles')"
+fi
+
+log "✓ Tmux setup complete"

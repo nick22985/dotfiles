@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+env_dir="$script_dir/env"
+
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+if [ -z "$XDG_CONFIG_HOME" ]; then
+    log "no XDG_CONFIG_HOME set"
+    log "using ~/.config"
+    XDG_CONFIG_HOME=$HOME/.config
+fi
+
+parse_args "$@"
+
+update_files() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    if [[ ! -d "$source_dir" ]]; then
+        log "⚠ Source directory $source_dir does not exist, skipping..."
+        return
+    fi
+
+    log "copying over files from: $source_dir"
+    pushd "$source_dir" &> /dev/null
+    (
+        configs=$(find . -mindepth 1 -maxdepth 1)
+        for c in $configs; do
+            item_name=${c#./}
+            target_path=${target_dir%/}/${item_name}
+
+            if [[ -d "$c" ]]; then
+                log "    removing directory: rm -rf $target_path"
+                if [[ $DRY_RUN == "0" ]]; then
+                    rm -rf "$target_path"
+                fi
+
+                log "    copying directory: cp -r $c $target_dir"
+                if [[ $DRY_RUN == "0" ]]; then
+                    mkdir -p "$target_dir"
+                    cp -r "./$c" "$target_dir"
+                fi
+            elif [[ -f "$c" ]]; then
+                log "    removing file: rm -f $target_path"
+                if [[ $DRY_RUN == "0" ]]; then
+                    rm -f "$target_path"
+                fi
+
+                log "    copying file: cp $c $target_dir"
+                if [[ $DRY_RUN == "0" ]]; then
+                    mkdir -p "$target_dir"
+                    cp "./$c" "$target_dir"
+                fi
+            fi
+        done
+    )
+    popd &> /dev/null
+}
+
+copy() {
+    local source="$1"
+    local target="$2"
+
+    if [[ ! -f "$source" ]]; then
+        log "⚠ Source file $source does not exist, skipping..."
+        return
+    fi
+
+    local target_dir=$(dirname "$target")
+    if [[ $DRY_RUN == "0" ]]; then
+        mkdir -p "$target_dir"
+    fi
+
+    log "removing: $target"
+    if [[ $DRY_RUN == "0" ]]; then
+        rm -f "$target"
+    fi
+
+    log "copying: $source to $target"
+    if [[ $DRY_RUN == "0" ]]; then
+        cp "$source" "$target"
+    fi
+}
+
+log "env: $script_dir"
+
+update_files "$env_dir/.config" "$XDG_CONFIG_HOME"
+update_files "$env_dir/.local" "$HOME/.local"
+
+dotfiles=(".bashrc" ".zshrc" ".gitconfig" ".wezterm.lua")
+for dotfile in "${dotfiles[@]}"; do
+    if [[ -f "$env_dir/$dotfile" ]]; then
+        copy "$env_dir/$dotfile" "$HOME/$dotfile"
+    fi
+done
+
+if [[ -d "$env_dir/.gnupg" ]]; then
+    log "removing: $HOME/.gnupg"
+    if [[ $DRY_RUN == "0" ]]; then
+        rm -rf "$HOME/.gnupg"
+    fi
+
+    log "copying: $env_dir/.gnupg to $HOME/.gnupg"
+    if [[ $DRY_RUN == "0" ]]; then
+        cp -r "$env_dir/.gnupg" "$HOME/.gnupg"
+        chmod 700 "$HOME/.gnupg"
+        find "$HOME/.gnupg" -type f -exec chmod 600 {} \;
+    fi
+fi
+
+if [[ -d "$HOME/.local/bin" ]]; then
+    log "Making local bin scripts executable..."
+    if [[ $DRY_RUN == "0" ]]; then
+        find "$HOME/.local/bin" -type f -exec chmod +x {} \;
+    else
+        log "Would make scripts in $HOME/.local/bin executable"
+    fi
+fi
+
+log ""
+if [[ $DRY_RUN == "0" ]]; then
+    log "✓ Dotfiles deployment complete!"
+else
+    log "Dry run complete. Run without --dry to apply changes."
+fi

@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Detecting multi-boot setup and configuring GRUB..."
+
+if ! command_exists grub-mkconfig && ! command_exists update-grub; then
+    log "⚠ GRUB not found. This script is for GRUB-based systems only."
+    exit 0
+fi
+
+detect_boot_mode() {
+    if [[ -d /sys/firmware/efi ]]; then
+        echo "UEFI"
+    else
+        echo "BIOS"
+    fi
+}
+
+detect_boot_disks() {
+    log "→ Scanning for bootable disks and partitions..."
+
+    local disks=$(lsblk -dpno NAME,SIZE,TYPE | grep disk | awk '{print $1}')
+    local boot_mode=$(detect_boot_mode)
+
+    log "→ Boot mode: $boot_mode"
+    log "→ Available disks:"
+
+    for disk in $disks; do
+        local size=$(lsblk -dno SIZE "$disk")
+        local model=$(lsblk -dno MODEL "$disk" 2>/dev/null || echo "Unknown")
+        log "  - $disk ($size) - $model"
+
+        local partitions=$(lsblk -pno NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$disk" | tail -n +2)
+        if [[ -n "$partitions" ]]; then
+            echo "$partitions" | while read -r part size fstype label mount; do
+                if [[ -n "$part" && "$part" != "$disk" ]]; then
+                    local info="    └─ $part ($size)"
+                    [[ -n "$fstype" ]] && info="$info [$fstype]"
+                    [[ -n "$label" ]] && info="$info \"$label\""
+                    [[ -n "$mount" ]] && info="$info -> $mount"
+                    log "$info"
+                fi
+            done
+        fi
+    done
+}
+
+
+
+install_grub_themes() {
+    log "→ Installing GRUB themes from vinceliuice/grub2-themes..."
+
+    local temp_dir="/tmp/grub2-themes"
+    local theme_name="vimix"
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if ! command_exists git; then
+            log "→ Installing git for theme download..."
+            if command_exists pacman; then
+                sudo pacman -S --needed --noconfirm git || log "⚠ Failed to install git"
+            elif command_exists apt; then
+                sudo apt update && sudo apt install -y git || log "⚠ Failed to install git"
+            fi
+        fi
+
+        if [[ -d "$temp_dir" && -d "$temp_dir/.git" ]]; then
+            log "→ Updating existing grub2-themes repository..."
+            cd "$temp_dir"
+            if git pull origin master; then
+                log "✓ Themes repository updated successfully"
+            else
+                log "⚠ Failed to update repository, removing and cloning fresh..."
+                cd - >/dev/null
+                rm -rf "$temp_dir"
+                if git clone https://github.com/vinceliuice/grub2-themes.git "$temp_dir"; then
+                    log "✓ Themes repository cloned successfully"
+                else
+                    log "⚠ Failed to clone grub2-themes repository"
+                    return 1
+                fi
+            fi
+        else
+            log "→ Downloading grub2-themes repository..."
+            if [[ -d "$temp_dir" ]]; then
+                rm -rf "$temp_dir"
+            fi
+            if git clone https://github.com/vinceliuice/grub2-themes.git "$temp_dir"; then
+                log "✓ Themes repository downloaded successfully"
+            else
+                log "⚠ Failed to download grub2-themes repository"
+                return 1
+            fi
+        fi
+
+            cd "$temp_dir"
+
+            chmod +x install.sh
+
+            log "→ Installing $theme_name theme with 4K resolution..."
+            if sudo ./install.sh -t "$theme_name" -s 4k; then
+                log "✓ $theme_name theme installed successfully with 4K resolution"
+            else
+                log "⚠ Failed to install $theme_name theme"
+            fi
+
+        cd - >/dev/null 2>/dev/null || true
+    else
+        log "Would download grub2-themes from vinceliuice/grub2-themes"
+        log "Would install $theme_name theme with 4K resolution"
+    fi
+}
+
+configure_grub_multiboot() {
+    log "→ Configuring GRUB with os-prober for automatic OS detection..."
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if ! command_exists os-prober; then
+            log "→ Installing os-prober for automatic OS detection..."
+            if command_exists pacman; then
+                sudo pacman -S --needed --noconfirm os-prober || log "⚠ Failed to install os-prober"
+            elif command_exists apt; then
+                sudo apt update && sudo apt install -y os-prober || log "⚠ Failed to install os-prober"
+            fi
+        fi
+
+        local grub_config="/etc/default/grub"
+        if [[ -f "$grub_config" ]]; then
+            log "→ Configuring GRUB settings..."
+
+            sudo cp "$grub_config" "$grub_config.backup.$(date +%Y%m%d_%H%M%S)"
+
+            if grep -q "^GRUB_DISABLE_OS_PROBER=" "$grub_config"; then
+                sudo sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "$grub_config"
+            else
+                echo "GRUB_DISABLE_OS_PROBER=false" | sudo tee -a "$grub_config" >/dev/null
+            fi
+
+            if grep -q "^GRUB_TIMEOUT=" "$grub_config"; then
+                sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=10/' "$grub_config"
+            else
+                echo "GRUB_TIMEOUT=10" | sudo tee -a "$grub_config" >/dev/null
+            fi
+
+            if ! grep -q "^GRUB_SAVEDEFAULT=" "$grub_config"; then
+                echo "GRUB_SAVEDEFAULT=true" | sudo tee -a "$grub_config" >/dev/null
+            fi
+
+            if ! grep -q "^GRUB_DEFAULT=" "$grub_config"; then
+                echo "GRUB_DEFAULT=saved" | sudo tee -a "$grub_config" >/dev/null
+            fi
+
+            log "✓ GRUB configuration updated"
+        fi
+
+        log "→ Updating GRUB configuration (os-prober will detect all OSes)..."
+        if command_exists update-grub; then
+            sudo update-grub && log "✓ GRUB updated successfully" || log "⚠ GRUB update failed"
+        elif command_exists grub-mkconfig; then
+            sudo grub-mkconfig -o /boot/grub/grub.cfg && log "✓ GRUB updated successfully" || log "⚠ GRUB update failed"
+        fi
+    else
+        log "Would install os-prober for automatic OS detection"
+        log "Would enable os-prober, set timeout to 10s, and enable saving last choice"
+        log "Would update GRUB configuration (os-prober will detect all OSes)"
+    fi
+}
+
+detect_boot_disks
+echo ""
+
+install_grub_themes
+echo ""
+
+configure_grub_multiboot
+
+log "✓ GRUB setup complete"

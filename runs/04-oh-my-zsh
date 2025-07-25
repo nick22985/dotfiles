@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing Oh My Zsh..."
+
+if ! command_exists zsh; then
+    log "⚠ Zsh is not installed. Run the 'packages' script first."
+    exit 1
+fi
+
+if [[ -d "$HOME/.oh-my-zsh" ]]; then
+    log "✓ Oh My Zsh is already installed"
+
+    log "→ Updating Oh My Zsh..."
+    if [[ $DRY_RUN == "0" ]]; then
+        cd "$HOME/.oh-my-zsh" && git pull origin master 2>/dev/null || {
+            log "⚠ Failed to update Oh My Zsh automatically"
+        }
+    fi
+else
+    log "→ Installing Oh My Zsh..."
+    if [[ $DRY_RUN == "0" ]]; then
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+        log "✓ Oh My Zsh installed successfully"
+    fi
+fi

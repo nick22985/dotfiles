@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+env_dir="$script_dir/env"
+
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+if [ -z "$XDG_CONFIG_HOME" ]; then
+    log "no XDG_CONFIG_HOME set"
+    log "using ~/.config"
+    XDG_CONFIG_HOME=$HOME/.config
+fi
+
+parse_args "$@"
+
+clean_directories() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    if [[ ! -d "$source_dir" ]]; then
+        log "⚠ Source directory $source_dir does not exist, skipping..."
+        return
+    fi
+
+    log "cleaning directories from: $source_dir"
+    pushd "$source_dir" &> /dev/null
+    (
+        configs=$(find . -mindepth 1 -maxdepth 1 -type d)
+        for c in $configs; do
+            directory=${target_dir%/}/${c#./}
+            if [[ -d "$directory" ]]; then
+                log "    removing: rm -rf $directory"
+                if [[ $DRY_RUN == "0" ]]; then
+                    rm -rf "$directory"
+                fi
+            else
+                log "    not found: $directory (already clean)"
+            fi
+        done
+    )
+    popd &> /dev/null
+}
+
+clean_file() {
+    local target="$1"
+
+    if [[ -f "$target" ]]; then
+        log "removing: $target"
+        if [[ $DRY_RUN == "0" ]]; then
+            rm -f "$target"
+        fi
+    else
+        log "not found: $target (already clean)"
+    fi
+}
+
+log "Cleaning dotfiles from: $script_dir"
+
+clean_directories "$env_dir/.config" "$XDG_CONFIG_HOME"
+
+clean_directories "$env_dir/.local" "$HOME/.local"
+
+dotfiles=(".bashrc" ".zshrc" ".gitconfig" ".wezterm.lua")
+for dotfile in "${dotfiles[@]}"; do
+    if [[ -f "$env_dir/$dotfile" ]]; then
+        clean_file "$HOME/$dotfile"
+    fi
+done
+
+if [[ -d "$env_dir/.gnupg" ]]; then
+    if [[ -d "$HOME/.gnupg" ]]; then
+        log "removing: $HOME/.gnupg"
+        if [[ $DRY_RUN == "0" ]]; then
+            rm -rf "$HOME/.gnupg"
+        fi
+    else
+        log "not found: $HOME/.gnupg (already clean)"
+    fi
+fi
+
+log ""
+if [[ $DRY_RUN == "0" ]]; then
+    log "✓ Dotfiles cleanup complete!"
+    log "→ All configurations deployed by dev-env have been removed"
+else
+    log "Dry run complete. Run without --dry to apply changes."
+fi

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -e
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Deploying dotfiles configurations..."
+
+if [[ $DRY_RUN == "1" ]]; then
+    "$DOTFILES_DIR/dev-env" --dry
+else
+    "$DOTFILES_DIR/dev-env"
+fi
+
+log "✓ Dotfiles deployed successfully"

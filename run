@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+export DOTFILES_DIR="$script_dir"
+export DEV_ENV="$script_dir"
+
+source "$script_dir/lib/utils.sh"
+
+keep_sudo_alive() {
+    while true; do
+        sudo -n true
+        sleep 60
+        kill -0 "$$" || exit
+    done 2>/dev/null &
+}
+
+if [[ "${DRY_RUN:-0}" != "1" ]] && [[ "$*" != *"--dry"* ]]; then
+    log "Requesting sudo privileges upfront..."
+    if sudo -v; then
+        log "✓ Sudo privileges granted"
+        keep_sudo_alive
+    else
+        log "❌ Failed to get sudo privileges"
+        exit 1
+    fi
+fi
+
+grep_pattern=""
+
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--dry" ]]; then
+        DRY_RUN="1"
+        export DRY_RUN
+    else
+        grep_pattern="$1"
+    fi
+    shift
+done
+
+log "RUN: grep: $grep_pattern -- dry: $DRY_RUN"
+
+runs_dir=$(find "$script_dir/runs" -mindepth 1 -maxdepth 1 -executable | sort)
+
+script_count=0
+executed_count=0
+
+for script in $runs_dir; do
+    script_name=$(basename "$script")
+    script_count=$((script_count + 1))
+
+    if [[ -n "$grep_pattern" ]] && ! echo "$script_name" | grep -q "$grep_pattern"; then
+        log "grep \"$grep_pattern\" filtered out $script"
+        continue
+    fi
+
+    log "running script: $script"
+    executed_count=$((executed_count + 1))
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if [[ "$script_name" =~ ^(01-git|02-packages|05-hyprland-packages|10-flatpak|11-snap)$ ]]; then
+            sudo -v 2>/dev/null || true
+        fi
+
+        if "$script"; then
+            echo ""
+        else
+            echo "❌ Script $script_name failed"
+            exit 1
+        fi
+    else
+        "$script" --dry
+        echo ""
+    fi
+done
+
+if [[ $DRY_RUN == "1" ]]; then
+    log "Would execute $executed_count of $script_count scripts"
+else
+    echo "✅ Executed $executed_count of $script_count scripts successfully"
+    echo "🎉 Dotfiles setup complete! You can rerun this anytime to update."
+fi

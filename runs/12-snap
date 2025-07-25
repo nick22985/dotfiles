@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing Snap applications..."
+
+if ! command_exists snap; then
+    log "⚠ Snap not available. Install it first with the packages script."
+    exit 1
+fi
+
+if command_exists pacman; then
+    log "→ Setting up Snap for Arch Linux..."
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if [[ ! -e /snap ]]; then
+            log "→ Creating /snap symlink..."
+            sudo ln -sf /var/lib/snapd/snap /snap || log "⚠ Failed to create /snap symlink"
+        fi
+
+        log "→ Enabling snapd services..."
+        sudo systemctl enable --now snapd.socket || log "⚠ Failed to enable snapd.socket"
+
+        if systemctl is-active --quiet apparmor 2>/dev/null; then
+            log "→ AppArmor is active, configuring for snap..."
+            sudo systemctl restart apparmor.service || log "⚠ Failed to restart apparmor"
+            sudo systemctl restart snapd.service || log "⚠ Failed to restart snapd"
+            sudo systemctl enable --now snapd.apparmor.service || log "⚠ Failed to enable snapd.apparmor"
+        else
+            log "→ AppArmor not active, starting snapd without AppArmor..."
+            sudo systemctl restart snapd.service || log "⚠ Failed to restart snapd"
+        fi
+
+        log "→ Waiting for snapd to be ready..."
+        sleep 3
+
+        if snap version >/dev/null 2>&1; then
+            log "✓ Snap is ready"
+        else
+            log "⚠ Snap may not be fully ready, continuing anyway..."
+        fi
+    else
+        log "Would setup snap symlink and services"
+    fi
+fi
+
+log "→ Installing Snap applications..."
+snap_packages=()
+
+snap_to_install=()
+for package_with_flags in "${snap_packages[@]}"; do
+    package_name=$(echo "$package_with_flags" | awk '{print $1}')
+    if ! snap list | grep -q "^$package_name " 2>/dev/null; then
+        snap_to_install+=("$package_with_flags")
+    else
+        log "✓ $package_name (Snap) already installed"
+    fi
+done
+
+if [ ${#snap_to_install[@]} -gt 0 ]; then
+    log "→ Installing Snap packages: ${snap_to_install[*]}"
+    if [[ $DRY_RUN == "0" ]]; then
+        for package_with_flags in "${snap_to_install[@]}"; do
+            log "→ Installing $package_with_flags..."
+            if sudo snap install $package_with_flags 2>/dev/null; then
+                log "✓ Successfully installed $package_with_flags"
+            else
+                log "⚠ Failed to install $package_with_flags"
+            fi
+        done
+    fi
+else
+    log "✓ All Snap packages already installed"
+fi
+
+log "✓ Snap setup complete"

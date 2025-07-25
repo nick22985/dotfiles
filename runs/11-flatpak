@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+
+set -e
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing Flatpak applications..."
+
+if ! command_exists flatpak; then
+    log "⚠ Flatpak not available. Install it first:"
+    if command_exists pacman; then
+        log "  sudo pacman -S flatpak"
+    elif command_exists apt; then
+        log "  sudo apt install flatpak"
+    elif command_exists dnf; then
+        log "  sudo dnf install flatpak"
+    elif command_exists zypper; then
+        log "  sudo zypper install flatpak"
+    else
+        log "  Check your distribution's package manager"
+    fi
+    exit 1
+fi
+
+log "→ Installing Flatpak applications..."
+flatpak_packages=(
+    "com.discordapp.Discord"
+    "com.slack.Slack"
+    "org.signal.Signal"
+    "org.telegram.desktop"
+
+    "com.spotify.Client"
+    "org.videolan.VLC"
+    "org.audacityteam.Audacity"
+    "com.obsproject.Studio"
+
+    "com.google.Chrome"
+    "org.mozilla.firefox"
+
+    "com.getpostman.Postman"
+    "com.visualstudio.code"
+
+    "org.libreoffice.LibreOffice"
+
+    "org.gimp.GIMP"
+    "org.blender.Blender"
+    "org.kde.kdenlive"
+
+    "com.valvesoftware.Steam"
+    "net.lutris.Lutris"
+    "org.prismlauncher.PrismLauncher"
+
+    "com.github.wwmm.easyeffects"
+    "com.github.tchx84.Flatseal"
+)
+
+flatpak_to_install=()
+for package in "${flatpak_packages[@]}"; do
+    if ! (flatpak list --app --system 2>/dev/null | grep -q "$package" || flatpak list --app --user 2>/dev/null | grep -q "$package"); then
+        flatpak_to_install+=("$package")
+    else
+        log "✓ $package (Flatpak) already installed"
+    fi
+done
+
+if [ ${#flatpak_to_install[@]} -gt 0 ]; then
+    log "→ Installing Flatpak packages: ${flatpak_to_install[*]}"
+    if [[ $DRY_RUN == "0" ]]; then
+        log "→ Configuring Flatpak permissions..."
+        if ! getent group flatpak >/dev/null 2>&1; then
+            sudo groupadd flatpak 2>/dev/null && log "✓ Created flatpak group" || log "⚠ Failed to create flatpak group"
+        fi
+
+        if ! groups "$USER" | grep -q flatpak; then
+            sudo usermod -aG flatpak "$USER" && log "✓ Added $USER to flatpak group" || log "⚠ Failed to add user to flatpak group"
+            log "→ Note: Group membership will take effect after logout/login"
+        else
+            log "✓ $USER already in flatpak group"
+        fi
+
+        log "→ Adding Flathub repository (user-level)..."
+        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo --user || log "⚠ Failed to add Flathub repository"
+
+        for package in "${flatpak_to_install[@]}"; do
+            log "→ Installing $package (user-level)..."
+            if flatpak install -y flathub "$package" --user; then
+                log "✓ Installed $package for user"
+            else
+                log "⚠ Failed to install $package (user-level)"
+                log "→ You may need to install this manually or check Flathub availability"
+            fi
+        done
+    fi
+else
+    log "✓ All Flatpak packages already installed"
+fi
+
+log "→ Configuring XDG_DATA_DIRS for Flatpak applications..."
+
+flatpak_profile="/etc/profile.d/flatpak.sh"
+if [[ $DRY_RUN == "0" ]]; then
+    if [[ ! -f "$flatpak_profile" ]]; then
+        sudo tee "$flatpak_profile" > /dev/null << 'EOF'
+# Add Flatpak directories to XDG_DATA_DIRS
+if [ -d /var/lib/flatpak/exports/share ]; then
+    export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+fi
+
+if [ -d "$HOME/.local/share/flatpak/exports/share" ]; then
+    export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+fi
+EOF
+        sudo chmod +x "$flatpak_profile"
+        log "✓ Created $flatpak_profile for XDG_DATA_DIRS configuration"
+    else
+        log "✓ $flatpak_profile already exists"
+    fi
+
+    if [ -d /var/lib/flatpak/exports/share ]; then
+        export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    fi
+    if [ -d "$HOME/.local/share/flatpak/exports/share" ]; then
+        export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    fi
+
+    log "✓ XDG_DATA_DIRS configured for current session"
+    log "→ Flatpak applications will appear in desktop menus after next login"
+else
+    log "Would create $flatpak_profile"
+    log "Would configure XDG_DATA_DIRS for Flatpak applications"
+fi
+
+log "✓ Flatpak setup complete"

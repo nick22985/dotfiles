@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing Hyprland and related packages..."
+
+if command_exists pacman; then
+    log "→ Detected Arch Linux (pacman)"
+
+    hyprland_packages=(
+        "hyprland"
+        "waybar"
+        "rofi-wayland"
+        "hyprpaper"
+        "hypridle"
+        "hyprlock"
+        "hyprshot"
+        "wl-clipboard"
+        "cliphist"
+        "brightnessctl"
+        "playerctl"
+        "pavucontrol"
+        "networkmanager"
+        "network-manager-applet"
+        "polkit-kde-agent"
+        "xdg-desktop-portal-hyprland"
+        "qt5-wayland"
+        "qt6-wayland"
+        "xorg-xwayland"
+    )
+
+    packages_to_install=()
+    for package in "${hyprland_packages[@]}"; do
+        if ! is_installed_pacman "$package"; then
+            packages_to_install+=("$package")
+        else
+            log "✓ $package already installed"
+        fi
+    done
+
+    if [ ${#packages_to_install[@]} -gt 0 ]; then
+        log "→ Installing Hyprland packages: ${packages_to_install[*]}"
+        if [[ $DRY_RUN == "0" ]]; then
+            ensure_sudo
+            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log "⚠ Some packages may have failed to install"
+        fi
+    else
+        log "✓ All Hyprland packages already installed"
+    fi
+
+    if command_exists paru; then
+        aur_hyprland_packages=(
+            "hyprpicker"
+            "grimblast-git"
+            "swaync"
+            "wofi"
+        )
+
+        aur_packages_to_install=()
+        for package in "${aur_hyprland_packages[@]}"; do
+            if ! is_installed_pacman "$package"; then
+                aur_packages_to_install+=("$package")
+            else
+                log "✓ $package (AUR) already installed"
+            fi
+        done
+
+        if [ ${#aur_packages_to_install[@]} -gt 0 ]; then
+            log "→ Installing AUR Hyprland packages: ${aur_packages_to_install[*]}"
+            if [[ $DRY_RUN == "0" ]]; then
+                paru -S --needed --noconfirm "${aur_packages_to_install[@]}" || log "⚠ Some AUR packages may have failed to install"
+            fi
+        else
+            log "✓ All AUR Hyprland packages already installed"
+        fi
+    else
+        log "⚠ paru not available, skipping AUR Hyprland packages"
+    fi
+
+elif command_exists apt; then
+    log "→ Detected Ubuntu/Debian (apt)"
+    log "⚠ Hyprland packages not available in Ubuntu/Debian repos"
+    log "→ Please install Hyprland manually or use a different distribution"
+
+else
+    log "⚠ Unknown package manager. Please install Hyprland packages manually"
+fi
+
+if [[ $DRY_RUN == "0" ]]; then
+    log "→ Enabling Hyprland-related services..."
+
+    if systemctl is-enabled NetworkManager &>/dev/null; then
+        log "✓ NetworkManager already enabled"
+    else
+        sudo systemctl enable --now NetworkManager 2>/dev/null && log "✓ NetworkManager enabled" || log "⚠ Failed to enable NetworkManager"
+    fi
+
+    log "→ Starting user services..."
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    if systemctl --user list-unit-files waybar.service &>/dev/null; then
+        systemctl --user enable waybar.service 2>/dev/null && log "✓ waybar service enabled" || log "⚠ Failed to enable waybar service"
+    fi
+else
+    log "Would enable NetworkManager and waybar services"
+fi
+
+log "✓ Hyprland packages installation complete"

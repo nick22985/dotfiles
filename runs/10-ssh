@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+set -e
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Setting up SSH server with secure configuration..."
+
+if ! command_exists sshd; then
+    log "→ Installing openssh server..."
+    if command_exists pacman; then
+        if [[ $DRY_RUN == "0" ]]; then
+            sudo pacman -S --needed --noconfirm openssh
+        fi
+    elif command_exists apt; then
+        if [[ $DRY_RUN == "0" ]]; then
+            sudo apt update -qq
+            sudo apt install -y openssh-server
+        fi
+    else
+        log "⚠ Unknown package manager. Please install openssh-server manually"
+        exit 1
+    fi
+    log "✓ OpenSSH server installed"
+else
+    log "✓ OpenSSH server already installed"
+fi
+
+log "→ Updating SSH daemon configuration for key-only authentication..."
+
+if [[ $DRY_RUN == "0" ]]; then
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+        log "✓ Backed up existing SSH config"
+    fi
+
+    update_ssh_config() {
+        local key="$1"
+        local value="$2"
+        local config_file="/etc/ssh/sshd_config"
+
+        if grep -q "^#*${key}" "$config_file"; then
+            sudo sed -i "s/^#*${key}.*/${key} ${value}/" "$config_file"
+        else
+            echo "${key} ${value}" | sudo tee -a "$config_file" > /dev/null
+        fi
+    }
+
+    log "→ Disabling password authentication..."
+    update_ssh_config "PasswordAuthentication" "no"
+    update_ssh_config "ChallengeResponseAuthentication" "no"
+    update_ssh_config "PermitEmptyPasswords" "no"
+
+    log "→ Enabling public key authentication..."
+    update_ssh_config "PubkeyAuthentication" "yes"
+
+    log "→ Disabling root login..."
+    update_ssh_config "PermitRootLogin" "no"
+
+    log "→ Setting security limits..."
+    update_ssh_config "MaxAuthTries" "3"
+
+    log "✓ SSH daemon configuration updated with secure settings"
+else
+    log "Would backup existing SSH config and update security settings:"
+    log "  - PasswordAuthentication no"
+    log "  - ChallengeResponseAuthentication no"
+    log "  - PermitEmptyPasswords no"
+    log "  - PubkeyAuthentication yes"
+    log "  - PermitRootLogin no"
+    log "  - MaxAuthTries 3"
+fi
+
+log "→ Ensuring SSH host keys exist..."
+if [[ $DRY_RUN == "0" ]]; then
+    sudo ssh-keygen -A 2>/dev/null || log "⚠ Failed to generate host keys (may already exist)"
+    log "✓ SSH host keys ready"
+else
+    log "Would generate SSH host keys if needed"
+fi
+
+log "→ Setting SSH directory permissions..."
+if [[ $DRY_RUN == "0" ]]; then
+    sudo chmod 755 /etc/ssh
+    sudo chmod 600 /etc/ssh/sshd_config
+    sudo chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
+    sudo chmod 644 /etc/ssh/ssh_host_*_key.pub 2>/dev/null || true
+    log "✓ SSH permissions set"
+else
+    log "Would set proper SSH directory and file permissions"
+fi
+
+log "→ Testing SSH configuration..."
+if [[ $DRY_RUN == "0" ]]; then
+    if sudo sshd -t; then
+        log "✓ SSH configuration is valid"
+    else
+        log "❌ SSH configuration test failed"
+        exit 1
+    fi
+else
+    log "Would test SSH configuration validity"
+fi
+
+log "→ Enabling SSH service..."
+if [[ $DRY_RUN == "0" ]]; then
+    if command_exists systemctl; then
+        sudo systemctl enable sshd
+        sudo systemctl restart sshd
+
+        if sudo systemctl is-active --quiet sshd; then
+            log "✓ SSH service is running"
+        else
+            log "⚠ SSH service failed to start"
+            sudo systemctl status sshd --no-pager -l
+        fi
+    else
+        log "⚠ systemctl not available, please start SSH service manually"
+    fi
+else
+    log "Would enable and start SSH service"
+fi
+
+log "→ Setting up user SSH directory..."
+ssh_dir="$HOME/.ssh"
+if [[ $DRY_RUN == "0" ]]; then
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+
+    if [[ ! -f "$ssh_dir/authorized_keys" ]]; then
+        touch "$ssh_dir/authorized_keys"
+        chmod 600 "$ssh_dir/authorized_keys"
+        log "✓ Created authorized_keys file"
+    else
+        log "✓ authorized_keys file already exists"
+    fi
+
+    log "✓ User SSH directory configured"
+else
+    log "Would create and configure user SSH directory"
+fi
+
+log "→ Checking for SSH key pair..."
+if [[ ! -f "$ssh_dir/id_ed25519" && ! -f "$ssh_dir/id_rsa" ]]; then
+    if [[ $DRY_RUN == "0" ]]; then
+        log "→ Generating new SSH key pair (Ed25519)..."
+        ssh-keygen -t ed25519 -f "$ssh_dir/id_ed25519" -N "" -C "$(whoami)@$(hostname)"
+        chmod 600 "$ssh_dir/id_ed25519"
+        chmod 644 "$ssh_dir/id_ed25519.pub"
+        log "✓ SSH key pair generated: $ssh_dir/id_ed25519"
+        log "→ Public key content:"
+        cat "$ssh_dir/id_ed25519.pub"
+    else
+        log "Would generate new SSH key pair (Ed25519)"
+    fi
+else
+    log "✓ SSH key pair already exists"
+fi

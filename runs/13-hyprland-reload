@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Reloading Hyprland configuration..."
+# Check if hyprctl is available
+if ! command_exists hyprctl; then
+    log "⚠ hyprctl not found, skipping Hyprland reload"
+    exit 0
+fi
+
+log "→ Looking for running Hyprland instance..."
+hyprland_pid=$(pgrep -x "Hyprland" | head -1)
+if [[ -z "$hyprland_pid" ]]; then
+    log "⚠ Hyprland not running, skipping reload"
+    exit 0
+fi
+
+log "→ Found Hyprland process (PID: $hyprland_pid)"
+
+hyprland_user=$(ps -o user= -p "$hyprland_pid" | tr -d ' ')
+hyprland_uid=$(id -u "$hyprland_user" 2>/dev/null || echo "")
+
+if [[ -z "$hyprland_uid" ]]; then
+    log "⚠ Could not determine Hyprland user, using current user"
+    hyprland_uid=$(id -u)
+fi
+
+log "→ Hyprland running as user: $hyprland_user (UID: $hyprland_uid)"
+
+if [[ $DRY_RUN == "0" ]]; then
+    hypr_socket_dir="/run/user/$hyprland_uid/hypr"
+
+    if [[ ! -d "$hypr_socket_dir" ]]; then
+        log "⚠ Hyprland socket directory not found at $hypr_socket_dir"
+        exit 1
+    fi
+
+    signature_path=$(find "$hypr_socket_dir" -maxdepth 1 -type d -name "*_*_*" | head -1)
+    if [[ -z "$signature_path" ]]; then
+        log "⚠ No Hyprland instance signature found in $hypr_socket_dir"
+        exit 1
+    fi
+
+    signature=$(basename "$signature_path")
+    log "→ Found Hyprland instance signature: $signature"
+
+    log "→ Attempting hyprctl reload with signature..."
+    if HYPRLAND_INSTANCE_SIGNATURE="$signature" hyprctl reload 2>/dev/null; then
+        log "✓ Hyprland configuration reloaded successfully"
+    else
+        log "→ hyprctl failed, trying direct socket communication..."
+
+        socket_path="$signature_path/.socket.sock"
+        if [[ -S "$socket_path" ]]; then
+            log "→ Using socket: $socket_path"
+            if echo "reload" | socat - "UNIX-CONNECT:$socket_path" 2>/dev/null; then
+                log "✓ Hyprland configuration reloaded via socket"
+            else
+                log "→ Socket communication failed, trying process signal..."
+
+                if kill -USR1 "$hyprland_pid" 2>/dev/null; then
+                    log "✓ Sent reload signal to Hyprland process"
+                else
+                    log "⚠ All reload methods failed"
+                fi
+            fi
+        else
+            log "⚠ Hyprland socket not found at $socket_path"
+
+            if kill -USR1 "$hyprland_pid" 2>/dev/null; then
+                log "✓ Sent reload signal to Hyprland process"
+            else
+                log "⚠ Failed to send signal to Hyprland process"
+            fi
+        fi
+    fi
+else
+    log "Would find Hyprland instance and run: hyprctl reload"
+fi
+
+log "✓ Hyprland reload complete"

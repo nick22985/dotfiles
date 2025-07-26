@@ -66,7 +66,12 @@ if command_exists pacman; then
         "gcc"               # C compiler (needed for entr)
         "cmake"             # Build system (needed for nvim packages)
         "luarocks"          # Lua package manager (needed for nvim plugins)
-        "xorg-xhost"
+				"imagemagick"
+        "ghostty"                # Terminal emulator
+				"timeshift-autosnap"
+				"bluez"
+				"bluez-utils"
+				"prettier"
     )
 
     # Check which packages need to be installed
@@ -104,24 +109,24 @@ if command_exists pacman; then
         # Enable docker if installed
         if is_installed_pacman "docker"; then
             log "→ Setting up Docker service..."
-            
+
             # Reload systemd daemon in case unit files changed
             sudo systemctl daemon-reload 2>/dev/null || true
-            
+
             # Check if docker is already enabled and running
             if systemctl is-enabled docker.service >/dev/null 2>&1; then
                 log "✓ Docker service already enabled"
             else
                 sudo systemctl enable docker 2>/dev/null && log "✓ Docker service enabled" || log "⚠ Failed to enable docker service"
             fi
-            
+
             # Check if docker is running
             if systemctl is-active docker.service >/dev/null 2>&1; then
                 log "✓ Docker service is running"
             else
                 sudo systemctl start docker 2>/dev/null && log "✓ Docker service started" || log "⚠ Failed to start docker service"
             fi
-            
+
             # Add user to docker group
             if ! groups "$USER" | grep -q docker; then
                 sudo usermod -aG docker "$USER" && log "✓ Added $USER to docker group" || log "⚠ Failed to add user to docker group"
@@ -130,20 +135,41 @@ if command_exists pacman; then
                 log "✓ $USER already in docker group"
             fi
         fi
-        
-        # Add user to other useful system groups
-        log "→ Adding user to system groups..."
-        groups_added=()
-        useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
-        for group in "${useful_groups[@]}"; do
-            if getent group "$group" >/dev/null 2>&1 && ! groups "$USER" | grep -q "$group"; then
-                if sudo usermod -aG "$group" "$USER"; then
-                    log "✓ Added $USER to $group group"
-                    groups_added+=("$group")
-                fi
-            fi
-        done
-        
+
+         # Enable bluetooth if installed
+         if is_installed_pacman "bluez"; then
+             log "→ Setting up Bluetooth service..."
+
+             # Reload systemd daemon in case unit files changed
+             sudo systemctl daemon-reload 2>/dev/null || true
+
+             # Check if bluetooth is already enabled and running
+             if systemctl is-enabled bluetooth.service >/dev/null 2>&1; then
+                 log "✓ Bluetooth service already enabled"
+             else
+                 sudo systemctl enable bluetooth.service 2>/dev/null && log "✓ Bluetooth service enabled" || log "⚠ Failed to enable bluetooth service"
+             fi
+
+             # Check if bluetooth is running
+             if systemctl is-active bluetooth.service >/dev/null 2>&1; then
+                 log "✓ Bluetooth service is running"
+             else
+                 sudo systemctl start bluetooth.service 2>/dev/null && log "✓ Bluetooth service started" || log "⚠ Failed to start bluetooth service"
+             fi
+         fi
+
+         # Add user to other useful system groups
+         log "→ Adding user to system groups..."
+         groups_added=()
+         useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
+         for group in "${useful_groups[@]}"; do
+             if getent group "$group" >/dev/null 2>&1 && ! groups "$USER" | grep -q "$group"; then
+                 if sudo usermod -aG "$group" "$USER"; then
+                     log "✓ Added $USER to $group group"
+                     groups_added+=("$group")
+                 fi
+             fi
+         done
         # Reload user groups if any were added
         if [ ${#groups_added[@]} -gt 0 ]; then
             log "→ Reloading user groups in current session..."
@@ -151,7 +177,7 @@ if command_exists pacman; then
             # But first, we need to continue the script execution
             log "→ Groups added: ${groups_added[*]}"
             log "→ Note: Some services may require a full logout/login to work properly"
-            
+
             # Try to refresh the current session's group membership
             # This works for some cases but not all
             for group in "${groups_added[@]}"; do
@@ -186,39 +212,7 @@ if command_exists pacman; then
         log "✓ Paru already installed"
     fi
 
-    # Install fonts first (needed for UI)
-    log "→ Installing fonts..."
-    font_packages=(
-        "ttf-font-awesome"          # FontAwesome 6 (includes Solid, Regular, Brands)
-        "ttf-fira-code"            # Fira Code with ligatures
-        "ttf-jetbrains-mono"       # JetBrains Mono
-        "noto-fonts"               # Google Noto fonts
-        "noto-fonts-emoji"         # Emoji support
-        "noto-fonts-cjk"           # Chinese, Japanese, Korean
-        "ttf-liberation"           # Liberation fonts (Arial/Times alternatives)
-        "ttf-dejavu"               # DejaVu fonts
-        "ttf-opensans"             # Open Sans
-        "ttf-roboto"               # Roboto font family
-        "fontconfig"               # Font configuration
-    )
 
-    fonts_to_install=()
-    for font in "${font_packages[@]}"; do
-        if ! is_installed_pacman "$font"; then
-            fonts_to_install+=("$font")
-        else
-            log "✓ $font already installed"
-        fi
-    done
-
-    if [ ${#fonts_to_install[@]} -gt 0 ]; then
-        log "→ Installing fonts: ${fonts_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm "${fonts_to_install[@]}" || log "⚠ Some fonts may have failed to install"
-        fi
-    else
-        log "✓ All fonts already installed"
-    fi
 
     # PRIORITY 2: AUR packages (not available in Flatpak or better suited for AUR)
     aur_packages=(
@@ -226,31 +220,13 @@ if command_exists pacman; then
         "lazygit"                    # Git TUI
         "lazydocker"                 # Docker TUI
         "act"                        # GitHub Actions runner
-        "deno"                       # Deno runtime (needed for nvim packages)
-        
+
         # System Tools & Utilities
         "1password"                  # Password manager (native integration)
         "1password-cli"              # 1Password CLI
         "yay"                        # Alternative AUR helper
         "snapd"                      # Snap package manager
         "neofetch"                   # System info
-        
-        # Browsers & Apps (AUR-specific or better performance)
-        "zen-browser-bin"            # Zen browser
-        "ghostty-git"                # Terminal emulator
-        "beekeeper-studio-bin"       # Database client (if not using Flatpak)
-        
-        # Fonts
-        "ttf-meslo-nerd-font-powerlevel10k"
-        
-        # REMOVED (moved to Flatpak for better sandboxing):
-        # - google-chrome → com.google.Chrome
-        # - visual-studio-code-bin → com.visualstudio.code  
-        # - discord → com.discordapp.Discord
-        # - spotify → com.spotify.Client
-        # - obsidian → com.obsidian.Obsidian
-        # - postman-bin → com.getpostman.Postman
-        # - slack-desktop → com.slack.Slack
     )
 
     # Check which AUR packages need to be installed
@@ -272,21 +248,7 @@ if command_exists pacman; then
         log "✓ All AUR packages already installed"
     fi
 
-    # Install Nerd Fonts from official repository
-    install_nerd_fonts
 
-    # Verify FontAwesome installation
-    log "→ Verifying FontAwesome installation..."
-    if [[ $DRY_RUN == "0" ]]; then
-        if fc-list | grep -i "font awesome" &> /dev/null; then
-            log "✓ FontAwesome fonts detected:"
-            fc-list | grep -i "font awesome" | head -3 | while read -r font; do
-                log "  - $(echo "$font" | cut -d: -f2 | xargs)"
-            done
-        else
-            log "⚠ FontAwesome fonts not detected in font cache"
-        fi
-    fi
 
     # Build and install entr from submodule
     log "→ Building and installing entr from source..."
@@ -334,14 +296,7 @@ elif command_exists apt; then
         "bat"
         "zoxide"
         "yq"                # YAML processor
-        "fontconfig"
-        "fonts-font-awesome"
-        "fonts-firacode"
-        "fonts-jetbrains-mono"
-        "fonts-noto"
-        "fonts-noto-color-emoji"
-        "fonts-liberation"
-        "fonts-dejavu-core"
+
         "cmake"             # Build system (needed for nvim packages)
         "luarocks"          # Lua package manager (needed for nvim plugins)
     )
@@ -385,24 +340,24 @@ elif command_exists apt; then
     else
         log "✓ Deno already installed"
     fi
-    
+
     # Generate Deno completions if Deno is available
     if command_exists deno || [[ -f "$HOME/.deno/bin/deno" ]]; then
         log "→ Setting up Deno completions..."
         if [[ $DRY_RUN == "0" ]]; then
             # Ensure deno is in PATH
             [[ -f "$HOME/.deno/bin/deno" ]] && export PATH="$HOME/.deno/bin:$PATH"
-            
+
             # Create completions directory
             mkdir -p "$HOME/.local/share/bash-completion/completions"
-            
+
             # Generate bash completions
             if deno completions bash > "$HOME/.local/share/bash-completion/completions/deno.bash" 2>/dev/null; then
                 log "✓ Deno bash completions generated"
             else
                 log "⚠ Failed to generate Deno bash completions"
             fi
-            
+
             # Generate zsh completions
             mkdir -p "$HOME/.local/share/zsh/site-functions"
             if deno completions zsh > "$HOME/.local/share/zsh/site-functions/_deno" 2>/dev/null; then
@@ -410,7 +365,7 @@ elif command_exists apt; then
             else
                 log "⚠ Failed to generate Deno zsh completions"
             fi
-            
+
             # Generate fish completions
             if command_exists fish; then
                 mkdir -p "$HOME/.config/fish/completions"
@@ -425,12 +380,7 @@ elif command_exists apt; then
         fi
     fi
 
-    # Refresh font cache for Ubuntu/Debian
-    log "→ Refreshing font cache..."
-    if [[ $DRY_RUN == "0" ]]; then
-        fc-cache -fv &> /dev/null || log "⚠ Failed to refresh font cache"
-    fi
-    log "✓ Font cache refreshed"
+
 
 else
     log "⚠ Unknown package manager. Please install packages manually:"
@@ -452,7 +402,7 @@ EOF
         else
             log "✓ Cargo environment file already exists"
         fi
-        
+
         # Add cargo bin to current PATH if not already there
         if [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
             export PATH="$HOME/.cargo/bin:$PATH"
@@ -468,17 +418,17 @@ fi
 # Try to reload user session to pick up group changes
 if [[ $DRY_RUN == "0" ]]; then
     log "→ Attempting to reload user session for group changes..."
-    
+
     # Method 1: Restart systemd user session
     systemctl --user daemon-reexec 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
-    
+
     # Method 2: For Flatpak issues, restart flatpak system helper
     if systemctl is-active --quiet flatpak-system-helper 2>/dev/null; then
         log "→ Restarting flatpak-system-helper service..."
         sudo systemctl restart flatpak-system-helper 2>/dev/null || true
     fi
-    
+
     log "→ Session reload attempted. Some changes may require logout/login."
 else
     log "Would attempt to reload user session"

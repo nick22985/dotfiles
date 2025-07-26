@@ -31,3 +31,12 @@
 [submodule "env/.config/tmux/plugins/catppuccin"]
 	path = env/.config/tmux/plugins/catppuccin
 	url = git@github.com:catppuccin/tmux.git
+[submodule "env/.oh-my-zsh/custom/plugins/zsh-autosuggestions"]
+	path = env/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+	url = git@github.com:zsh-users/zsh-autosuggestions.git
+[submodule "env/.oh-my-zsh/custom/plugins/fast-syntax-highlighting"]
+	path = env/.oh-my-zsh/custom/plugins/fast-syntax-highlighting
+	url = git@github.com:zdharma-continuum/fast-syntax-highlighting.git
+[submodule "env/.oh-my-zsh/custom/plugins/zsh-autocomplete"]
+	path = env/.oh-my-zsh/custom/plugins/zsh-autocomplete
+	url = git@github.com:marlonrichert/zsh-autocomplete.git

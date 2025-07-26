@@ -19,6 +19,7 @@ if command_exists pacman; then
         "hyprpaper"
         "hypridle"
         "hyprlock"
+				"xdg-desktop-portal-gtk"
         "xdg-desktop-portal-hyprland"
         "waybar"
         "rofi-wayland"
@@ -26,6 +27,17 @@ if command_exists pacman; then
         "grim"
         "slurp"
         "wl-clipboard"
+        "xorg-xhost"
+        "zenity"            # GUI dialogs (for waybar-hotspot)
+        "libnotify"         # Desktop notifications (for waybar-hotspot)
+				"hyprpolkitagent"
+				# dark theme support
+				"adw-gtk-theme"
+				"qt5ct"
+				"qt6ct"
+				"kvantum"
+				"kvantum"
+				"breeze-icons"
     )
 
     packages_to_install=()

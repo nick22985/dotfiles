@@ -34,6 +34,12 @@ if command_exists pacman; then
         "qt5-wayland"
         "qt6-wayland"
         "xorg-xwayland"
+				"adw-gtk-theme"
+				"qt5ct"
+				"qt6ct"
+				"kvantum"
+				"breeze-icons"
+				"socat"
     )
 
     packages_to_install=()
@@ -61,6 +67,7 @@ if command_exists pacman; then
             "grimblast-git"
             "swaync"
             "wofi"
+            "qr"                    # QR code generator (for waybar-hotspot)
         )
 
         aur_packages_to_install=()
@@ -82,6 +89,42 @@ if command_exists pacman; then
         fi
     else
         log "⚠ paru not available, skipping AUR Hyprland packages"
+    fi
+
+    # Install waybar-hotspot from GitHub
+    log "→ Installing waybar-hotspot..."
+    waybar_hotspot_dir="/tmp/waybar-hotspot"
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if ! command_exists waybar-hotspot; then
+            # Clone the repository
+            if [[ -d "$waybar_hotspot_dir" ]]; then
+                rm -rf "$waybar_hotspot_dir"
+            fi
+
+            if git clone https://github.com/ashish-kus/waybar-hotspot.git "$waybar_hotspot_dir"; then
+                log "✓ waybar-hotspot repository cloned"
+
+                # Install using make
+                (
+                    cd "$waybar_hotspot_dir"
+                    if sudo make install; then
+                        log "✓ waybar-hotspot installed successfully"
+                    else
+                        log "⚠ Failed to install waybar-hotspot"
+                    fi
+                ) || log "⚠ Failed to build waybar-hotspot"
+
+                # Clean up
+                rm -rf "$waybar_hotspot_dir"
+            else
+                log "⚠ Failed to clone waybar-hotspot repository"
+            fi
+        else
+            log "✓ waybar-hotspot already installed"
+        fi
+    else
+        log "Would clone and install waybar-hotspot from GitHub"
     fi
 
 elif command_exists apt; then

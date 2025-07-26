@@ -58,7 +58,7 @@ for script in $runs_dir; do
     executed_count=$((executed_count + 1))
 
     if [[ $DRY_RUN == "0" ]]; then
-        if [[ "$script_name" =~ ^(01-git|02-packages|05-hyprland-packages|10-flatpak|11-snap)$ ]]; then
+        if [[ "$script_name" =~ ^(01-git|02-fonts|05-packages|08-hyprland-packages|13-flatpak|14-snap)$ ]]; then
             sudo -v 2>/dev/null || true
         fi
 

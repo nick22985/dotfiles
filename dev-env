@@ -15,50 +15,105 @@ fi
 
 parse_args "$@"
 
-update_files() {
+# Directories that can be completely replaced (whitelist)
+# These directories will be completely removed and replaced with new versions
+# Use full paths relative to the target directory (e.g., ".config/nvim", ".local/bin/somedir")
+REPLACEABLE_DIRS=(
+    ".config/nvim"
+    ".config/tmux"
+    ".config/entr"
+    ".config/treesitterCustom"
+    ".config/docker-compose"
+    ".config/alacritty"
+    ".config/kitty"
+    ".config/rofi"
+    ".config/waybar"
+    ".config/hypr"
+    ".config/swaync"
+    ".config/wofi"
+    ".config/fish"
+    ".config/networkmanager-dmenu"
+    ".config/activitywatch"
+    ".config/ghostty"
+    ".config/.nickInstall"
+    ".oh-my-zsh/custom/plugins"
+    # Add more directories here as needed
+)
+
+# Check if a directory path is in the replaceable whitelist
+is_replaceable_dir() {
+    local source_dir="$1"
+    local target_dir="$2"
+    local item_name="$3"
+
+    # Build the relative path from HOME
+    local relative_path=""
+    if [[ "$target_dir" == "$HOME" ]]; then
+        relative_path="$item_name"
+    else
+        # Extract relative path from HOME
+        relative_path="${target_dir#$HOME/}/$item_name"
+    fi
+
+    for replaceable in "${REPLACEABLE_DIRS[@]}"; do
+        if [[ "$relative_path" == "$replaceable" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+# Recursively sync directory contents without removing the parent
+sync_directory_contents() {
     local source_dir="$1"
     local target_dir="$2"
 
     if [[ ! -d "$source_dir" ]]; then
-        log "⚠ Source directory $source_dir does not exist, skipping..."
         return
     fi
 
-    log "copying over files from: $source_dir"
-    pushd "$source_dir" &> /dev/null
-    (
-        configs=$(find . -mindepth 1 -maxdepth 1)
-        for c in $configs; do
-            item_name=${c#./}
-            target_path=${target_dir%/}/${item_name}
+    log "    syncing contents of directory: $source_dir -> $target_dir"
 
-            if [[ -d "$c" ]]; then
-                log "    removing directory: rm -rf $target_path"
+    # Create target directory if it doesn't exist
+    if [[ $DRY_RUN == "0" ]]; then
+        mkdir -p "$target_dir"
+    fi
+
+    pushd "$source_dir" &> /dev/null
+    local items=$(find . -mindepth 1 -maxdepth 1)
+    for item in $items; do
+        local item_name=${item#./}
+        local source_path="$source_dir/$item_name"
+        local target_path="$target_dir/$item_name"
+
+        if [[ -d "$item" ]]; then
+            # Check if this subdirectory should be completely replaced
+            if is_replaceable_dir "$source_dir" "$target_dir" "$item_name"; then
+                # For whitelisted directories, do full replacement
+                log "      removing replaceable subdirectory: rm -rf $target_path"
                 if [[ $DRY_RUN == "0" ]]; then
                     rm -rf "$target_path"
                 fi
 
-                log "    copying directory: cp -r $c $target_dir"
+                log "      copying directory: cp -r $item $target_dir"
                 if [[ $DRY_RUN == "0" ]]; then
                     mkdir -p "$target_dir"
-                    cp -r "./$c" "$target_dir"
+                    cp -r "./$item" "$target_dir"
                 fi
-            elif [[ -f "$c" ]]; then
-                log "    removing file: rm -f $target_path"
-                if [[ $DRY_RUN == "0" ]]; then
-                    rm -f "$target_path"
-                fi
-
-                log "    copying file: cp $c $target_dir"
-                if [[ $DRY_RUN == "0" ]]; then
-                    mkdir -p "$target_dir"
-                    cp "./$c" "$target_dir"
-                fi
+            else
+                # Recursively sync subdirectories
+                sync_directory_contents "$source_path" "$target_path"
             fi
-        done
-    )
+        elif [[ -f "$item" ]]; then
+            # Copy individual files
+            log "      copying file: $item_name"
+            if [[ $DRY_RUN == "0" ]]; then
+                cp "$source_path" "$target_path"
+            fi
+        fi
+    done
     popd &> /dev/null
 }
+
 
 copy() {
     local source="$1"
@@ -87,27 +142,65 @@ copy() {
 
 log "env: $script_dir"
 
-update_files "$env_dir/.config" "$XDG_CONFIG_HOME"
-update_files "$env_dir/.local" "$HOME/.local"
+# Process all items in env directory recursively
+process_env_directory() {
+    local source_base="$1"  # e.g., /path/to/dotfiles/env
+    local target_base="$2"  # e.g., /home/user
 
-dotfiles=(".bashrc" ".zshrc" ".gitconfig" ".wezterm.lua")
-for dotfile in "${dotfiles[@]}"; do
-    if [[ -f "$env_dir/$dotfile" ]]; then
-        copy "$env_dir/$dotfile" "$HOME/$dotfile"
-    fi
-done
-
-if [[ -d "$env_dir/.gnupg" ]]; then
-    log "removing: $HOME/.gnupg"
-    if [[ $DRY_RUN == "0" ]]; then
-        rm -rf "$HOME/.gnupg"
+    if [[ ! -d "$source_base" ]]; then
+        log "⚠ Source directory $source_base does not exist, skipping..."
+        return
     fi
 
-    log "copying: $env_dir/.gnupg to $HOME/.gnupg"
+    log "processing env directory: $source_base -> $target_base"
+
+    pushd "$source_base" &> /dev/null
+    local items=$(find . -mindepth 1 -maxdepth 1)
+
+    for item in $items; do
+        local item_name=${item#./}
+        local source_path="$source_base/$item_name"
+        local target_path="$target_base/$item_name"
+
+        if [[ -d "$item" ]]; then
+            # Check if this directory path is replaceable
+            if is_replaceable_dir "$source_base" "$target_base" "$item_name"; then
+                # For whitelisted directories, do full replacement
+                log "    removing replaceable directory: rm -rf $target_path"
+                if [[ $DRY_RUN == "0" ]]; then
+                    rm -rf "$target_path"
+                fi
+
+                log "    copying directory: cp -r $item $target_base"
+                if [[ $DRY_RUN == "0" ]]; then
+                    mkdir -p "$target_base"
+                    cp -r "./$item" "$target_base"
+                fi
+            else
+                # For other directories, sync contents recursively
+                sync_directory_contents "$source_path" "$target_path"
+            fi
+        elif [[ -f "$item" ]]; then
+            # Handle individual files
+            log "    copying file: $item_name"
+            copy "$source_path" "$target_path"
+        fi
+    done
+
+    popd &> /dev/null
+}
+
+# Process the entire env directory
+process_env_directory "$env_dir" "$HOME"
+
+# Special handling for .gnupg permissions
+if [[ -d "$HOME/.gnupg" ]]; then
+    log "Setting .gnupg permissions..."
     if [[ $DRY_RUN == "0" ]]; then
-        cp -r "$env_dir/.gnupg" "$HOME/.gnupg"
         chmod 700 "$HOME/.gnupg"
         find "$HOME/.gnupg" -type f -exec chmod 600 {} \;
+    else
+        log "Would set .gnupg permissions"
     fi
 fi
 
@@ -119,6 +212,10 @@ if [[ -d "$HOME/.local/bin" ]]; then
         log "Would make scripts in $HOME/.local/bin executable"
     fi
 fi
+
+# Reload Hyprland configuration if running
+log ""
+reload_hyprland
 
 log ""
 if [[ $DRY_RUN == "0" ]]; then

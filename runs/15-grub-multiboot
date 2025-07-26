@@ -105,7 +105,7 @@ install_grub_themes() {
             chmod +x install.sh
 
             log "→ Installing $theme_name theme with 4K resolution..."
-            if sudo ./install.sh -t "$theme_name" -s 4k; then
+            if sudo ./install.sh -b -t "$theme_name" -s ultrawide2k; then
                 log "✓ $theme_name theme installed successfully with 4K resolution"
             else
                 log "⚠ Failed to install $theme_name theme"

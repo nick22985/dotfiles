@@ -72,6 +72,10 @@ if command_exists pacman; then
 				"bluez"
 				"bluez-utils"
 				"prettier"
+				"steam-native-runtime"
+				"kwallet"
+				"kwalletmanager"
+				"kwallet-pam"
     )
 
     # Check which packages need to be installed

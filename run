@@ -40,6 +40,18 @@ done
 
 log "RUN: grep: $grep_pattern -- dry: $DRY_RUN"
 
+# Load ignore list
+ignore_file="$script_dir/.ignore"
+ignored_scripts=()
+if [[ -f "$ignore_file" ]]; then
+    while IFS= read -r line; do
+        # Skip empty lines and comments
+        if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
+            ignored_scripts+=("$line")
+        fi
+    done < "$ignore_file"
+fi
+
 runs_dir=$(find "$script_dir/runs" -mindepth 1 -maxdepth 1 -executable | sort)
 
 script_count=0
@@ -53,6 +65,14 @@ for script in $runs_dir; do
         log "grep \"$grep_pattern\" filtered out $script"
         continue
     fi
+
+    # Check if script is in ignore list
+    for ignored in "${ignored_scripts[@]}"; do
+        if [[ "$script_name" == "$ignored" ]]; then
+            log "ignored script: $script (found in .ignore file)"
+            continue 2
+        fi
+    done
 
     log "running script: $script"
     executed_count=$((executed_count + 1))

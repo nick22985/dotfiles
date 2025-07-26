@@ -1,0 +1,9 @@
+# Dotfiles ignore file
+# Add script names (without path) to ignore them during installation
+# Examples:
+# 08-hyprland-packages
+# 16-kde-plasma
+
+# Uncomment the lines below to ignore specific components:
+# 08-hyprland-packages
+# 16-kde-plasma

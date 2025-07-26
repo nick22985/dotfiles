@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing KDE Plasma desktop environment..."
+
+if command_exists pacman; then
+    log "→ Detected Arch Linux (pacman)"
+
+    kde_packages=(
+        "plasma"
+        "sddm"
+    )
+
+    packages_to_install=()
+    for package in "${kde_packages[@]}"; do
+        if ! is_installed_pacman "$package"; then
+            packages_to_install+=("$package")
+        else
+            log "✓ $package already installed"
+        fi
+    done
+
+    if [ ${#packages_to_install[@]} -gt 0 ]; then
+        log "→ Installing KDE Plasma packages: ${packages_to_install[*]}"
+        if [[ $DRY_RUN == "0" ]]; then
+            ensure_sudo
+            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log "⚠ Some packages may have failed to install"
+        fi
+    else
+        log "✓ All KDE Plasma packages already installed"
+    fi
+
+else
+    log "⚠ Only Arch Linux is supported for KDE Plasma installation"
+fi
+
+if [[ $DRY_RUN == "0" ]]; then
+    log "→ Configuring SDDM display manager..."
+
+    if systemctl is-enabled sddm &>/dev/null; then
+        log "✓ SDDM already enabled"
+    else
+        sudo systemctl enable sddm 2>/dev/null && log "✓ SDDM enabled" || log "⚠ Failed to enable SDDM"
+    fi
+
+    log "→ Setting up Plasma session..."
+    # Ensure plasma session is available
+    if [[ -f /usr/share/xsessions/plasma.desktop ]]; then
+        log "✓ Plasma X11 session available"
+    fi
+
+    if [[ -f /usr/share/wayland-sessions/plasmawayland.desktop ]]; then
+        log "✓ Plasma Wayland session available"
+    fi
+else
+    log "Would enable SDDM and configure Plasma sessions"
+fi
+
+log "✓ KDE Plasma installation complete"
+log "→ You can switch to KDE Plasma by logging out and selecting it from the session menu"

@@ -48,7 +48,6 @@ flatpak_packages=(
     "org.blender.Blender"
     "org.kde.kdenlive"
 
-    "com.valvesoftware.Steam"
     "net.lutris.Lutris"
 		"com.vysp3r.ProtonPlus"
 
@@ -59,7 +58,7 @@ flatpak_packages=(
 		"app.zen_browser.zen"
 		"io.beekeeperstudio.Studio"
 		"org.dbgate.DbGate"
-		"flathub md.obsidian.Obsidian"
+		"md.obsidian.Obsidian"
 )
 
 flatpak_to_install=()

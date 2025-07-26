@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# List all available scripts
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "Available scripts in $script_dir:"
+echo
+
+for script in "$script_dir"/*; do
+    if [[ -f "$script" && -x "$script" ]]; then
+        script_name=$(basename "$script")
+        if [[ "$script_name" != "list" ]]; then
+            echo "  $script_name"
+            
+            # Try to extract description from script header
+            description=$(head -10 "$script" | grep -E "^#.*[Uu]pdate|^#.*[Cc]lean|^#.*[Ss]cript" | head -1 | sed 's/^# *//')
+            if [[ -n "$description" ]]; then
+                echo "    $description"
+            fi
+            echo
+        fi
+    fi
+done
+
+echo "Usage: ./scripts/<script-name> [--dry]"

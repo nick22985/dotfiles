@@ -17,6 +17,7 @@ NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
 if [[ -d "$NVM_DIR" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
     log "✓ NVM already installed at $NVM_DIR"
+		# need to create .nvm file
 
     source "$NVM_DIR/nvm.sh"
     current_version=$(nvm --version 2>/dev/null || echo "unknown")

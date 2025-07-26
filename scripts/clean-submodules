@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+# Clean submodules - Remove and reinitialize all git submodules
+
+set -e
+
+script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
+
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+# Source shared utilities
+source "$DOTFILES_DIR/lib/utils.sh"
+
+# Parse arguments
+parse_args "$@"
+
+log "Cleaning git submodules..."
+
+if [[ ! -f "$script_dir/.gitmodules" ]]; then
+    echo "❌ No .gitmodules file found"
+    exit 1
+fi
+
+while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*path[[:space:]]*=[[:space:]]*(.+)$ ]]; then
+        submodule_path="${BASH_REMATCH[1]}"
+        full_path="$script_dir/$submodule_path"
+
+        if [[ -d "$full_path" ]]; then
+            log "→ Removing: $submodule_path"
+            if [[ $DRY_RUN == "0" ]]; then
+                rm -rf "$full_path"
+            fi
+        else
+            log "✓ Already clean: $submodule_path"
+        fi
+    fi
+done < "$script_dir/.gitmodules"
+
+if [[ $DRY_RUN == "0" ]]; then
+    log "✓ All submodule directories removed"
+else
+    log "Dry run complete. Run without --dry to apply changes."
+fi

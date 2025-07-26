@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Clean dotfiles - Remove all symlinked dotfiles from home directory
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_dir="$script_dir/env"
 
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"

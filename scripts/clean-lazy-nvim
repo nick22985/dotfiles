@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Clean Lazy.nvim - Remove Lazy.nvim cache and plugin data
+
 set -e
 
 RED='\033[0;31m'

@@ -40,6 +40,26 @@ done
 
 log "RUN: grep: $grep_pattern -- dry: $DRY_RUN"
 
+# Define execution order programmatically
+execution_order=(
+    "git"
+    "fonts"
+    "oh-my-zsh"
+    "dotfiles"
+    "packages"
+    "shell"
+    "hyprland-packages"
+    "tmux"
+    "hypr"
+    "node"
+    "ssh"
+    "flatpak"
+    "snap"
+    "grub-multiboot"
+    "kde-plasma"
+    "defaults"
+)
+
 # Load ignore list
 ignore_file="$script_dir/.ignore"
 ignored_scripts=()
@@ -52,12 +72,59 @@ if [[ -f "$ignore_file" ]]; then
     done < "$ignore_file"
 fi
 
-runs_dir=$(find "$script_dir/runs" -mindepth 1 -maxdepth 1 -executable | sort)
+# Build ordered script list
+ordered_scripts=()
+for script_name in "${execution_order[@]}"; do
+    # Look for script with any numeric prefix or no prefix
+    script_path=""
+    for candidate in "$script_dir/runs/"*"$script_name"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+            script_path="$candidate"
+            break
+        fi
+    done
+    
+    if [[ -n "$script_path" ]]; then
+        ordered_scripts+=("$script_path")
+    fi
+done
+
+# Add any remaining scripts not in the execution order (for backwards compatibility)
+for script in "$script_dir/runs/"*; do
+    if [[ -f "$script" && -x "$script" ]]; then
+        script_basename=$(basename "$script")
+        # Remove numeric prefix for comparison
+        clean_name=$(echo "$script_basename" | sed 's/^[0-9]*-//')
+        
+        # Check if this script is already in our ordered list
+        found=false
+        for ordered_script in "${ordered_scripts[@]}"; do
+            if [[ "$script" == "$ordered_script" ]]; then
+                found=true
+                break
+            fi
+        done
+        
+        # If not found and not in execution order, add it to the end
+        if [[ "$found" == false ]]; then
+            in_order=false
+            for order_name in "${execution_order[@]}"; do
+                if [[ "$clean_name" == "$order_name" ]]; then
+                    in_order=true
+                    break
+                fi
+            done
+            if [[ "$in_order" == false ]]; then
+                ordered_scripts+=("$script")
+            fi
+        fi
+    fi
+done
 
 script_count=0
 executed_count=0
 
-for script in $runs_dir; do
+for script in "${ordered_scripts[@]}"; do
     script_name=$(basename "$script")
     script_count=$((script_count + 1))
 
@@ -78,7 +145,7 @@ for script in $runs_dir; do
     executed_count=$((executed_count + 1))
 
     if [[ $DRY_RUN == "0" ]]; then
-        if [[ "$script_name" =~ ^(01-git|02-fonts|05-packages|08-hyprland-packages|13-flatpak|14-snap)$ ]]; then
+        if [[ "$script_name" =~ (git|fonts|packages|hyprland-packages|flatpak|snap) ]]; then
             sudo -v 2>/dev/null || true
         fi
 

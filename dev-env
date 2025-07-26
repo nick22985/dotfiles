@@ -193,6 +193,79 @@ process_env_directory() {
 # Process the entire env directory
 process_env_directory "$env_dir" "$HOME"
 
+# Process system files that require sudo
+system_dir="$script_dir/system"
+if [[ -d "$system_dir" ]]; then
+    log "Processing system files (requires sudo)..."
+
+    # Function to copy system files with sudo (mirrors the copy() function)
+    copy_system_file() {
+        local source="$1"
+        local target="$2"
+
+        if [[ ! -f "$source" ]]; then
+            log "⚠ Source file $source does not exist, skipping..."
+            return
+        fi
+
+        local target_dir=$(dirname "$target")
+        if [[ $DRY_RUN == "0" ]]; then
+            sudo mkdir -p "$target_dir"
+        fi
+
+        log "removing system file: $target"
+        if [[ $DRY_RUN == "0" ]]; then
+            sudo rm -f "$target"
+        fi
+
+        log "copying system file: $source to $target"
+        if [[ $DRY_RUN == "0" ]]; then
+            sudo cp "$source" "$target"
+            
+            # Set appropriate permissions based on file location
+            if [[ "$target" == /etc/pam.d/* ]]; then
+                sudo chmod 644 "$target"
+                sudo chown root:root "$target"
+            elif [[ "$target" == /etc/systemd/system/* ]]; then
+                sudo chmod 644 "$target"
+                sudo chown root:root "$target"
+            elif [[ "$target" == /etc/sudoers.d/* ]]; then
+                sudo chmod 440 "$target"
+                sudo chown root:root "$target"
+            else
+                # Default permissions for /etc files
+                sudo chmod 644 "$target"
+                sudo chown root:root "$target"
+            fi
+        fi
+    }
+
+    # Process system directory recursively
+    process_system_directory() {
+        local source_base="$1"  # e.g., /path/to/dotfiles/system
+        local target_base="$2"  # e.g., /
+
+        if [[ ! -d "$source_base" ]]; then
+            return
+        fi
+
+        pushd "$source_base" &> /dev/null
+        local items=$(find . -type f)
+
+        for item in $items; do
+            local item_path=${item#./}
+            local source_path="$source_base/$item_path"
+            local target_path="$target_base$item_path"
+
+            copy_system_file "$source_path" "$target_path"
+        done
+
+        popd &> /dev/null
+    }
+
+    process_system_directory "$system_dir" "/"
+fi
+
 # Special handling for .gnupg permissions
 if [[ -d "$HOME/.gnupg" ]]; then
     log "Setting .gnupg permissions..."

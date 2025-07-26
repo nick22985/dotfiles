@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+# Set default applications (idempotent)
+set -e
+
+# Set DOTFILES_DIR if not already set
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+# Source shared utilities
+source "$DOTFILES_DIR/lib/utils.sh"
+
+# Parse arguments
+parse_args "$@"
+
+log "Setting default applications..."
+
+# Set default web browser
+log "→ Setting default web browser..."
+if [[ $DRY_RUN == "0" ]]; then
+    if command_exists brave || command_exists brave-browser; then
+        xdg-settings set default-web-browser com.brave.Browser.desktop 2>/dev/null && log "✓ Set Brave as default web browser" || log "⚠ Failed to set default web browser"
+    else
+        log "→ Brave browser not found, skipping default browser setup"
+    fi
+else
+    log "Would set Brave as default web browser"
+fi
+
+log "✓ Default applications setup complete"

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
@@ -11,12 +10,15 @@ parse_args "$@"
 
 log "Setting up git, pulling latest changes, and updating submodules..."
 
+# Set context for error tracking
+set_context "Git Setup"
+
 if ! command_exists git; then
-    log "→ Git not found, installing git first..."
+    log_info "Git not found, installing git first..."
     if command_exists pacman; then
         if [[ $DRY_RUN == "0" ]]; then
             sudo pacman -S --needed --noconfirm git || {
-                log "❌ Failed to install git"
+                log_error "Failed to install git"
                 exit 1
             }
         else
@@ -25,7 +27,7 @@ if ! command_exists git; then
     elif command_exists apt; then
         if [[ $DRY_RUN == "0" ]]; then
             sudo apt update -qq && sudo apt install -y git || {
-                log "❌ Failed to install git"
+                log_error "Failed to install git"
                 exit 1
             }
         else
@@ -63,13 +65,13 @@ fi
 log "→ Initializing and updating submodules..."
 update_submodules "$DOTFILES_DIR"
 
-log "→ Checking SSH keys..."
+log_info "Checking SSH keys..."
 check_ssh_keys
 
-log "→ Checking GPG keys..."
+log_info "Checking GPG keys..."
 check_gpg_keys
 
-log "→ Setting up SSH keys from GitHub..."
+log_info "Setting up SSH keys from GitHub..."
 setup_github_ssh_keys
 
-log "✓ Git setup complete"
+log_success "Git setup complete"

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
@@ -9,42 +8,41 @@ source "$DOTFILES_DIR/lib/utils.sh"
 
 parse_args "$@"
 
+# Set context for error tracking
+set_context "Tmux Configuration"
+
 log "Setting up Tmux..."
 
 if ! command_exists tmux; then
-    log "⚠ Tmux is not installed. Run the 'packages' script first."
+    log_warn "Tmux is not installed. Run the 'packages' script first."
     exit 1
 fi
 
-tpm_dir="$HOME/.tmux/plugins/tpm"
-if [[ ! -d "$tpm_dir" ]]; then
-    log "→ Installing TPM (Tmux Plugin Manager)..."
-    if [[ $DRY_RUN == "0" ]]; then
-        git clone https://github.com/tmux-plugins/tpm "$tpm_dir"
-    fi
-    log "✓ TPM installed"
-else
-    log "✓ TPM already installed"
+# TPM and plugins are managed as submodules in the dotfiles repo
+tpm_dir="$HOME/.config/tmux/plugins/tpm"
 
-    log "→ Updating TPM..."
-    if [[ $DRY_RUN == "0" ]]; then
-        (cd "$tpm_dir" && git pull --quiet) || log "→ TPM update skipped (no internet or git issues)"
-    fi
+# Check if TPM is available (should be deployed by the dotfiles script)
+if [[ -d "$tpm_dir" ]]; then
+    log_success "TPM found at $tpm_dir"
+else
+    log_warn "TPM not found at $tpm_dir"
+    log_info "TPM and plugins will be available after running the 'dotfiles' script"
+    log_info "Tmux plugins are managed as submodules in the dotfiles repository"
 fi
 
 if [[ -d "$HOME/.local/bin" ]]; then
-    log "→ Making tmux scripts executable..."
+    log_info "Making tmux scripts executable..."
     tmux_scripts=$(find "$HOME/.local/bin" -name "tmux*" -type f 2>/dev/null || true)
     if [[ -n "$tmux_scripts" ]]; then
         if [[ $DRY_RUN == "0" ]]; then
             echo "$tmux_scripts" | xargs chmod +x
         fi
-        log "✓ Tmux scripts are executable"
+        log_success "Tmux scripts are executable"
     else
-        log "→ No tmux scripts found in ~/.local/bin (will be available after running 'dotfiles')"
+        log_info "No tmux scripts found in ~/.local/bin (will be available after running 'dotfiles')"
     fi
 else
-    log "→ ~/.local/bin not found (will be available after running 'dotfiles')"
+    log_info "~/.local/bin not found (will be available after running 'dotfiles')"
 fi
 
 tmux_config_found=false
@@ -57,30 +55,42 @@ elif [[ -f "$HOME/.tmux.conf" ]]; then
 fi
 
 if [[ $tmux_config_found == true ]]; then
-    log "✓ Tmux configuration found at $tmux_config_path"
+    log_success "Tmux configuration found at $tmux_config_path"
 
     if [[ -d "$tpm_dir" ]]; then
-        log "→ Installing/updating tmux plugins automatically..."
+        log_info "TPM and plugins are available, checking plugin status..."
+        
+        # Since plugins are submodules, they should already be present
+        # We can still run TPM scripts to ensure they're properly set up
         if [[ $DRY_RUN == "0" ]]; then
             if [[ -f "$tpm_dir/scripts/install_plugins.sh" ]]; then
-                log "→ Running TPM plugin installation..."
-                bash "$tpm_dir/scripts/install_plugins.sh" 2>/dev/null && log "✓ Tmux plugins installed/updated" || log "⚠ Some plugins may have failed to install"
+                log_info "Running TPM plugin installation (ensuring plugins are properly linked)..."
+                install_output=""
+                if install_output=$(bash "$tpm_dir/scripts/install_plugins.sh" 2>&1); then
+                    log_success "Tmux plugins verified/installed"
+                else
+                    # Since plugins are submodules, installation "failures" might be normal
+                    if echo "$install_output" | grep -q "Already installed\|already exists\|up to date"; then
+                        log_success "Tmux plugins already properly installed"
+                    elif echo "$install_output" | grep -q "git clone\|curl\|wget\|network\|connection"; then
+                        log_warn "Plugin verification failed - check internet connection"
+                        log_warn "Plugin error: $(echo "$install_output" | head -2 | tr '\n' '; ')"
+                    else
+                        log_info "Plugin installation output: $(echo "$install_output" | head -2 | tr '\n' '; ')"
+                        log_info "This is normal when plugins are managed as submodules"
+                    fi
+                fi
             else
-                log "⚠ TPM install script not found"
-            fi
-
-            if [[ -f "$tpm_dir/scripts/update_plugin.sh" ]]; then
-                log "→ Updating all tmux plugins..."
-                bash "$tpm_dir/scripts/update_plugin.sh" all 2>/dev/null && log "✓ All tmux plugins updated" || log "⚠ Some plugins may have failed to update"
-            else
-                log "⚠ TPM update script not found"
+                log_warn "TPM install script not found at $tpm_dir/scripts/install_plugins.sh"
             fi
         else
-            log "Would automatically install and update tmux plugins"
+            log "Would verify tmux plugin installation"
         fi
+    else
+        log_info "TPM not available yet - plugins will be available after 'dotfiles' script runs"
     fi
 else
-    log "→ Tmux configuration not found (will be available after running 'dotfiles')"
+    log_info "Tmux configuration not found (will be available after running 'dotfiles')"
 fi
 
-log "✓ Tmux setup complete"
+log_success "Tmux setup complete"

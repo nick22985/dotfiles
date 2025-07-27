@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 source "$DOTFILES_DIR/lib/utils.sh"
 
@@ -8,8 +7,11 @@ parse_args "$@"
 
 log "Installing Flatpak applications..."
 
+# Set context for error tracking
+set_context "Flatpak Applications"
+
 if ! command_exists flatpak; then
-    log "⚠ Flatpak not available. Install it first:"
+    log_error "Flatpak not available. Install it first:"
     if command_exists pacman; then
         log "  sudo pacman -S flatpak"
     elif command_exists apt; then
@@ -61,46 +63,26 @@ flatpak_packages=(
 		"md.obsidian.Obsidian"
 )
 
-flatpak_to_install=()
-for package in "${flatpak_packages[@]}"; do
-    if ! (flatpak list --app --system 2>/dev/null | grep -q "$package" || flatpak list --app --user 2>/dev/null | grep -q "$package"); then
-        flatpak_to_install+=("$package")
+# Configure Flatpak permissions and repository
+if [[ $DRY_RUN == "0" ]]; then
+    log "→ Configuring Flatpak permissions..."
+    if ! getent group flatpak >/dev/null 2>&1; then
+        sudo groupadd flatpak 2>/dev/null && log "✓ Created flatpak group" || log "⚠ Failed to create flatpak group"
+    fi
+
+    if ! groups "$USER" | grep -q flatpak; then
+        sudo usermod -aG flatpak "$USER" && log "✓ Added $USER to flatpak group" || log "⚠ Failed to add user to flatpak group"
+        log "→ Note: Group membership will take effect after logout/login"
     else
-        log "✓ $package (Flatpak) already installed"
+        log "✓ $USER already in flatpak group"
     fi
-done
 
-if [ ${#flatpak_to_install[@]} -gt 0 ]; then
-    log "→ Installing Flatpak packages: ${flatpak_to_install[*]}"
-    if [[ $DRY_RUN == "0" ]]; then
-        log "→ Configuring Flatpak permissions..."
-        if ! getent group flatpak >/dev/null 2>&1; then
-            sudo groupadd flatpak 2>/dev/null && log "✓ Created flatpak group" || log "⚠ Failed to create flatpak group"
-        fi
-
-        if ! groups "$USER" | grep -q flatpak; then
-            sudo usermod -aG flatpak "$USER" && log "✓ Added $USER to flatpak group" || log "⚠ Failed to add user to flatpak group"
-            log "→ Note: Group membership will take effect after logout/login"
-        else
-            log "✓ $USER already in flatpak group"
-        fi
-
-        log "→ Adding Flathub repository (user-level)..."
-        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo --user || log "⚠ Failed to add Flathub repository"
-
-        for package in "${flatpak_to_install[@]}"; do
-            log "→ Installing $package (user-level)..."
-            if flatpak install -y flathub "$package" --user; then
-                log "✓ Installed $package for user"
-            else
-                log "⚠ Failed to install $package (user-level)"
-                log "→ You may need to install this manually or check Flathub availability"
-            fi
-        done
-    fi
-else
-    log "✓ All Flatpak packages already installed"
+    log "→ Adding Flathub repository (user-level)..."
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo --user || log "⚠ Failed to add Flathub repository"
 fi
+
+# Install Flatpak packages using utility function
+install_packages_flatpak "${flatpak_packages[@]}"
 
 log "→ Configuring XDG_DATA_DIRS for Flatpak applications..."
 
@@ -137,4 +119,4 @@ else
     log "Would configure XDG_DATA_DIRS for Flatpak applications"
 fi
 
-log "✓ Flatpak setup complete"
+log_success "Flatpak setup complete"

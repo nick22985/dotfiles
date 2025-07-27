@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # Install fonts (idempotent)
-set -e
 
 # Set DOTFILES_DIR if not already set
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +16,7 @@ log "Installing fonts..."
 
 # Detect package manager and install fonts
 if command_exists pacman; then
-    log "→ Detected Arch Linux (pacman)"
+    log_info "Detected Arch Linux (pacman)"
 
     # Font packages for Arch (official repos)
     font_packages=(
@@ -39,17 +38,17 @@ if command_exists pacman; then
         if ! is_installed_pacman "$font"; then
             fonts_to_install+=("$font")
         else
-            log "✓ $font already installed"
+            log_success "$font already installed"
         fi
     done
 
     if [ ${#fonts_to_install[@]} -gt 0 ]; then
-        log "→ Installing fonts: ${fonts_to_install[*]}"
+        log_info "Installing fonts: ${fonts_to_install[*]}"
         if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm "${fonts_to_install[@]}" || log "⚠ Some fonts may have failed to install"
+            sudo pacman -S --needed --noconfirm "${fonts_to_install[@]}" || log_warn "Some fonts may have failed to install"
         fi
     else
-        log "✓ All official fonts already installed"
+        log_success "All official fonts already installed"
     fi
 
     # AUR font packages
@@ -61,42 +60,42 @@ if command_exists pacman; then
         if ! is_installed_pacman "$font"; then
             aur_fonts_to_install+=("$font")
         else
-            log "✓ $font (AUR) already installed"
+            log_success "$font (AUR) already installed"
         fi
     done
 
     if [ ${#aur_fonts_to_install[@]} -gt 0 ]; then
         # Check if paru is available
         if command_exists paru; then
-            log "→ Installing AUR fonts: ${aur_fonts_to_install[*]}"
+            log_info "Installing AUR fonts: ${aur_fonts_to_install[*]}"
             if [[ $DRY_RUN == "0" ]]; then
-                paru -S --needed --noconfirm "${aur_fonts_to_install[@]}" || log "⚠ Some AUR fonts may have failed to install"
+                paru -S --needed --noconfirm "${aur_fonts_to_install[@]}" || log_warn "Some AUR fonts may have failed to install"
             fi
         else
-            log "⚠ paru not found, skipping AUR fonts. Run packages script first to install paru."
+            log_warn "paru not found, skipping AUR fonts. Run packages script first to install paru."
         fi
     else
-        log "✓ All AUR fonts already installed"
+        log_success "All AUR fonts already installed"
     fi
 
     # Install Nerd Fonts from official repository
     install_nerd_fonts
 
     # Verify FontAwesome installation
-    log "→ Verifying FontAwesome installation..."
+    log_info "Verifying FontAwesome installation..."
     if [[ $DRY_RUN == "0" ]]; then
         if fc-list | grep -i "font awesome" &> /dev/null; then
-            log "✓ FontAwesome fonts detected:"
+            log_success "FontAwesome fonts detected:"
             fc-list | grep -i "font awesome" | head -3 | while read -r font; do
                 log "  - $(echo "$font" | cut -d: -f2 | xargs)"
             done
         else
-            log "⚠ FontAwesome fonts not detected in font cache"
+            log_warn "FontAwesome fonts not detected in font cache"
         fi
     fi
 
 elif command_exists apt; then
-    log "→ Detected Ubuntu/Debian (apt)"
+    log_info "Detected Ubuntu/Debian (apt)"
 
     # Font packages for Ubuntu/Debian
     font_packages=(
@@ -116,34 +115,34 @@ elif command_exists apt; then
         if ! is_installed_apt "$font"; then
             fonts_to_install+=("$font")
         else
-            log "✓ $font already installed"
+            log_success "$font already installed"
         fi
     done
 
     if [ ${#fonts_to_install[@]} -gt 0 ]; then
-        log "→ Updating package list..."
+        log_info "Updating package list..."
         if [[ $DRY_RUN == "0" ]]; then
             sudo apt update -qq
         fi
 
-        log "→ Installing fonts: ${fonts_to_install[*]}"
+        log_info "Installing fonts: ${fonts_to_install[*]}"
         if [[ $DRY_RUN == "0" ]]; then
-            sudo apt install -y "${fonts_to_install[@]}" || log "⚠ Some fonts may have failed to install"
+            sudo apt install -y "${fonts_to_install[@]}" || log_warn "Some fonts may have failed to install"
         fi
     else
-        log "✓ All fonts already installed"
+        log_success "All fonts already installed"
     fi
 
     # Refresh font cache for Ubuntu/Debian
-    log "→ Refreshing font cache..."
+    log_info "Refreshing font cache..."
     if [[ $DRY_RUN == "0" ]]; then
-        fc-cache -fv &> /dev/null || log "⚠ Failed to refresh font cache"
+        fc-cache -fv &> /dev/null || log_warn "Failed to refresh font cache"
     fi
-    log "✓ Font cache refreshed"
+    log_success "Font cache refreshed"
 
 else
-    log "⚠ Unknown package manager. Please install fonts manually:"
+    log_warn "Unknown package manager. Please install fonts manually:"
     log "  - fontconfig, font-awesome, fira-code, jetbrains-mono, noto fonts"
 fi
 
-log "✓ Font installation complete"
+log_success "Font installation complete"

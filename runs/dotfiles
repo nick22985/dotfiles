@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 source "$DOTFILES_DIR/lib/utils.sh"
 
@@ -14,4 +13,4 @@ else
     "$DOTFILES_DIR/dev-env"
 fi
 
-log "✓ Dotfiles deployed successfully"
+log_success "Dotfiles deployed successfully"

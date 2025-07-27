@@ -7,6 +7,12 @@ export DEV_ENV="$script_dir"
 
 source "$script_dir/lib/utils.sh"
 
+# Initialize error tracking for the main script
+init_error_tracking
+
+# Create Timeshift backup before making system changes
+create_dotfiles_backup "dotfiles-setup" "$@"
+
 keep_sudo_alive() {
     while true; do
         sudo -n true
@@ -29,12 +35,23 @@ fi
 grep_pattern=""
 
 while [[ $# -gt 0 ]]; do
-    if [[ "$1" == "--dry" ]]; then
-        DRY_RUN="1"
-        export DRY_RUN
-    else
-        grep_pattern="$1"
-    fi
+    case "$1" in
+        --dry)
+            DRY_RUN="1"
+            export DRY_RUN
+            ;;
+        --quiet|-q)
+            QUIET="1"
+            export QUIET
+            ;;
+        --auto-backup)
+            AUTO_BACKUP="1"
+            export AUTO_BACKUP
+            ;;
+        *)
+            grep_pattern="$1"
+            ;;
+    esac
     shift
 done
 
@@ -47,6 +64,7 @@ execution_order=(
     "oh-my-zsh"
     "dotfiles"
     "packages"
+    "java"
     "shell"
     "hyprland-packages"
     "tmux"
@@ -78,24 +96,19 @@ ordered_scripts=()
 for script_name in "${execution_order[@]}"; do
     # Look for script with any numeric prefix or no prefix
     script_path=""
-    for candidate in "$script_dir/runs/"*"$script_name"; do
-        if [[ -f "$candidate" && -x "$candidate" ]]; then
-            script_path="$candidate"
-            break
-        fi
-    done
+    if [[ -f "$script_dir/runs/$script_name" && -x "$script_dir/runs/$script_name" ]]; then
+        script_path="$script_dir/runs/$script_name"
+    fi
     
     if [[ -n "$script_path" ]]; then
         ordered_scripts+=("$script_path")
     fi
 done
 
-# Add any remaining scripts not in the execution order (for backwards compatibility)
+# Add any remaining scripts not in the execution order
 for script in "$script_dir/runs/"*; do
     if [[ -f "$script" && -x "$script" ]]; then
         script_basename=$(basename "$script")
-        # Remove numeric prefix for comparison
-        clean_name=$(echo "$script_basename" | sed 's/^[0-9]*-//')
         
         # Check if this script is already in our ordered list
         found=false
@@ -110,7 +123,7 @@ for script in "$script_dir/runs/"*; do
         if [[ "$found" == false ]]; then
             in_order=false
             for order_name in "${execution_order[@]}"; do
-                if [[ "$clean_name" == "$order_name" ]]; then
+                if [[ "$script_basename" == "$order_name" ]]; then
                     in_order=true
                     break
                 fi
@@ -129,7 +142,7 @@ for script in "${ordered_scripts[@]}"; do
     script_name=$(basename "$script")
     script_count=$((script_count + 1))
 
-    if [[ -n "$grep_pattern" ]] && ! echo "$script_name" | grep -q "$grep_pattern"; then
+    if [[ -n "$grep_pattern" ]] && [[ "$script_name" != "$grep_pattern" ]]; then
         log "grep \"$grep_pattern\" filtered out $script"
         continue
     fi
@@ -153,8 +166,9 @@ for script in "${ordered_scripts[@]}"; do
         if "$script"; then
             echo ""
         else
-            echo "❌ Script $script_name failed"
-            exit 1
+            log_error "Script $script_name failed"
+            echo ""
+            # Don't exit - continue with other scripts and show summary at end
         fi
     else
         "$script" --dry
@@ -168,3 +182,9 @@ else
     echo "✅ Executed $executed_count of $script_count scripts successfully"
     echo "🎉 Dotfiles setup complete! You can rerun this anytime to update."
 fi
+
+# Show summary of all errors and warnings
+show_summary "Dotfiles Setup"
+
+# Cleanup backup tracking only if this script created the backup
+cleanup_backup_tracking_if_owner "dotfiles-setup"

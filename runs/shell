@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
@@ -12,10 +11,10 @@ parse_args "$@"
 log "Setting up shell environment..."
 
 setup_zsh() {
-    log "→ Setting up zsh as default shell..."
+    log_info "Setting up zsh as default shell..."
 
     if ! command_exists zsh; then
-        log "⚠ Zsh is not installed. Run the 'packages' script first."
+        log_warn "Zsh is not installed. Run the 'packages' script first."
         return 1
     fi
 
@@ -23,57 +22,57 @@ setup_zsh() {
 
     current_shell=$(getent passwd "$USER" | cut -d: -f7)
     if [[ "$current_shell" != "$zsh_path" ]]; then
-        log "→ Current shell: $current_shell"
-        log "→ Changing default shell to zsh..."
+        log_info "Current shell: $current_shell"
+        log_info "Changing default shell to zsh..."
 
         if ! grep -q "^$zsh_path$" /etc/shells 2>/dev/null; then
-            log "→ Adding zsh to /etc/shells..."
+            log_info "Adding zsh to /etc/shells..."
             if [[ $DRY_RUN == "0" ]]; then
                 echo "$zsh_path" | sudo tee -a /etc/shells
             fi
         else
-            log "✓ Zsh already in /etc/shells"
+            log_success "Zsh already in /etc/shells"
         fi
 
-        log "→ Setting zsh as default shell..."
+        log_info "Setting zsh as default shell..."
         if [[ $DRY_RUN == "0" ]]; then
             chsh -s "$zsh_path"
         fi
-        log "✓ Default shell changed to zsh (restart terminal to take effect)"
+        log_success "Default shell changed to zsh (restart terminal to take effect)"
     else
-        log "✓ Zsh is already the default shell"
+        log_success "Zsh is already the default shell"
     fi
 }
 
 setup_fish() {
-    log "→ Setting up fish shell (available but not default)..."
+    log_info "Setting up fish shell (available but not default)..."
 
     if ! command_exists fish; then
-        log "→ Fish not installed, skipping fish setup"
+        log_info "Fish not installed, skipping fish setup"
         return 0
     fi
 
     fish_path=$(which fish)
 
     if ! grep -q "^$fish_path$" /etc/shells 2>/dev/null; then
-        log "→ Adding fish to /etc/shells..."
+        log_info "Adding fish to /etc/shells..."
         if [[ $DRY_RUN == "0" ]]; then
             echo "$fish_path" | sudo tee -a /etc/shells
         fi
     else
-        log "✓ Fish already in /etc/shells"
+        log_success "Fish already in /etc/shells"
     fi
 
     if ! fish -c "functions -q fisher" 2>/dev/null; then
-        log "→ Installing Fisher plugin manager..."
+        log_info "Installing Fisher plugin manager..."
         if [[ $DRY_RUN == "0" ]]; then
             fish -c "curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher" 2>/dev/null || {
-                log "⚠ Failed to install Fisher automatically. You can install it manually later with:"
+                log_warn "Failed to install Fisher automatically. You can install it manually later with:"
                 log "  fish -c 'curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher'"
             }
         fi
     else
-        log "✓ Fisher plugin manager already installed"
+        log_success "Fisher plugin manager already installed"
     fi
 }
 
@@ -81,9 +80,9 @@ setup_zsh
 setup_fish
 
 if command_exists starship; then
-    log "✓ Starship detected, it will be configured via shell configs"
+    log_success "Starship detected, it will be configured via shell configs"
 else
-    log "→ Starship not found, install it for better prompt experience"
+    log_info "Starship not found, install it for better prompt experience"
 fi
 
-log "✓ Shell setup complete"
+log_success "Shell setup complete"

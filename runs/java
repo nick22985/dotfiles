@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+
+# Configure Java environment (idempotent)
+
+# Set DOTFILES_DIR if not already set
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+# Source shared utilities
+source "$DOTFILES_DIR/lib/utils.sh"
+
+# Parse arguments
+parse_args "$@"
+
+log "Installing and configuring Java environment..."
+
+# Set context for error tracking
+set_context "Java Setup"
+
+# Install Java/OpenJDK packages
+if command_exists pacman; then
+    log_info "Installing Java packages for Arch Linux..."
+
+    # Java packages for Arch
+    # Note: jdk-openjdk includes JRE and headless JRE, and conflicts with separate JRE packages
+    java_packages=(
+        "jdk-openjdk"           # OpenJDK Development Kit (includes JRE and headless JRE)
+        "openjdk-doc"           # OpenJDK documentation
+        "openjdk-src"           # OpenJDK source code
+        "java-runtime-common"   # Java environment management tool (provides archlinux-java)
+    )
+
+    install_packages_pacman "${java_packages[@]}"
+
+elif command_exists apt; then
+    log_info "Installing Java packages for Ubuntu/Debian..."
+
+    # Java packages for Ubuntu/Debian
+    java_packages=(
+        "openjdk-21-jdk"        # OpenJDK 21 Development Kit
+        "openjdk-21-jre"        # OpenJDK 21 Runtime Environment
+        "openjdk-21-jre-headless" # Headless JRE for servers
+    )
+
+    install_packages_apt "${java_packages[@]}"
+
+else
+    log_error "Unknown package manager. Please install Java manually:"
+fi
+
+# Create Java environment configuration
+java_config_file="/etc/profile.d/jre.sh"
+java_config_content='# Java AWT configuration for tiling window managers
+export _JAVA_AWT_WM_NONREPARENTING=1
+'
+
+if [[ $DRY_RUN == "0" ]]; then
+    # Check if the configuration already exists
+    if [[ -f "$java_config_file" ]] && grep -q "_JAVA_AWT_WM_NONREPARENTING=1" "$java_config_file"; then
+        log "✓ Java AWT configuration already exists in $java_config_file"
+    else
+        log "→ Creating Java environment configuration..."
+
+        # Create the profile.d directory if it doesn't exist
+        sudo mkdir -p /etc/profile.d
+
+        # Write the Java configuration
+        echo "$java_config_content" | sudo tee "$java_config_file" > /dev/null
+
+        # Make it executable
+        sudo chmod +x "$java_config_file"
+
+        log "✓ Created Java environment configuration in $java_config_file"
+    fi
+
+    # Set the environment variable for the current session
+    export _JAVA_AWT_WM_NONREPARENTING=1
+    log "✓ Set _JAVA_AWT_WM_NONREPARENTING=1 for current session"
+
+else
+    log "Would create Java environment configuration in $java_config_file"
+    log "Would set _JAVA_AWT_WM_NONREPARENTING=1"
+fi
+
+log "✓ Java environment configuration complete"

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
@@ -12,23 +11,46 @@ parse_args "$@"
 log "Installing Oh My Zsh..."
 
 if ! command_exists zsh; then
-    log "⚠ Zsh is not installed. Run the 'packages' script first."
+    log_warn "Zsh is not installed. Run the 'packages' script first."
     exit 1
 fi
 
 if [[ -d "$HOME/.oh-my-zsh" ]]; then
-    log "✓ Oh My Zsh is already installed"
+    log_success "Oh My Zsh is already installed"
 
-    log "→ Updating Oh My Zsh..."
+    log_info "Updating Oh My Zsh..."
     if [[ $DRY_RUN == "0" ]]; then
-        cd "$HOME/.oh-my-zsh" && git pull origin master 2>/dev/null || {
-            log "⚠ Failed to update Oh My Zsh automatically"
-        }
+        (
+            cd "$HOME/.oh-my-zsh" || exit 1
+            # Check if we're in a git repository
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+                # Fetch latest changes
+                if git fetch origin master 2>/dev/null; then
+                    # Check if we need to update
+                    current_commit=$(git rev-parse HEAD)
+                    remote_commit=$(git rev-parse origin/master)
+                    
+                    if [[ "$current_commit" != "$remote_commit" ]]; then
+                        if git pull origin master 2>/dev/null; then
+                            log_success "Oh My Zsh updated successfully"
+                        else
+                            log_warn "Failed to update Oh My Zsh - may have local changes"
+                        fi
+                    else
+                        log_success "Oh My Zsh is already up to date"
+                    fi
+                else
+                    log_warn "Failed to fetch Oh My Zsh updates - check internet connection"
+                fi
+            else
+                log_warn "Oh My Zsh directory is not a git repository"
+            fi
+        ) || log_warn "Failed to update Oh My Zsh automatically"
     fi
 else
-    log "→ Installing Oh My Zsh..."
+    log_info "Installing Oh My Zsh..."
     if [[ $DRY_RUN == "0" ]]; then
         sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-        log "✓ Oh My Zsh installed successfully"
+        log_success "Oh My Zsh installed successfully"
     fi
 fi

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 source "$DOTFILES_DIR/lib/utils.sh"
 
@@ -8,8 +7,11 @@ parse_args "$@"
 
 log "Setting up JavaScript runtimes (NVM + Bun + Deno)..."
 
+# Set context for error tracking
+set_context "JavaScript Runtimes"
+
 if ! command_exists curl && ! command_exists wget; then
-    log "❌ Neither curl nor wget is available. Run the 'packages' script first."
+    log_error "Neither curl nor wget is available. Run the 'packages' script first."
     exit 1
 fi
 
@@ -239,7 +241,7 @@ else
     log "→ Installing Deno from official installer..."
     if [[ $DRY_RUN == "0" ]]; then
         if command_exists curl; then
-            curl -fsSL https://deno.land/install.sh | sh
+            curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.deno" sh -s -- -y
         else
             log "⚠ curl not available, cannot install Deno"
         fi
@@ -297,4 +299,4 @@ if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
     fi
 fi
 
-log "✓ JavaScript runtimes setup complete"
+log_success "JavaScript runtimes setup complete"

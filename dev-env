@@ -15,6 +15,10 @@ fi
 
 parse_args "$@"
 
+# Create Timeshift backup only if running independently (not called by ./run)
+# The backup tracking system will prevent duplicate backups
+create_dotfiles_backup "dev-env-sync" "$@"
+
 # Directories that can be completely replaced (whitelist)
 # These directories will be completely removed and replaced with new versions
 # Use full paths relative to the target directory (e.g., ".config/nvim", ".local/bin/somedir")
@@ -23,7 +27,6 @@ REPLACEABLE_DIRS=(
     ".config/tmux"
     ".config/entr"
     ".config/treesitterCustom"
-    ".config/docker-compose"
     ".config/alacritty"
     ".config/kitty"
     ".config/rofi"
@@ -221,7 +224,7 @@ if [[ -d "$system_dir" ]]; then
         log "copying system file: $source to $target"
         if [[ $DRY_RUN == "0" ]]; then
             sudo cp "$source" "$target"
-            
+
             # Set appropriate permissions based on file location
             if [[ "$target" == /etc/pam.d/* ]]; then
                 sudo chmod 644 "$target"
@@ -296,3 +299,6 @@ if [[ $DRY_RUN == "0" ]]; then
 else
     log "Dry run complete. Run without --dry to apply changes."
 fi
+
+# Cleanup backup tracking only if this script created the backup
+cleanup_backup_tracking_if_owner "dev-env-sync"

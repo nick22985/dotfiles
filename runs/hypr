@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
 
 source "$DOTFILES_DIR/lib/utils.sh"
 
@@ -9,12 +8,12 @@ parse_args "$@"
 log "Setting up Hyprland..."
 
 if ! command_exists Hyprland; then
-    log "⚠ Hyprland is not installed. Run the 'packages' script first."
+    log_warn "Hyprland is not installed. Run the 'packages' script first."
     exit 1
 fi
 
 if command_exists pacman; then
-    log "→ Checking Hyprland dependencies..."
+    log_info "Checking Hyprland dependencies..."
     hypr_packages=(
         "hyprpaper"
         "hypridle"
@@ -45,51 +44,51 @@ if command_exists pacman; then
         if ! is_installed_pacman "$package"; then
             packages_to_install+=("$package")
         else
-            log "✓ $package already installed"
+            log_success "$package already installed"
         fi
     done
 
     if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log "→ Installing Hyprland dependencies: ${packages_to_install[*]}"
+        log_info "Installing Hyprland dependencies: ${packages_to_install[*]}"
         if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log "⚠ Some Hyprland packages may have failed to install"
+            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log_warn "Some Hyprland packages may have failed to install"
         fi
     else
-        log "✓ All Hyprland dependencies already installed"
+        log_success "All Hyprland dependencies already installed"
     fi
 elif command_exists apt; then
-    log "→ Hyprland dependencies for Debian/Ubuntu not fully supported"
-    log "→ Please install manually: waybar, rofi, grim, slurp, wl-clipboard"
+    log_info "Hyprland dependencies for Debian/Ubuntu not fully supported"
+    log_info "Please install manually: waybar, rofi, grim, slurp, wl-clipboard"
 fi
 
 if [[ -d "$HOME/.config/hypr/scripts" ]]; then
-    log "→ Making Hyprland scripts executable..."
+    log_info "Making Hyprland scripts executable..."
     if [[ $DRY_RUN == "0" ]]; then
         find "$HOME/.config/hypr/scripts" -type f -exec chmod +x {} \;
     fi
-    log "✓ Hyprland scripts are executable"
+    log_success "Hyprland scripts are executable"
 else
-    log "→ Hyprland scripts directory not found (will be available after running 'dotfiles')"
+    log_info "Hyprland scripts directory not found (will be available after running 'dotfiles')"
 fi
 
 if [[ -d "$HOME/.config/waybar/scripts" ]]; then
-    log "→ Making waybar scripts executable..."
+    log_info "Making waybar scripts executable..."
     if [[ $DRY_RUN == "0" ]]; then
         find "$HOME/.config/waybar/scripts" -type f -exec chmod +x {} \;
     fi
-    log "✓ Waybar scripts are executable"
+    log_success "Waybar scripts are executable"
 else
-    log "→ Waybar scripts directory not found (will be available after running 'dotfiles')"
+    log_info "Waybar scripts directory not found (will be available after running 'dotfiles')"
 fi
 
 if [[ -d "$HOME/.config/rofi/scripts" ]]; then
-    log "→ Making rofi scripts executable..."
+    log_info "Making rofi scripts executable..."
     if [[ $DRY_RUN == "0" ]]; then
         find "$HOME/.config/rofi/scripts" -type f -exec chmod +x {} \;
     fi
-    log "✓ Rofi scripts are executable"
+    log_success "Rofi scripts are executable"
 else
-    log "→ Rofi scripts directory not found (will be available after running 'dotfiles')"
+    log_info "Rofi scripts directory not found (will be available after running 'dotfiles')"
 fi
 
-log "✓ Hyprland setup complete"
+log_success "Hyprland setup complete"

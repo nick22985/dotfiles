@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # Install system packages (idempotent)
-set -e
 
 # Set DOTFILES_DIR if not already set
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,9 +14,12 @@ parse_args "$@"
 
 log "Installing system packages..."
 
+# Set context for error tracking
+set_context "System Packages"
+
 # Detect package manager and install essential packages
 if command_exists pacman; then
-    log "→ Detected Arch Linux (pacman)"
+    log_info "Detected Arch Linux (pacman)"
 
     # Essential packages for Arch (official repos)
     # Note: git is handled by the git script (01-git)
@@ -66,156 +68,30 @@ if command_exists pacman; then
         "gcc"               # C compiler (needed for entr)
         "cmake"             # Build system (needed for nvim packages)
         "luarocks"          # Lua package manager (needed for nvim plugins)
-				"imagemagick"
+		"imagemagick"
         "ghostty"                # Terminal emulator
-				"timeshift-autosnap"
-				"bluez"
-				"bluez-utils"
-				"prettier"
-				"steam-native-runtime"
-				"kwallet"
-				"kwalletmanager"
-				"kwallet-pam"
-				"dolphin"
+		"timeshift-autosnap"
+		"bluez"
+		"bluez-utils"
+		"prettier"
+		"steam-native-runtime"
+		"kwallet"
+		"kwalletmanager"
+		"kwallet-pam"
+		"dolphin"
     )
 
-    # Check which packages need to be installed
-    packages_to_install=()
-    for package in "${packages[@]}"; do
-        if ! is_installed_pacman "$package"; then
-            packages_to_install+=("$package")
-        else
-            log "✓ $package already installed"
-        fi
-    done
-
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log "→ Installing packages: ${packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log "⚠ Some packages may have failed to install"
-        fi
-    else
-        log "✓ All official packages already installed"
-    fi
-
+    install_packages_pacman "${packages[@]}"
     # Enable and start services
-    log "→ Enabling package manager services..."
-    if [[ $DRY_RUN == "0" ]]; then
-        # Enable snapd if installed
-        if is_installed_pacman "snapd"; then
-            sudo systemctl enable --now snapd.socket 2>/dev/null || log "⚠ Failed to enable snapd"
-            sudo systemctl enable --now snapd.apparmor 2>/dev/null || true
-            # Create snap symlink if it doesn't exist
-            if [[ ! -e /snap ]]; then
-                sudo ln -sf /var/lib/snapd/snap /snap 2>/dev/null || true
-            fi
-        fi
-
-        # Enable docker if installed
-        if is_installed_pacman "docker"; then
-            log "→ Setting up Docker service..."
-
-            # Reload systemd daemon in case unit files changed
-            sudo systemctl daemon-reload 2>/dev/null || true
-
-            # Check if docker is already enabled and running
-            if systemctl is-enabled docker.service >/dev/null 2>&1; then
-                log "✓ Docker service already enabled"
-            else
-                sudo systemctl enable docker 2>/dev/null && log "✓ Docker service enabled" || log "⚠ Failed to enable docker service"
-            fi
-
-            # Check if docker is running
-            if systemctl is-active docker.service >/dev/null 2>&1; then
-                log "✓ Docker service is running"
-            else
-                sudo systemctl start docker 2>/dev/null && log "✓ Docker service started" || log "⚠ Failed to start docker service"
-            fi
-
-            # Add user to docker group
-            if ! groups "$USER" | grep -q docker; then
-                sudo usermod -aG docker "$USER" && log "✓ Added $USER to docker group" || log "⚠ Failed to add user to docker group"
-                log "→ Note: Log out and back in for docker group membership to take effect"
-            else
-                log "✓ $USER already in docker group"
-            fi
-        fi
-
-         # Enable bluetooth if installed
-         if is_installed_pacman "bluez"; then
-             log "→ Setting up Bluetooth service..."
-
-             # Reload systemd daemon in case unit files changed
-             sudo systemctl daemon-reload 2>/dev/null || true
-
-             # Check if bluetooth is already enabled and running
-             if systemctl is-enabled bluetooth.service >/dev/null 2>&1; then
-                 log "✓ Bluetooth service already enabled"
-             else
-                 sudo systemctl enable bluetooth.service 2>/dev/null && log "✓ Bluetooth service enabled" || log "⚠ Failed to enable bluetooth service"
-             fi
-
-             # Check if bluetooth is running
-             if systemctl is-active bluetooth.service >/dev/null 2>&1; then
-                 log "✓ Bluetooth service is running"
-             else
-                 sudo systemctl start bluetooth.service 2>/dev/null && log "✓ Bluetooth service started" || log "⚠ Failed to start bluetooth service"
-             fi
-         fi
-
-         # Add user to other useful system groups
-         log "→ Adding user to system groups..."
-         groups_added=()
-         useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
-         for group in "${useful_groups[@]}"; do
-             if getent group "$group" >/dev/null 2>&1 && ! groups "$USER" | grep -q "$group"; then
-                 if sudo usermod -aG "$group" "$USER"; then
-                     log "✓ Added $USER to $group group"
-                     groups_added+=("$group")
-                 fi
-             fi
-         done
-        # Reload user groups if any were added
-        if [ ${#groups_added[@]} -gt 0 ]; then
-            log "→ Reloading user groups in current session..."
-            # Use exec to replace the current shell with a new one that has updated groups
-            # But first, we need to continue the script execution
-            log "→ Groups added: ${groups_added[*]}"
-            log "→ Note: Some services may require a full logout/login to work properly"
-
-            # Try to refresh the current session's group membership
-            # This works for some cases but not all
-            for group in "${groups_added[@]}"; do
-                if command -v newgrp >/dev/null 2>&1; then
-                    log "→ Attempting to activate $group group in current session"
-                    # Note: newgrp starts a new shell, so we can't use it directly in a script
-                    # Instead, we'll note that a reboot/relogin may be needed
-                fi
-            done
-        fi
-    else
-        log "Would enable snapd and docker services"
-        log "Would add user to docker group"
-    fi
+    log_info "Setting up package manager services..."
+    setup_package_services
+    
+    # Add user to useful system groups
+    useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
+    add_user_to_groups "${useful_groups[@]}"
 
     # Install paru (AUR helper) if not already installed
-    if ! command_exists paru; then
-        log "→ Installing paru (AUR helper)..."
-        if [[ $DRY_RUN == "0" ]]; then
-            # Clone and build paru
-            temp_dir=$(mktemp -d)
-            (
-                cd "$temp_dir"
-                git clone https://aur.archlinux.org/paru.git
-                cd paru
-                makepkg -si --noconfirm
-            ) || log "⚠ Failed to install paru"
-            rm -rf "$temp_dir"
-        fi
-        log "✓ Paru installed"
-    else
-        log "✓ Paru already installed"
-    fi
+    install_paru
 
 
 
@@ -232,26 +108,10 @@ if command_exists pacman; then
         "yay"                        # Alternative AUR helper
         "snapd"                      # Snap package manager
         "neofetch"                   # System info
+				"infisical-bin"
     )
 
-    # Check which AUR packages need to be installed
-    aur_packages_to_install=()
-    for package in "${aur_packages[@]}"; do
-        if ! is_installed_pacman "$package"; then
-            aur_packages_to_install+=("$package")
-        else
-            log "✓ $package (AUR) already installed"
-        fi
-    done
-
-    if [ ${#aur_packages_to_install[@]} -gt 0 ]; then
-        log "→ Installing AUR packages: ${aur_packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            paru -S --needed --noconfirm "${aur_packages_to_install[@]}" || log "⚠ Some AUR packages may have failed to install"
-        fi
-    else
-        log "✓ All AUR packages already installed"
-    fi
+    install_packages_aur "${aur_packages[@]}"
 
 
 
@@ -284,7 +144,7 @@ if command_exists pacman; then
     fi
 
 elif command_exists apt; then
-    log "→ Detected Ubuntu/Debian (apt)"
+    log_info "Detected Ubuntu/Debian (apt)"
 
     # Essential packages for Ubuntu/Debian
     # Note: git is handled by the git script (01-git)
@@ -306,35 +166,13 @@ elif command_exists apt; then
         "luarocks"          # Lua package manager (needed for nvim plugins)
     )
 
-    # Check which packages need to be installed
-    packages_to_install=()
-    for package in "${packages[@]}"; do
-        if ! is_installed_apt "$package"; then
-            packages_to_install+=("$package")
-        else
-            log "✓ $package already installed"
-        fi
-    done
-
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log "→ Updating package list..."
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo apt update -qq
-        fi
-
-        log "→ Installing packages: ${packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo apt install -y "${packages_to_install[@]}" || log "⚠ Some packages may have failed to install"
-        fi
-    else
-        log "✓ All packages already installed"
-    fi
+    install_packages_apt "${packages[@]}"
 
     # Install Deno (not available in Ubuntu repos)
     if ! command_exists deno; then
         log "→ Installing Deno runtime..."
         if [[ $DRY_RUN == "0" ]]; then
-            curl -fsSL https://deno.land/install.sh | sh 2>/dev/null && {
+            curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.deno" sh -s -- -y 2>/dev/null && {
                 # Add to PATH for current session
                 export PATH="$HOME/.deno/bin:$PATH"
                 log "✓ Deno installed successfully"
@@ -388,7 +226,7 @@ elif command_exists apt; then
 
 
 else
-    log "⚠ Unknown package manager. Please install packages manually:"
+    log_error "Unknown package manager. Please install packages manually:"
     log "  - git, curl, fish, zsh, tmux, neovim, alacritty, starship, ripgrep, fzf, fd, bat, exa, zoxide"
 fi
 
@@ -439,4 +277,4 @@ else
     log "Would attempt to reload user session"
 fi
 
-log "✓ Package installation complete"
+log_success "Package installation complete"

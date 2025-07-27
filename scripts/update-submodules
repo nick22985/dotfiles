@@ -13,7 +13,7 @@ source "$DOTFILES_DIR/lib/utils.sh"
 # Parse arguments
 parse_args "$@"
 
-log "Updating all submodules to latest commits..."
+log "Updating nick22985 submodules to latest commits..."
 
 cd "$DOTFILES_DIR"
 
@@ -23,15 +23,15 @@ if [[ ! -f .gitmodules ]]; then
     exit 0
 fi
 
-# Get list of submodules
-submodules=$(git config --file .gitmodules --get-regexp path | awk '{ print $2 }')
+# Get list of nick22985 submodules only
+submodules=$(git config --file .gitmodules --get-regexp url | grep "nick22985" | awk '{print $1}' | sed 's/submodule\.\(.*\)\.url/\1/' | while read -r name; do git config --file .gitmodules --get "submodule.$name.path"; done)
 
 if [[ -z "$submodules" ]]; then
-    log "⚠ No submodules found"
+    log "⚠ No nick22985 submodules found"
     exit 0
 fi
 
-log "Found submodules:"
+log "Found nick22985 submodules:"
 echo "$submodules" | while read -r submodule; do
     log "  → $submodule"
 done
@@ -115,7 +115,7 @@ if [[ $DRY_RUN == "0" ]]; then
         log "✓ No submodule reference updates needed"
     else
         log "→ Committing submodule reference updates..."
-        git commit -m "Update submodules to latest commits" || {
+        git commit -m "Update nick22985 submodules to latest commits" || {
             log "⚠ Failed to commit submodule updates"
         }
         log "✓ Submodule references updated and committed"
@@ -127,5 +127,5 @@ fi
 if [[ $DRY_RUN == "0" ]]; then
     log "✓ Submodule update complete"
 else
-    log "Would update all submodules to latest commits"
+    log "Would update all nick22985 submodules to latest commits"
 fi

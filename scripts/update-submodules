@@ -62,8 +62,8 @@ echo "$submodules" | while read -r submodule_path; do
             # Get current commit before update
             old_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
-            # Check if there are any uncommitted changes
-            if ! git diff --quiet || ! git diff --cached --quiet; then
+            # Check if there are any uncommitted changes (modified, staged, or untracked files)
+            if ! git diff --quiet || ! git diff --cached --quiet || [[ -n $(git ls-files --others --exclude-standard) ]]; then
                 log "  → Found uncommitted changes, committing..."
                 
                 # Add all changes

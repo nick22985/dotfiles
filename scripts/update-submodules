@@ -13,7 +13,7 @@ source "$DOTFILES_DIR/lib/utils.sh"
 # Parse arguments
 parse_args "$@"
 
-log "Updating nick22985 submodules to latest commits..."
+log "Updating all submodules to latest commits..."
 
 cd "$DOTFILES_DIR"
 
@@ -23,24 +23,32 @@ if [[ ! -f .gitmodules ]]; then
     exit 0
 fi
 
-# Get list of nick22985 submodules only
-submodules=$(git config --file .gitmodules --get-regexp url | grep "nick22985" | awk '{print $1}' | sed 's/submodule\.\(.*\)\.url/\1/' | while read -r name; do git config --file .gitmodules --get "submodule.$name.path"; done)
+# Get list of ALL submodules
+all_submodules=$(git config --file .gitmodules --get-regexp path | awk '{ print $2 }')
 
-if [[ -z "$submodules" ]]; then
-    log "⚠ No nick22985 submodules found"
+# Get list of nick22985 submodules
+nick_submodules=$(git config --file .gitmodules --get-regexp url | grep "nick22985" | awk '{print $1}' | sed 's/submodule\.\(.*\)\.url/\1/' | while read -r name; do git config --file .gitmodules --get "submodule.$name.path"; done)
+
+if [[ -z "$all_submodules" ]]; then
+    log "⚠ No submodules found"
     exit 0
 fi
 
-log "Found nick22985 submodules:"
-echo "$submodules" | while read -r submodule; do
-    log "  → $submodule"
+log "Found submodules:"
+echo "$all_submodules" | while read -r submodule; do
+    # Check if this is a nick22985 submodule
+    if echo "$nick_submodules" | grep -q "^$submodule$"; then
+        log "  → $submodule (nick22985 - will commit/push)"
+    else
+        log "  → $submodule (external - update only)"
+    fi
 done
 
 # Update each submodule
 updated_count=0
 total_count=0
 
-echo "$submodules" | while read -r submodule_path; do
+echo "$all_submodules" | while read -r submodule_path; do
     total_count=$((total_count + 1))
 
     if [[ ! -d "$submodule_path" ]]; then
@@ -48,7 +56,14 @@ echo "$submodules" | while read -r submodule_path; do
         continue
     fi
 
-    log "→ Updating submodule: $submodule_path"
+    # Check if this is a nick22985 submodule
+    is_nick_submodule=false
+    if echo "$nick_submodules" | grep -q "^$submodule_path$"; then
+        is_nick_submodule=true
+        log "→ Updating nick22985 submodule: $submodule_path"
+    else
+        log "→ Updating external submodule: $submodule_path"
+    fi
 
     if [[ $DRY_RUN == "0" ]]; then
         # Get the configured branch for this submodule (if any)
@@ -62,20 +77,23 @@ echo "$submodules" | while read -r submodule_path; do
             # Get current commit before update
             old_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
-            # Check if there are any uncommitted changes (modified, staged, or untracked files)
-            if ! git diff --quiet || ! git diff --cached --quiet || [[ -n $(git ls-files --others --exclude-standard) ]]; then
-                log "  → Found uncommitted changes, committing..."
-                
-                # Add all changes
-                git add . 2>/dev/null || true
-                
-                # Commit with a generic message if there are staged changes
-                if ! git diff --cached --quiet; then
-                    git commit -m "Auto-commit changes from dotfiles update" || {
-                        log "  ⚠ Failed to commit changes"
-                        exit 1
-                    }
-                    log "  ✓ Committed local changes"
+            # Only commit/push changes for nick22985 submodules
+            if [[ "$is_nick_submodule" == "true" ]]; then
+                # Check if there are any uncommitted changes (modified, staged, or untracked files)
+                if ! git diff --quiet || ! git diff --cached --quiet || [[ -n $(git ls-files --others --exclude-standard) ]]; then
+                    log "  → Found uncommitted changes, committing..."
+                    
+                    # Add all changes
+                    git add . 2>/dev/null || true
+                    
+                    # Commit with a generic message if there are staged changes
+                    if ! git diff --cached --quiet; then
+                        git commit -m "Auto-commit changes from dotfiles update" || {
+                            log "  ⚠ Failed to commit changes"
+                            exit 1
+                        }
+                        log "  ✓ Committed local changes"
+                    fi
                 fi
             fi
 
@@ -99,46 +117,63 @@ echo "$submodules" | while read -r submodule_path; do
                 log "  → Using default branch: $default_branch"
             fi
 
-            # Ensure we're on the correct local branch
-            current_branch=$(git branch --show-current 2>/dev/null || echo "")
-            if [[ "$current_branch" != "$target_branch" ]]; then
-                # Switch to or create the target branch
-                if git show-ref --verify --quiet "refs/heads/$target_branch"; then
-                    git checkout "$target_branch" 2>/dev/null || {
-                        log "  ⚠ Failed to checkout branch $target_branch"
-                        exit 1
-                    }
-                else
-                    git checkout -b "$target_branch" "$target_ref" 2>/dev/null || {
-                        log "  ⚠ Failed to create and checkout branch $target_branch"
-                        exit 1
-                    }
+            if [[ "$is_nick_submodule" == "true" ]]; then
+                # For nick22985 submodules: ensure we're on the correct local branch and pull/push
+                current_branch=$(git branch --show-current 2>/dev/null || echo "")
+                if [[ "$current_branch" != "$target_branch" ]]; then
+                    # Switch to or create the target branch
+                    if git show-ref --verify --quiet "refs/heads/$target_branch"; then
+                        git checkout "$target_branch" 2>/dev/null || {
+                            log "  ⚠ Failed to checkout branch $target_branch"
+                            exit 1
+                        }
+                    else
+                        git checkout -b "$target_branch" "$target_ref" 2>/dev/null || {
+                            log "  ⚠ Failed to create and checkout branch $target_branch"
+                            exit 1
+                        }
+                    fi
+                    log "  → Switched to branch: $target_branch"
                 fi
-                log "  → Switched to branch: $target_branch"
-            fi
 
-            # Pull latest changes
-            if git pull origin "$target_branch" 2>/dev/null; then
-                new_commit=$(git rev-parse HEAD)
+                # Pull latest changes
+                if git pull origin "$target_branch" 2>/dev/null; then
+                    new_commit=$(git rev-parse HEAD)
 
-                if [[ "$old_commit" != "$new_commit" ]]; then
-                    log "  ✓ Updated from $old_commit to $new_commit"
-                    updated_count=$((updated_count + 1))
+                    if [[ "$old_commit" != "$new_commit" ]]; then
+                        log "  ✓ Updated from $old_commit to $new_commit"
+                        updated_count=$((updated_count + 1))
+                    else
+                        log "  ✓ Already up to date ($new_commit)"
+                    fi
                 else
-                    log "  ✓ Already up to date ($new_commit)"
+                    log "  ⚠ Failed to pull from $target_ref"
+                    exit 1
+                fi
+
+                # Push any local commits that haven't been pushed
+                if git log "@{u}.." --oneline 2>/dev/null | grep -q .; then
+                    log "  → Pushing local commits..."
+                    if git push origin "$target_branch" 2>/dev/null; then
+                        log "  ✓ Pushed local commits to origin"
+                    else
+                        log "  ⚠ Failed to push to origin"
+                    fi
                 fi
             else
-                log "  ⚠ Failed to pull from $target_ref"
-                exit 1
-            fi
+                # For external submodules: just update to latest commit
+                if git checkout -q "$target_ref" 2>/dev/null; then
+                    new_commit=$(git rev-parse HEAD)
 
-            # Push any local commits that haven't been pushed
-            if git log "@{u}.." --oneline 2>/dev/null | grep -q .; then
-                log "  → Pushing local commits..."
-                if git push origin "$target_branch" 2>/dev/null; then
-                    log "  ✓ Pushed local commits to origin"
+                    if [[ "$old_commit" != "$new_commit" ]]; then
+                        log "  ✓ Updated from $old_commit to $new_commit"
+                        updated_count=$((updated_count + 1))
+                    else
+                        log "  ✓ Already up to date ($new_commit)"
+                    fi
                 else
-                    log "  ⚠ Failed to push to origin"
+                    log "  ⚠ Failed to checkout $target_ref"
+                    exit 1
                 fi
             fi
         ) || {
@@ -162,7 +197,7 @@ if [[ $DRY_RUN == "0" ]]; then
         log "✓ No submodule reference updates needed"
     else
         log "→ Committing submodule reference updates..."
-        git commit -m "Update nick22985 submodules to latest commits" || {
+        git commit -m "Update submodules to latest commits" || {
             log "⚠ Failed to commit submodule updates"
         }
         log "✓ Submodule references updated and committed"
@@ -174,5 +209,5 @@ fi
 if [[ $DRY_RUN == "0" ]]; then
     log "✓ Submodule update complete"
 else
-    log "Would update all nick22985 submodules to latest commits"
+    log "Would update all submodules to latest commits"
 fi

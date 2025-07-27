@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+# Update and commit submodules from nick22985 GitHub account
+set -e
+
+# Set DOTFILES_DIR if not already set
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+# Source shared utilities
+source "$DOTFILES_DIR/lib/utils.sh"
+
+# Parse arguments
+parse_args "$@"
+
+log "Updating nick22985 submodules and committing changes..."
+
+cd "$DOTFILES_DIR"
+
+# Check if we have any submodules
+if [[ ! -f .gitmodules ]]; then
+    log "⚠ No .gitmodules file found"
+    exit 0
+fi
+
+# Get list of nick22985 submodules
+nick_submodules=$(git config --file .gitmodules --get-regexp url | grep "nick22985" | awk '{print $1}' | sed 's/submodule\.\(.*\)\.url/\1/')
+
+if [[ -z "$nick_submodules" ]]; then
+    log "⚠ No nick22985 submodules found"
+    exit 0
+fi
+
+log "Found nick22985 submodules:"
+echo "$nick_submodules" | while read -r submodule_name; do
+    submodule_path=$(git config --file .gitmodules --get "submodule.$submodule_name.path")
+    submodule_url=$(git config --file .gitmodules --get "submodule.$submodule_name.url")
+    log "  → $submodule_name ($submodule_path) - $submodule_url"
+done
+
+# Update each nick22985 submodule
+updated_count=0
+total_count=0
+updated_submodules=()
+
+echo "$nick_submodules" | while read -r submodule_name; do
+    total_count=$((total_count + 1))
+    
+    submodule_path=$(git config --file .gitmodules --get "submodule.$submodule_name.path")
+    submodule_url=$(git config --file .gitmodules --get "submodule.$submodule_name.url")
+
+    if [[ ! -d "$submodule_path" ]]; then
+        log "⚠ Submodule directory not found: $submodule_path"
+        continue
+    fi
+
+    log "→ Updating nick22985 submodule: $submodule_name ($submodule_path)"
+
+    if [[ $DRY_RUN == "0" ]]; then
+        # Get the configured branch for this submodule (if any)
+        branch=$(git config --file .gitmodules --get "submodule.$submodule_name.branch" 2>/dev/null || echo "")
+
+        # Change to submodule directory
+        (
+            cd "$submodule_path"
+
+            # Get current commit before update
+            old_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+            old_commit_short=$(echo "$old_commit" | cut -c1-8)
+
+            # Fetch latest changes
+            git fetch origin 2>/dev/null || {
+                log "⚠ Failed to fetch from origin for $submodule_path"
+                exit 1
+            }
+
+            # Determine which branch/ref to update to
+            if [[ -n "$branch" ]]; then
+                # Use specified branch
+                target_ref="origin/$branch"
+                log "  → Using configured branch: $branch"
+            else
+                # Use default branch (usually main/master)
+                default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+                target_ref="origin/$default_branch"
+                log "  → Using default branch: $default_branch"
+            fi
+
+            # Update to latest commit
+            if git checkout -q "$target_ref" 2>/dev/null; then
+                new_commit=$(git rev-parse HEAD)
+                new_commit_short=$(echo "$new_commit" | cut -c1-8)
+
+                if [[ "$old_commit" != "$new_commit" ]]; then
+                    log "  ✓ Updated from $old_commit_short to $new_commit_short"
+                    echo "$submodule_name:$old_commit_short:$new_commit_short" >> /tmp/updated_submodules_$$
+                else
+                    log "  ✓ Already up to date ($new_commit_short)"
+                fi
+            else
+                log "  ⚠ Failed to checkout $target_ref"
+                exit 1
+            fi
+        ) || {
+            log "⚠ Failed to update submodule: $submodule_path"
+            continue
+        }
+    else
+        log "  Would update submodule: $submodule_path"
+    fi
+done
+
+# Update the main repository's submodule references and commit
+if [[ $DRY_RUN == "0" ]]; then
+    log "→ Updating submodule references in main repository..."
+
+    # Add all submodule changes
+    git add . 2>/dev/null || true
+
+    # Check if there are any changes to commit
+    if git diff --cached --quiet; then
+        log "✓ No submodule reference updates needed"
+    else
+        # Read updated submodules info
+        updated_info=""
+        if [[ -f /tmp/updated_submodules_$$ ]]; then
+            updated_info=$(cat /tmp/updated_submodules_$$)
+            rm -f /tmp/updated_submodules_$$
+        fi
+
+        # Create detailed commit message
+        commit_msg="Update nick22985 submodules"
+        if [[ -n "$updated_info" ]]; then
+            commit_msg="$commit_msg
+
+Updated submodules:"
+            echo "$updated_info" | while IFS=':' read -r name old_commit new_commit; do
+                commit_msg="$commit_msg
+- $name: $old_commit → $new_commit"
+            done
+        fi
+
+        log "→ Committing submodule reference updates..."
+        git commit -m "$commit_msg" || {
+            log "⚠ Failed to commit submodule updates"
+        }
+        log "✓ Nick22985 submodule references updated and committed"
+    fi
+else
+    log "Would update submodule references in main repository"
+fi
+
+# Clean up temp file if it exists
+rm -f /tmp/updated_submodules_$$
+
+if [[ $DRY_RUN == "0" ]]; then
+    log "✓ Nick22985 submodule update complete"
+else
+    log "Would update all nick22985 submodules to latest commits"
+fi

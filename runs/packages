@@ -68,24 +68,24 @@ if command_exists pacman; then
         "gcc"               # C compiler (needed for entr)
         "cmake"             # Build system (needed for nvim packages)
         "luarocks"          # Lua package manager (needed for nvim plugins)
-		"imagemagick"
-        "ghostty"                # Terminal emulator
-		"timeshift-autosnap"
-		"bluez"
-		"bluez-utils"
-		"prettier"
-		"steam-native-runtime"
-		"kwallet"
-		"kwalletmanager"
-		"kwallet-pam"
-		"dolphin"
+				"imagemagick"
+				"ghostty"                # Terminal emulator
+				"timeshift-autosnap"
+				"bluez"
+				"bluez-utils"
+				"steam-native-runtime"
+				"kwallet"
+				"kwalletmanager"
+				"kwallet-pam"
+				"dolphin"
+				"networkmanager-openvpn"
     )
 
     install_packages_pacman "${packages[@]}"
     # Enable and start services
     log_info "Setting up package manager services..."
     setup_package_services
-    
+
     # Add user to useful system groups
     useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
     add_user_to_groups "${useful_groups[@]}"
@@ -109,6 +109,7 @@ if command_exists pacman; then
         "snapd"                      # Snap package manager
         "neofetch"                   # System info
 				"infisical-bin"
+				"mongodb-compass"
     )
 
     install_packages_aur "${aur_packages[@]}"

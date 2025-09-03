@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+aur_packages=(
+	"cups"
+	"epson-inkjet-printer-escpr2"
+)
+install_packages_aur "${aur_packages[@]}"
+sudo systemctl enable --now cups.service
+systemctl status cups.service
+

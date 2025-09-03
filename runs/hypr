@@ -1,66 +1,131 @@
 #!/usr/bin/env bash
 
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
 source "$DOTFILES_DIR/lib/utils.sh"
 
 parse_args "$@"
 
-log "Setting up Hyprland..."
-
-if ! command_exists Hyprland; then
-    log_warn "Hyprland is not installed. Run the 'packages' script first."
-    exit 1
-fi
+log "Installing Hyprland and related packages..."
 
 if command_exists pacman; then
-    log_info "Checking Hyprland dependencies..."
-    hypr_packages=(
+    log_info "Detected Arch Linux (pacman)"
+
+    hyprland_packages=(
+        "hyprland"
+        "waybar"
+        "rofi-wayland"
         "hyprpaper"
         "hypridle"
         "hyprlock"
-				"xdg-desktop-portal-gtk"
-        "xdg-desktop-portal-hyprland"
-        "waybar"
-        "rofi-wayland"
-        "swaync"
-        "grim"
-        "slurp"
+        "hyprshot"
         "wl-clipboard"
+        "cliphist"
+        "brightnessctl"
+        "playerctl"
+        "pavucontrol"
+        "networkmanager"
+        "network-manager-applet"
+        "polkit-kde-agent"
+        "xdg-desktop-portal-hyprland"
+        "xdg-desktop-portal-gtk"
+        "qt5-wayland"
+        "qt6-wayland"
+        "xorg-xwayland"
         "xorg-xhost"
-        "zenity"            # GUI dialogs (for waybar-hotspot)
-        "libnotify"         # Desktop notifications (for waybar-hotspot)
-				"hyprpolkitagent"
-				# dark theme support
-				"adw-gtk-theme"
-				"qt5ct"
-				"qt6ct"
-				"kvantum"
-				"kvantum"
-				"breeze-icons"
+        "zenity"
+        "libnotify"
+        "hyprpolkitagent"
+        "adw-gtk-theme"
+        "qt5ct"
+        "qt6ct"
+        "kvantum"
+        "breeze-icons"
+        "socat"
     )
+    install_packages_pacman "${hyprland_packages[@]}"
 
-    packages_to_install=()
-    for package in "${hypr_packages[@]}"; do
-        if ! is_installed_pacman "$package"; then
-            packages_to_install+=("$package")
+    if command_exists paru; then
+        aur_hyprland_packages=(
+            "hyprpicker"
+            "grimblast-git"
+            "swaync"
+            "wofi"
+            "qr"                    # QR code generator (for waybar-hotspot)
+        )
+
+        install_packages_aur "${aur_hyprland_packages[@]}"
+    else
+        log_warn "paru not available, skipping AUR Hyprland packages"
+    fi
+
+    # Install waybar-hotspot from GitHub
+    log_info "Installing waybar-hotspot..."
+    waybar_hotspot_dir="/tmp/waybar-hotspot"
+
+    if [[ $DRY_RUN == "0" ]]; then
+        if ! command_exists waybar-hotspot; then
+            # Clone the repository
+            if [[ -d "$waybar_hotspot_dir" ]]; then
+                rm -rf "$waybar_hotspot_dir"
+            fi
+
+            if git clone https://github.com/ashish-kus/waybar-hotspot.git "$waybar_hotspot_dir"; then
+                log_success "waybar-hotspot repository cloned"
+
+                # Install using make
+                (
+                    cd "$waybar_hotspot_dir"
+                    if sudo make install; then
+                        log_success "waybar-hotspot installed successfully"
+                    else
+                        log_warn "Failed to install waybar-hotspot"
+                    fi
+                ) || log_warn "Failed to build waybar-hotspot"
+
+                # Clean up
+                rm -rf "$waybar_hotspot_dir"
+            else
+                log_warn "Failed to clone waybar-hotspot repository"
+            fi
         else
-            log_success "$package already installed"
-        fi
-    done
-
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log_info "Installing Hyprland dependencies: ${packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" || log_warn "Some Hyprland packages may have failed to install"
+            log_success "waybar-hotspot already installed"
         fi
     else
-        log_success "All Hyprland dependencies already installed"
+        log "Would clone and install waybar-hotspot from GitHub"
     fi
+
 elif command_exists apt; then
-    log_info "Hyprland dependencies for Debian/Ubuntu not fully supported"
-    log_info "Please install manually: waybar, rofi, grim, slurp, wl-clipboard"
+    log_info "Detected Ubuntu/Debian (apt)"
+    log_warn "Hyprland packages not available in Ubuntu/Debian repos"
+    log_info "Please install Hyprland manually or use a different distribution"
+
+else
+    log_warn "Unknown package manager. Please install Hyprland packages manually"
 fi
 
+if [[ $DRY_RUN == "0" ]]; then
+    log_info "Enabling Hyprland-related services..."
+
+    if systemctl is-enabled NetworkManager &>/dev/null; then
+        log_success "NetworkManager already enabled"
+    else
+        sudo systemctl enable --now NetworkManager 2>/dev/null && log_success "NetworkManager enabled" || log_warn "Failed to enable NetworkManager"
+    fi
+
+    log_info "Starting user services..."
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    if systemctl --user list-unit-files waybar.service &>/dev/null; then
+        systemctl --user enable waybar.service 2>/dev/null && log_success "waybar service enabled" || log_warn "Failed to enable waybar service"
+    fi
+else
+    log "Would enable NetworkManager and waybar services"
+fi
+
+# Make scripts executable
 if [[ -d "$HOME/.config/hypr/scripts" ]]; then
     log_info "Making Hyprland scripts executable..."
     if [[ $DRY_RUN == "0" ]]; then
@@ -91,4 +156,4 @@ else
     log_info "Rofi scripts directory not found (will be available after running 'dotfiles')"
 fi
 
-log_success "Hyprland setup complete"
+log_success "Hyprland packages installation complete"

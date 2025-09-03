@@ -583,6 +583,99 @@ reload_hyprland() {
     return 0
 }
 
+# Reload tmux configuration
+reload_tmux() {
+    log "→ Reloading tmux configuration..."
+
+    # Check if tmux is available
+    if ! command_exists tmux; then
+        log "⚠ tmux not found, skipping tmux reload"
+        return 0
+    fi
+
+    # Check if there are any tmux sessions running
+    if ! tmux list-sessions &>/dev/null; then
+        log "⚠ No tmux sessions running, skipping reload"
+        return 0
+    fi
+
+    if [[ $DRY_RUN == "0" ]]; then
+        local config_file=""
+        
+        # Determine which config file to use
+        if [[ -f "$HOME/.config/tmux/tmux.conf" ]]; then
+            config_file="$HOME/.config/tmux/tmux.conf"
+        elif [[ -f "$HOME/.tmux.conf" ]]; then
+            config_file="$HOME/.tmux.conf"
+        else
+            log "⚠ No tmux configuration file found"
+            return 1
+        fi
+
+        log "→ Using config file: $config_file"
+        
+        # Source the configuration file globally
+        if tmux source-file "$config_file" 2>/dev/null; then
+            log "→ Configuration sourced globally"
+        else
+            log "⚠ Failed to source configuration globally"
+            return 1
+        fi
+        
+        # Check if TPM (Tmux Plugin Manager) is available and reload plugins
+        local tpm_path="$HOME/.config/tmux/plugins/tpm/tpm"
+        if [[ -f "$tpm_path" ]]; then
+            log "→ Reloading tmux plugins with TPM..."
+            # Run TPM to reload plugins
+            "$tpm_path" 2>/dev/null || true
+            # Also try to reload plugins using TPM's reload functionality
+            tmux run-shell "$HOME/.config/tmux/plugins/tpm/scripts/install_plugins.sh" 2>/dev/null || true
+        fi
+        
+        # Force reload of Catppuccin theme if it exists
+        local catppuccin_path="$HOME/.config/tmux/plugins/catppuccin/catppuccin.tmux"
+        if [[ -f "$catppuccin_path" ]]; then
+            log "→ Reloading Catppuccin theme..."
+            tmux run-shell "$catppuccin_path" 2>/dev/null || true
+        fi
+        
+        # Kill and restart the status bar to force complete theme reload
+        tmux set-option -g status off 2>/dev/null || true
+        sleep 0.2
+        tmux set-option -g status on 2>/dev/null || true
+        
+        # Get all sessions and refresh each one
+        local sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+        local refresh_count=0
+        
+        while IFS= read -r session; do
+            if [[ -n "$session" ]]; then
+                log "→ Refreshing session: $session"
+                # Multiple refresh methods to ensure theme is applied
+                tmux refresh-client -t "$session" 2>/dev/null || true
+                tmux refresh-client -t "$session" -S 2>/dev/null || true
+                # Force complete redraw
+                tmux refresh-client -t "$session" -f 2>/dev/null || true
+                refresh_count=$((refresh_count + 1))
+            fi
+        done <<< "$sessions"
+        
+        # Final global refresh
+        tmux refresh-client -S 2>/dev/null || true
+        
+        if [[ $refresh_count -gt 0 ]]; then
+            log "✓ tmux configuration and plugins reloaded, $refresh_count session(s) refreshed"
+        else
+            log "⚠ No sessions were refreshed"
+            return 1
+        fi
+    else
+        log "Would reload tmux configuration, plugins, and refresh all running sessions"
+    fi
+
+    return 0
+}
+
 # Package Manager Utility Functions
 # ===================================
 
@@ -1268,5 +1361,5 @@ cleanup_backup_tracking_if_owner() {
 export -f log log_error log_warn log_success log_info parse_args command_exists is_installed_pacman is_installed_apt ensure_sudo
 export -f init_error_tracking cleanup_error_tracking set_context push_context pop_context get_context show_summary clear_tracking get_error_count get_warning_count
 export -f check_timeshift_available create_dotfiles_backup cleanup_backup_tracking cleanup_backup_tracking_if_owner
-export -f check_ssh_keys check_gpg_keys update_submodules setup_github_ssh_keys check_nerd_fonts_installed install_nerd_fonts check_nvm check_bun check_js_runtimes reload_hyprland
+export -f check_ssh_keys check_gpg_keys update_submodules setup_github_ssh_keys check_nerd_fonts_installed install_nerd_fonts check_nvm check_bun check_js_runtimes reload_hyprland reload_tmux
 export -f install_packages_pacman install_packages_apt install_packages_aur install_packages_yay install_packages_flatpak install_packages_snap install_packages install_paru install_yay setup_package_services add_user_to_groups

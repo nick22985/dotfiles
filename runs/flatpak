@@ -43,6 +43,7 @@ flatpak_packages=(
 
     "com.getpostman.Postman"
     "com.visualstudio.code"
+		"com.vscodium.codium"
 
     "org.libreoffice.LibreOffice"
 
@@ -61,6 +62,7 @@ flatpak_packages=(
 		"io.beekeeperstudio.Studio"
 		"org.dbgate.DbGate"
 		"md.obsidian.Obsidian"
+		"org.flameshot.Flameshot"
 )
 
 # Configure Flatpak permissions and repository

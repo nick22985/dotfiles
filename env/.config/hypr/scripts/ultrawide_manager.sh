@@ -114,16 +114,16 @@ handle_initial_dual_windows() {
         echo "Detected: Left window is in gap, setting appropriate gaps"
         set_workspace_gaps 0 $SIDE_PADDING $DEFAULT_PADDING $DEFAULT_PADDING
 
-        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:$left_window
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$right_window
+        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
+        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$right_window"
 
         gap_side="left"
     elif [[ $right_width -lt $((SIDE_PADDING + 100)) ]]; then
         echo "Detected: Right window is in gap, setting appropriate gaps"
         set_workspace_gaps $SIDE_PADDING 0 $DEFAULT_PADDING $DEFAULT_PADDING
 
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$left_window
-        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:$right_window
+        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$left_window"
+        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$right_window"
 
         gap_side="right"
     else
@@ -132,13 +132,13 @@ handle_initial_dual_windows() {
 
         if [[ $mouse_x -lt $SCREEN_CENTER ]]; then
             set_workspace_gaps 0 $SIDE_PADDING $DEFAULT_PADDING $DEFAULT_PADDING
-            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:$left_window
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$right_window
+            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
+            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$right_window"
             gap_side="left"
         else
             set_workspace_gaps $SIDE_PADDING 0 $DEFAULT_PADDING $DEFAULT_PADDING
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$left_window
-            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:$right_window
+            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$left_window"
+            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$right_window"
             gap_side="right"
         fi
     fi
@@ -166,8 +166,8 @@ handle_dual_windows() {
             echo "Main window: $main_window, New window: $new_window"
             echo "Resizing new window to exactly ${SIDE_PADDING}px and main window to ${CENTER_WIDTH}px"
 
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$main_window
-            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:$new_window
+            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$main_window"
+            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$new_window"
 
             gap_side="left"
         else
@@ -184,8 +184,8 @@ handle_dual_windows() {
 
             sleep 0.1
 
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$main_window
-            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:$new_window
+            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$main_window"
+            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$new_window"
 
             hyprctl dispatch moveactive exact $((CENTER_WIDTH + SIDE_PADDING)) 0
 
@@ -210,9 +210,9 @@ handle_initial_triple_windows() {
     local center_window=$(echo "$windows_json" | jq -r '.[1].address')
     local right_window=$(echo "$windows_json" | jq -r '.[2].address')
 
-    hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:$left_window
-    hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$center_window
-    hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:$right_window
+    hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
+    hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$center_window"
+    hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:"$right_window"
 
     layout_mode="triple"
 }
@@ -249,9 +249,9 @@ handle_triple_windows() {
 
         echo "Resizing: left=${SIDE_PADDING}px, center=${CENTER_WIDTH}px, right=$((SIDE_PADDING - 30))px"
 
-        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:$left_window
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:$center_window
-        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:$right_window
+        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
+        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$center_window"
+        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:"$right_window"
 
         layout_mode="triple"
     fi
@@ -491,6 +491,6 @@ else
 fi
 
 echo "Listening for window events..."
-socat - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" | while read -r line; do
+socat -t 10000 - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" | while read -r line; do
     handle_event "$line"
 done

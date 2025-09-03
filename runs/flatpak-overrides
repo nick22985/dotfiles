@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Flatpak Overrides..."
+
+set_context "Flatpak Overrides"
+
+# Set all applications to use Wayland windowing system only
+# some apps hate this
+# flatpak override --user --socket=wayland --socket=fallback-x11 --nosocket=x11
+
+# make it work in hyprland / wayland sessionks
+# sdfs
+flatpak override --user --env=QT_QPA_PLATFORM=wayland org.flameshot.Flameshot
+flatpak override --user --env=XDG_SESSION_DESKTOP=sway org.flameshot.Flameshot
+flatpak override --user --env=XDG_CURRENT_DESKTOP=sway org.flameshot.Flameshot
+flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland --socket=wayland --socket=fallback-x11 --nosocket=x11 com.slack.Slack
+
+# discord crashing running in wayland???
+flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.discordapp.Discord

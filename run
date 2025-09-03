@@ -73,6 +73,7 @@ execution_order=(
     "ssh"
     "sync-repos"
     "flatpak"
+		"flatpak-overrides"
     "snap"
     "grub-multiboot"
     "kde-plasma"
@@ -99,7 +100,7 @@ for script_name in "${execution_order[@]}"; do
     if [[ -f "$script_dir/runs/$script_name" && -x "$script_dir/runs/$script_name" ]]; then
         script_path="$script_dir/runs/$script_name"
     fi
-    
+
     if [[ -n "$script_path" ]]; then
         ordered_scripts+=("$script_path")
     fi
@@ -109,7 +110,7 @@ done
 for script in "$script_dir/runs/"*; do
     if [[ -f "$script" && -x "$script" ]]; then
         script_basename=$(basename "$script")
-        
+
         # Check if this script is already in our ordered list
         found=false
         for ordered_script in "${ordered_scripts[@]}"; do
@@ -118,7 +119,7 @@ for script in "$script_dir/runs/"*; do
                 break
             fi
         done
-        
+
         # If not found and not in execution order, add it to the end
         if [[ "$found" == false ]]; then
             in_order=false

@@ -293,6 +293,10 @@ fi
 log ""
 reload_hyprland
 
+# Reload tmux configuration if running
+log ""
+reload_tmux
+
 log ""
 if [[ $DRY_RUN == "0" ]]; then
     log "✓ Dotfiles deployment complete!"

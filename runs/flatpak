@@ -34,7 +34,7 @@ flatpak_packages=(
     "org.telegram.desktop"
 
     "com.spotify.Client"
-    "org.videolan.VLC"
+    # "org.videolan.VLC"
     "org.audacityteam.Audacity"
     "com.obsproject.Studio"
 
@@ -56,13 +56,12 @@ flatpak_packages=(
 
     "com.github.wwmm.easyeffects"
     "com.github.tchx84.Flatseal"
-		"com.brave.Browser"
+		# "com.brave.Browser"
 		"net.labymod.LabyMod"
 		"app.zen_browser.zen"
 		"io.beekeeperstudio.Studio"
 		"org.dbgate.DbGate"
 		"md.obsidian.Obsidian"
-		"org.flameshot.Flameshot"
 )
 
 # Configure Flatpak permissions and repository

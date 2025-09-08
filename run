@@ -78,6 +78,7 @@ execution_order=(
     "grub-multiboot"
     "kde-plasma"
     "defaults"
+		"clipboard"
 )
 
 # Load ignore list

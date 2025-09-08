@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+log "Installing Screenshot and screenrecord..."
+
+if command_exists pacman; then
+    log_info "Detected Arch Linux (pacman)"
+
+    screenshot_packages=(
+        "wl-clipboard"
+				"swappy"
+				"slurp"
+        "cliphist"
+				"grim"
+				"jq"
+    )
+    install_packages_pacman "${screenshot_packages[@]}"
+
+    # if command_exists paru; then
+    #     aur_hyprland_packages=(
+    #         "hyprpicker"
+    #         "grimblast-git"
+    #         "swaync"
+    #         "wofi"
+    #         "qr"                    # QR code generator (for waybar-hotspot)
+    #     )
+    #
+    #     install_packages_aur "${aur_hyprland_packages[@]}"
+    # else
+    #     log_warn "paru not available, skipping AUR Hyprland packages"
+    # fi
+fi

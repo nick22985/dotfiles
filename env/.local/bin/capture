@@ -1,0 +1,403 @@
+#!/bin/bash
+set -euo pipefail
+
+# Unified capture script for screenshots and recordings
+# Author: Nick  
+# Version: 2.1
+
+# Script metadata
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+readonly TIMESTAMP
+
+# Default configuration
+ACTION="screenshot"
+TARGET="region"
+USE_SWAPPY=false
+USE_FREEZE=false
+USE_NOTIFICATIONS=true
+
+# Output directories
+readonly SCREENSHOT_DIR="$HOME/Pictures"
+readonly RECORDING_DIR="$HOME/Videos"
+readonly PID_FILE="/tmp/wf-recorder.pid"
+
+# Colors for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+# Logging functions
+log_info() { printf "${BLUE}[INFO]${NC} %s\n" "$*"; }
+log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$*"; }
+log_warning() { printf "${YELLOW}[WARNING]${NC} %s\n" "$*"; }
+log_error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
+
+# Notification functions
+notify_info() {
+    if [[ $USE_NOTIFICATIONS == true ]]; then
+        notify-send -i camera-photo "Capture" "$*" 2>/dev/null || true
+    fi
+}
+
+notify_success() {
+    if [[ $USE_NOTIFICATIONS == true ]]; then
+        notify-send -i emblem-default "Capture Success" "$*" 2>/dev/null || true
+    fi
+}
+
+notify_error() {
+    if [[ $USE_NOTIFICATIONS == true ]]; then
+        notify-send -i dialog-error "Capture Error" "$*" 2>/dev/null || true
+    fi
+}
+
+notify_recording() {
+    if [[ $USE_NOTIFICATIONS == true ]]; then
+        notify-send -i media-record "Recording" "$*" 2>/dev/null || true
+    fi
+}
+
+# Error handling
+die() {
+    log_error "$1"
+    exit 1
+}
+
+# Dependency checks
+check_dependencies() {
+    local deps=("hyprctl" "jq" "grim")
+    
+    if [[ $ACTION == "record" ]]; then
+        deps+=("wf-recorder")
+    fi
+    
+    if [[ $TARGET == "region" ]] || [[ $USE_FREEZE == true ]]; then
+        deps+=("slurp")
+    fi
+    
+    if [[ $USE_SWAPPY == true ]]; then
+        deps+=("swappy")
+    fi
+    
+    if [[ $USE_FREEZE == true ]]; then
+        deps+=("wayfreeze")
+    fi
+    
+    if [[ $USE_NOTIFICATIONS == true ]]; then
+        deps+=("notify-send")
+    fi
+    
+    for dep in "${deps[@]}"; do
+        command -v "$dep" >/dev/null 2>&1 || die "Required dependency '$dep' not found"
+    done
+}
+
+show_help() {
+    printf "%b%s%b - Unified screenshot and recording tool\n\n" "$BLUE" "$SCRIPT_NAME" "$NC"
+    
+    printf "%bUSAGE:%b\n" "$YELLOW" "$NC"
+    printf "    %s [OPTIONS]\n\n" "$SCRIPT_NAME"
+    
+    printf "%bOPTIONS:%b\n" "$YELLOW" "$NC"
+    printf "    -s, --screenshot     Take a screenshot (default)\n"
+    printf "    -r, --record         Start a recording\n"
+    printf "    -m, --monitor        Capture the focused monitor\n"
+    printf "    -w, --window         Capture the active window\n"
+    printf "    -g, --region         Capture a selected region (default)\n"
+    printf "    -f, --freeze         Freeze screen before region selection\n"
+    printf "    -e, --edit           Open screenshot in swappy\n"
+    printf "    -n, --notify         Enable desktop notifications (default: on)\n"
+    printf "    --no-notify          Disable desktop notifications\n"
+    printf "    --stop-recording     Stop any active recording\n"
+    printf "    -h, --help           Show this help\n\n"
+    
+    printf "%bEXAMPLES:%b\n" "$YELLOW" "$NC"
+    printf "    %s                    # Screenshot selected region\n" "$SCRIPT_NAME"
+    printf "    %s -m                 # Screenshot monitor\n" "$SCRIPT_NAME"
+    printf "    %s -w -e              # Screenshot window and edit\n" "$SCRIPT_NAME"
+    printf "    %s -f                 # Freeze screen then select region\n" "$SCRIPT_NAME"
+    printf "    %s -r -g              # Record selected region\n\n" "$SCRIPT_NAME"
+    
+    printf "%bOUTPUT:%b\n" "$YELLOW" "$NC"
+    printf "    Screenshots: %s/\n" "$SCREENSHOT_DIR"
+    printf "    Recordings:  %s/\n" "$RECORDING_DIR"
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -s|--screenshot) ACTION="screenshot"; shift ;;
+            -r|--record) ACTION="record"; shift ;;
+            -m|--monitor) TARGET="monitor"; shift ;;
+            -w|--window) TARGET="window"; shift ;;
+            -g|--region) TARGET="region"; shift ;;
+            -f|--freeze) USE_FREEZE=true; TARGET="region"; shift ;;
+            -e|--edit) USE_SWAPPY=true; shift ;;
+            -n|--notify) USE_NOTIFICATIONS=true; shift ;;
+            --no-notify) USE_NOTIFICATIONS=false; shift ;;
+            --stop-recording) stop_recording; exit 0 ;;
+            -h|--help) show_help; exit 0 ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unexpected argument: $1" ;;
+        esac
+    done
+}
+
+# Get geometry based on target
+get_geometry() {
+    local geom
+    
+    case $TARGET in
+        monitor)
+            geom=$(hyprctl monitors -j | jq -r '.[] | select(.focused==true) | "\(.x),\(.y) \(.width)x\(.height)"')
+            [[ -n $geom ]] || die "Could not get monitor geometry"
+            ;;
+        window)
+            geom=$(hyprctl activewindow -j | jq -r '"\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+            [[ -n $geom ]] || die "Could not get window geometry"
+            ;;
+        region)
+            geom=$(slurp 2>/dev/null) || die "Region selection cancelled"
+            ;;
+    esac
+    
+    echo "$geom"
+}
+
+# Generate detailed filename
+generate_filename() {
+    local extension prefix details
+    
+    if [[ $ACTION == "record" ]]; then
+        extension=".mkv"
+        prefix="recording"
+    else
+        extension=".png"
+        prefix="screenshot"
+    fi
+    
+    case $TARGET in
+        monitor)
+            local monitor_info
+            monitor_info=$(hyprctl monitors -j | jq -r '.[] | select(.focused==true) | "\(.name)_\(.width)x\(.height)"')
+            details="monitor_${monitor_info}"
+            ;;
+        window)
+            local window_info
+            window_info=$(hyprctl activewindow -j | jq -r '"\(.class)_\(.title)"')
+            window_info=$(echo "$window_info" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-50)
+            details="window_${window_info}"
+            ;;
+        region)
+            if [[ $USE_FREEZE == true ]]; then
+                details="freeze_region"
+            else
+                details="region"
+            fi
+            ;;
+    esac
+    
+    echo "${prefix}_${details}_${TIMESTAMP}${extension}"
+}
+
+# Take screenshot with freeze functionality  
+take_screenshot_freeze() {
+    local filename filepath geom freeze_pid
+    
+    if [[ $USE_SWAPPY == true ]]; then
+        log_info "Freezing screen for region selection..."
+        log_info "Select your region, then swappy will open..."
+        notify_info "Screen frozen - select your region"
+        
+        # Start wayfreeze in background and get the geometry
+        wayfreeze & 
+        freeze_pid=$!
+        sleep 0.1
+        
+        # Get the region selection
+        geom=$(slurp) || {
+            kill "$freeze_pid" 2>/dev/null || true
+            notify_error "Region selection cancelled"
+            die "Region selection cancelled"
+        }
+        
+        # Kill wayfreeze and take screenshot
+        kill "$freeze_pid" 2>/dev/null || true
+        grim -g "$geom" - | swappy -f - || die "Failed to take frozen screenshot"
+        notify_success "Frozen screenshot opened in editor"
+        
+    else
+        # Direct save version
+        filename=$(generate_filename)
+        filepath="${SCREENSHOT_DIR}/${filename}"
+        mkdir -p "$SCREENSHOT_DIR"
+        
+        log_info "Freezing screen for region selection..."
+        log_info "Select your region to save screenshot..."
+        notify_info "Screen frozen - select your region"
+        
+        # Start wayfreeze in background
+        wayfreeze &
+        freeze_pid=$!
+        sleep 0.1
+        
+        # Get the region selection  
+        geom=$(slurp) || {
+            kill "$freeze_pid" 2>/dev/null || true
+            notify_error "Region selection cancelled"
+            die "Region selection cancelled"
+        }
+        
+        # Kill wayfreeze and take screenshot
+        kill "$freeze_pid" 2>/dev/null || true
+        grim -g "$geom" "$filepath" || die "Failed to save frozen screenshot"
+        
+        log_success "Frozen screenshot saved: $filepath"
+        notify_success "Frozen screenshot saved\n$(basename "$filepath")"
+    fi
+}
+
+# Take screenshot
+take_screenshot() {
+    local geom filename filepath
+    
+    if [[ $USE_FREEZE == true ]]; then
+        take_screenshot_freeze
+        return
+    fi
+    
+    # Regular screenshot workflow
+    geom=$(get_geometry)
+    
+    if [[ $USE_SWAPPY == true ]]; then
+        log_info "Taking screenshot of $TARGET and opening in swappy..."
+        notify_info "Taking $TARGET screenshot..."
+        grim -g "$geom" - | swappy -f - || die "Failed to take screenshot"
+        notify_success "Screenshot opened in editor"
+    else
+        filename=$(generate_filename)
+        filepath="${SCREENSHOT_DIR}/${filename}"
+        
+        # Ensure output directory exists
+        mkdir -p "$SCREENSHOT_DIR"
+        
+        log_info "Taking screenshot of $TARGET..."
+        notify_info "Taking $TARGET screenshot..."
+        grim -g "$geom" "$filepath" || die "Failed to save screenshot"
+        
+        log_success "Screenshot saved: $filepath"
+        notify_success "Screenshot saved\n$(basename "$filepath")"
+    fi
+}
+
+# Stop any active recording
+stop_recording() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            log_info "Stopping recording (PID: $pid)..."
+            notify_recording "Stopping recording..."
+            kill -TERM "$pid"
+            sleep 1
+            # If still running, force kill
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid"
+            fi
+            rm -f "$PID_FILE"
+            log_success "Recording stopped"
+            notify_success "Recording stopped and saved"
+        else
+            log_warning "No active recording found (stale PID file)"
+            notify_error "No active recording found"
+            rm -f "$PID_FILE"
+        fi
+    else
+        # Fallback: kill any wf-recorder processes
+        if pgrep -x "wf-recorder" >/dev/null; then
+            log_info "Stopping all wf-recorder processes..."
+            notify_recording "Stopping recording..."
+            pkill -TERM wf-recorder
+            sleep 1
+            pkill -KILL wf-recorder 2>/dev/null || true
+            log_success "Recording stopped"
+            notify_success "Recording stopped and saved"
+        else
+            log_warning "No active recording found"
+            notify_error "No active recording found"
+        fi
+    fi
+}
+
+# Start recording
+start_recording() {
+    local geom filename filepath
+    
+    # Check if recording is already active
+    if [[ -f "$PID_FILE" ]]; then
+        local existing_pid
+        existing_pid=$(cat "$PID_FILE")
+        if kill -0 "$existing_pid" 2>/dev/null; then
+            log_warning "Recording already active (PID: $existing_pid)"
+            log_info "Use '$SCRIPT_NAME --stop-recording' to stop it"
+            exit 1
+        else
+            rm -f "$PID_FILE"
+        fi
+    fi
+    
+    geom=$(get_geometry)
+    filename=$(generate_filename)
+    filepath="${RECORDING_DIR}/${filename}"
+    
+    # Ensure output directory exists
+    mkdir -p "$RECORDING_DIR"
+    
+    log_info "Starting recording of $TARGET..."
+    log_info "Output: $filepath"
+    log_info "Use '$SCRIPT_NAME --stop-recording' or your keybind to stop"
+    notify_recording "Recording $TARGET started\nPress Super+Ctrl+X to stop"
+    
+    # Start wf-recorder in background and save PID
+    wf-recorder -g "$geom" -f "$filepath" &
+    local recorder_pid=$!
+    echo "$recorder_pid" > "$PID_FILE"
+    
+    # Wait for the process and handle cleanup
+    wait "$recorder_pid"
+    local exit_code=$?
+    
+    # Clean up PID file
+    rm -f "$PID_FILE"
+    
+    # Check exit status
+    if [[ $exit_code -eq 0 ]] || [[ $exit_code -eq 130 ]] || [[ $exit_code -eq 143 ]]; then
+        # 0 = normal exit, 130 = SIGINT, 143 = SIGTERM
+        log_success "Recording saved: $filepath"
+        notify_success "Recording saved successfully\n$(basename "$filepath")"
+    else
+        log_error "Recording may have failed (exit code: $exit_code)"
+        log_info "File saved to: $filepath"
+        notify_error "Recording may have failed\nFile: $(basename "$filepath")"
+    fi
+}
+
+# Main execution
+main() {
+    parse_args "$@"
+    check_dependencies
+    
+    case $ACTION in
+        screenshot) take_screenshot ;;
+        record) start_recording ;;
+        *) die "Invalid action: $ACTION" ;;
+    esac
+}
+
+# Run main function with all arguments
+main "$@"

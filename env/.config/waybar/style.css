@@ -55,6 +55,11 @@ window#waybar {
 #clock {
 	padding: 0 5px;
 }
+
+#custom-notifications {
+	padding: 0 5px;
+	margin-right: 2px;
+}
 #pulseaudio {
 	padding-top: 3px;
 }
@@ -94,4 +99,32 @@ window#waybar {
 		background-color: #ffffff;
 		color: #000000;
 	}
+}
+
+/* Notification colors based on state */
+#custom-notifications {
+	color: #ffffff; /* Default white */
+}
+
+/* When notifications are present */
+#custom-notifications.notification {
+	color: #5fd1fa; /* Blue for notifications */
+}
+
+/* When in do not disturb mode */
+#custom-notifications.dnd-notification,
+#custom-notifications.dnd-none {
+	color: #f53c3c; /* Red for DND */
+}
+
+/* When inhibited */
+#custom-notifications.inhibited-notification,
+#custom-notifications.inhibited-none {
+	color: #ffbe61; /* Yellow for inhibited */
+}
+
+/* When both DND and inhibited */
+#custom-notifications.dnd-inhibited-notification,
+#custom-notifications.dnd-inhibited-none {
+	color: #ff8c00; /* Orange for DND + inhibited */
 }

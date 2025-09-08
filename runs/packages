@@ -78,7 +78,18 @@ if command_exists pacman; then
 				"kwalletmanager"
 				"kwallet-pam"
 				"dolphin"
+				# open default files for dolphin
+				"archlinux-xdg-menu"
 				"networkmanager-openvpn"
+				"vlc"
+				"vlc-plugins-all"
+				"ffmpeg"
+				"libva" 
+				"libva-utils"
+				"gst-plugins-base"
+				"gst-plugins-good"
+				# "lutris"
+				"ntfs-3g" # ntfs support hdd
     )
 
     install_packages_pacman "${packages[@]}"
@@ -87,7 +98,7 @@ if command_exists pacman; then
     setup_package_services
 
     # Add user to useful system groups
-    useful_groups=("wheel" "audio" "video" "input" "storage" "optical" "network" "power")
+    useful_groups=("wheel" "audio" "video" "input" "storage" "disk" "optical" "network" "power" "libvirt" "docker" "lp")
     add_user_to_groups "${useful_groups[@]}"
 
     # Install paru (AUR helper) if not already installed
@@ -110,6 +121,8 @@ if command_exists pacman; then
         "neofetch"                   # System info
 				"infisical-bin"
 				"mongodb-compass"
+				"brave-bin"
+				"rofi-bluetooth-git"
     )
 
     install_packages_aur "${aur_packages[@]}"

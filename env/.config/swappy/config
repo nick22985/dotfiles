@@ -1,0 +1,5 @@
+[Default]
+save_dir=$HOME/Pictures/Screenshots
+copy_cmd=wl-copy < {}
+early_exit=true
+auto_save=true

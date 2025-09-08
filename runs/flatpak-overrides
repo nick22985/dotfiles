@@ -14,9 +14,9 @@ set_context "Flatpak Overrides"
 
 # make it work in hyprland / wayland sessionks
 # sdfs
-flatpak override --user --env=QT_QPA_PLATFORM=wayland org.flameshot.Flameshot
-flatpak override --user --env=XDG_SESSION_DESKTOP=sway org.flameshot.Flameshot
-flatpak override --user --env=XDG_CURRENT_DESKTOP=sway org.flameshot.Flameshot
+# flatpak override --user --env=QT_QPA_PLATFORM=wayland org.flameshot.Flameshot
+# flatpak override --user --env=XDG_SESSION_DESKTOP=sway org.flameshot.Flameshot
+# flatpak override --user --env=XDG_CURRENT_DESKTOP=sway org.flameshot.Flameshot
 flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland --socket=wayland --socket=fallback-x11 --nosocket=x11 com.slack.Slack
 
 # discord crashing running in wayland???

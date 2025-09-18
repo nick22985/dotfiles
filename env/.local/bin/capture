@@ -1,10 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Unified capture script for screenshots and recordings
-# Author: Nick  
-# Version: 2.1
-
 # Script metadata
 SCRIPT_NAME="$(basename "$0")"
 readonly SCRIPT_NAME

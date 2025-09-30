@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+session_name=$1
+ssh_host=$(tmux show-environment -t "$session_name" | grep '^TMUX_SSH_HOST=' | cut -d= -f2)
+
+if [[ -n "$ssh_host" ]]; then
+    # Get the latest window ID (the one that just got created)
+    win_id=$(tmux list-windows -t "$session_name" -F "#{window_id}" | tail -n1)
+    # Replace its first pane with ssh
+    tmux send-keys -t "$session_name:$win_id" "ssh $ssh_host" C-m
+fi
+

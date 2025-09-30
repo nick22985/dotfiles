@@ -1,0 +1,29 @@
+{
+	"notification-visibility": {
+		"block-mailsignin-notifications": {
+			"state": "ignored",
+			"summary": "Gmail",
+			"body": "Credentials needed\\: Enter credentials for .*"
+		},
+		"block-brave-critical": {
+			"state": "ignored",
+			"app-name": "Brave",
+			"urgency": "Critical"
+		},
+		"block-kdeconnect-systemui": {
+			"state": "ignored",
+			"app-name": "KDE Connect",
+			"summary": "System UI",
+			"body": "MediaOngoingActivity"
+    }
+		"example-name": {
+			"state": "The notification state",
+			"app-name": "Notification app-name Regex",
+			"summary": "Notification summary Regex",
+			"body": "Notification body Regex",
+			"urgency": "Low or Normal or Critical",
+			"category": "Notification category Regex"
+		}
+	}
+}
+

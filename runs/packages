@@ -90,6 +90,8 @@ if command_exists pacman; then
 				"gst-plugins-good"
 				# "lutris"
 				"ntfs-3g" # ntfs support hdd
+				"sshs"
+				"ncdu"
     )
 
     install_packages_pacman "${packages[@]}"

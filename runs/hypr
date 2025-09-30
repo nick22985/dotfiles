@@ -47,6 +47,7 @@ if command_exists pacman; then
         "kvantum"
         "breeze-icons"
         "socat"
+				"wf-recorder"
     )
     install_packages_pacman "${hyprland_packages[@]}"
 
@@ -57,6 +58,7 @@ if command_exists pacman; then
             "swaync"
             "wofi"
             "qr"                    # QR code generator (for waybar-hotspot)
+					"wayfreeze-git"
         )
 
         install_packages_aur "${aur_hyprland_packages[@]}"

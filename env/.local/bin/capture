@@ -32,12 +32,56 @@ log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$*"; }
 log_warning() { printf "${YELLOW}[WARNING]${NC} %s\n" "$*"; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
 
-# Notification functions
-notify_info() {
-    if [[ $USE_NOTIFICATIONS == true ]]; then
-        notify-send -i camera-photo "Capture" "$*" 2>/dev/null || true
+# Notification with actions
+notify_with_actions() {
+    local title="$1"
+    local message="$2"
+    local filepath="$3"
+
+    if [[ $USE_NOTIFICATIONS == false ]]; then
+        return
     fi
+
+    local actions
+    if file --mime-type -b "$filepath" | grep -q "^image/"; then
+        actions='["default", "Dismiss", "copy", "Copy to Clipboard", "open", "Open File"]'
+    else
+        actions='["default", "Dismiss", "open", "Open File"]'
+    fi
+
+    local nid
+    nid=$(gdbus call \
+        --session \
+        --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify \
+        "CaptureScript" 0 "camera-photo" "$title" "$message" \
+        "$actions" '{}' -1 \
+        | awk '{print $2}' )
+
+    gdbus monitor --session --dest org.freedesktop.Notifications \
+        | while read -r line; do
+            if [[ "$line" =~ "ActionInvoked" ]] && [[ "$line" =~ "$nid" ]]; then
+                if [[ "$line" =~ '"copy"' ]]; then
+                    if command -v wl-copy >/dev/null 2>&1; then
+                        wl-copy < "$filepath"
+                        log_success "Copied file to clipboard"
+                    elif command -v xclip >/dev/null 2>&1; then
+                        xclip -selection clipboard -t image/png -i "$filepath"
+                        log_success "Copied file to clipboard (xclip)"
+                    else
+                        log_warning "No clipboard tool (install wl-clipboard or xclip)"
+                    fi
+                    break
+                elif [[ "$line" =~ '"open"' ]]; then
+                    xdg-open "$filepath" >/dev/null 2>&1 &
+                    log_success "Opened file: $filepath"
+                    break
+                fi
+            fi
+        done &
 }
+
 
 notify_success() {
     if [[ $USE_NOTIFICATIONS == true ]]; then
@@ -208,7 +252,6 @@ take_screenshot_freeze() {
     if [[ $USE_SWAPPY == true ]]; then
         log_info "Freezing screen for region selection..."
         log_info "Select your region, then swappy will open..."
-        notify_info "Screen frozen - select your region"
         
         # Start wayfreeze in background and get the geometry
         wayfreeze & 
@@ -235,7 +278,6 @@ take_screenshot_freeze() {
         
         log_info "Freezing screen for region selection..."
         log_info "Select your region to save screenshot..."
-        notify_info "Screen frozen - select your region"
         
         # Start wayfreeze in background
         wayfreeze &
@@ -254,7 +296,7 @@ take_screenshot_freeze() {
         grim -g "$geom" "$filepath" || die "Failed to save frozen screenshot"
         
         log_success "Frozen screenshot saved: $filepath"
-        notify_success "Frozen screenshot saved\n$(basename "$filepath")"
+        notify_with_actions "Screenshot Saved" "$(basename "$filepath")" "$filepath"
     fi
 }
 
@@ -272,7 +314,6 @@ take_screenshot() {
     
     if [[ $USE_SWAPPY == true ]]; then
         log_info "Taking screenshot of $TARGET and opening in swappy..."
-        notify_info "Taking $TARGET screenshot..."
         grim -g "$geom" - | swappy -f - || die "Failed to take screenshot"
         notify_success "Screenshot opened in editor"
     else
@@ -283,7 +324,6 @@ take_screenshot() {
         mkdir -p "$SCREENSHOT_DIR"
         
         log_info "Taking screenshot of $TARGET..."
-        notify_info "Taking $TARGET screenshot..."
         grim -g "$geom" "$filepath" || die "Failed to save screenshot"
         
         log_success "Screenshot saved: $filepath"
@@ -375,7 +415,7 @@ start_recording() {
     if [[ $exit_code -eq 0 ]] || [[ $exit_code -eq 130 ]] || [[ $exit_code -eq 143 ]]; then
         # 0 = normal exit, 130 = SIGINT, 143 = SIGTERM
         log_success "Recording saved: $filepath"
-        notify_success "Recording saved successfully\n$(basename "$filepath")"
+				notify_with_actions "Recording Saved" "$(basename "$filepath")" "$filepath"
     else
         log_error "Recording may have failed (exit code: $exit_code)"
         log_info "File saved to: $filepath"
@@ -397,3 +437,4 @@ main() {
 
 # Run main function with all arguments
 main "$@"
+

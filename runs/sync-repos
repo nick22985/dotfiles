@@ -99,12 +99,30 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         continue
     fi
 
-    # Parse line: "owner/repo [target_dir]"
-    read -r repo_spec target_dir <<< "$line"
+    # Parse line: "owner/repo [target_dir] [--bare]"
+    read -r -a words <<< "$line"
+    repo_spec="${words[0]}"
 
     if [[ -z "$repo_spec" ]]; then
         continue
     fi
+
+    target_dir=""
+    bare_clone=false
+    other_options=()
+
+    if [[ ${#words[@]} -gt 1 ]] && [[ "${words[1]}" != --* ]]; then
+        target_dir="${words[1]}"
+        other_options=("${words[@]:2}")
+    else
+        other_options=("${words[@]:1}")
+    fi
+
+    for option in "${other_options[@]}"; do
+        if [[ "$option" == "--bare" ]]; then
+            bare_clone=true
+        fi
+    done
 
     repo_count=$((repo_count + 1))
 
@@ -160,7 +178,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         log "  → Using default path: $full_path"
     fi
 
-    if [[ -d "$full_path/.git" ]]; then
+    if git -C "$full_path" rev-parse --git-dir &>/dev/null; then
         # Repository exists, skip it
         log "  ✓ Repository already exists, skipping"
         skip_count=$((skip_count + 1))
@@ -175,7 +193,13 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
             # Use the provided or constructed Git URL
             log "  → Cloning repository: $git_url"
-            if git clone "$git_url" "$full_path" 2>/dev/null; then
+            
+            clone_cmd=("git" "clone")
+            if [[ "$bare_clone" == "true" ]]; then
+                clone_cmd+=("--bare")
+            fi
+
+            if "${clone_cmd[@]}" "$git_url" "$full_path" 2>/dev/null; then
                 if [[ "$git_url" =~ ^git@ ]]; then
                     log "  ✓ Cloned $repo_spec (SSH)"
                 else
@@ -208,11 +232,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
                 [[ -d "$full_path" ]] && rm -rf "$full_path"
             fi
         else
-            if [[ "$git_url" =~ ^git@ ]]; then
-                log "  Would clone $repo_spec to $full_path (via SSH)"
-            else
-                log "  Would clone $repo_spec to $full_path (via HTTPS)"
+            clone_type=" (via SSH)"
+            if [[ ! "$git_url" =~ ^git@ ]]; then
+                clone_type=" (via HTTPS)"
             fi
+            bare_text=""
+            if [[ "$bare_clone" == "true" ]]; then
+                bare_text=" as bare repository"
+            fi
+            log "  Would clone $repo_spec to $full_path$clone_type$bare_text"
             log "  Would initialize submodules if present"
             success_count=$((success_count + 1))
         fi

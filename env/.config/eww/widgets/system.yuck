@@ -1,0 +1,13 @@
+;; System monitoring widgets
+
+(defwidget cpu_widget []
+  (box :class "cpu"
+    (label :text " ${cpu}%" :tooltip "CPU Usage")))
+
+(defwidget mem_widget []
+  (box :class "mem"
+    (label :text " ${mem}" :tooltip "Memory Usage")))
+
+(defwidget bat_widget []
+  (box :class "battery"
+    (label :text "󰁹 ${bat}%" :tooltip "Battery Level")))

@@ -1,0 +1,54 @@
+;; Left modules widgets (matching waybar left modules)
+
+(defwidget logo []
+  (button :class "logo"
+          :onclick "~/.config/rofi/scripts/powermenu.sh"
+          :tooltip "Power Menu"
+    (label :text "")))
+
+(defwidget clock_detailed []
+  (button :class "clock"
+          :tooltip "
+${date_tooltip}
+${calendar}"
+    (label :text "${time}")))
+
+(defwidget disk_widget []
+  (box :class "disk"
+       :tooltip "Disk usage: ${disk}% used"
+    (label :text " ${disk}%")))
+
+(defwidget memory_widget []
+  (box :class "memory"
+       :tooltip "Memory usage: ${mem}"
+    (label :text " ${mem_percent}%")))
+
+(defwidget cpu_widget_detailed []
+  (box :class "cpu"
+       :tooltip "CPU usage: ${cpu}%"
+    (label :text " ${cpu}%")))
+
+(defwidget temperature_widget []
+  (button :class "temperature ${temp > 80 ? 'critical' : ''}"
+          :onclick "htop"
+          :tooltip "CPU Temperature: ${temp}°C (click to open btop)"
+    (label :text " ${temp}°C")))
+
+(defwidget power_draw_widget []
+  (box :class "power-draw"
+       :tooltip "${power_draw_tooltip}"
+    (label :text " ${power_draw}")))
+
+;; Combined left modules
+(defwidget left_modules []
+  (box :class "modules-left"
+       :space-evenly false
+       :spacing 0
+    (logo)
+    (clock_detailed)
+    (disk_widget)
+    (memory_widget)
+    (cpu_widget_detailed)
+    (power_draw_widget)
+    (temperature_widget)
+    ))

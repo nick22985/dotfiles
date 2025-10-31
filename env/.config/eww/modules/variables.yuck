@@ -1,0 +1,117 @@
+;; Variables and polls for system monitoring
+
+;; Clock (matching waybar format with seconds)
+(defpoll time :interval "1s"
+  "date '+%I:%M:%S %p'")
+
+;; Date for tooltip
+(defpoll date_tooltip :interval "60s"
+  "date '+%Y %B'")
+
+;; Calendar for tooltip  
+(defpoll calendar :interval "3600s"
+  "cal")
+
+;; CPU usage
+(defpoll cpu :interval "1s"
+  "top -bn1 | awk '/Cpu\\(s\\)/ {print int(100 - $8)}'")
+
+;; Memory usage (percentage)
+(defpoll mem_percent :interval "5s"
+  "free | awk '/Mem:/ {printf \"%.0f\", $3/$2 * 100.0}'")
+
+;; Memory usage (formatted like waybar)
+(defpoll mem :interval "5s"
+  "free -h | awk '/Mem:/ {print $3 \"/\" $2}'")
+
+;; Battery (only show if battery exists)
+(defpoll has_battery :interval "30s"
+  "[ -e /sys/class/power_supply/BAT0 ] && echo 'true' || echo 'false'")
+
+(defpoll bat :interval "1s"
+  "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null || echo '0'")
+
+(defpoll bat_status :interval "1s"
+  "cat /sys/class/power_supply/BAT0/status 2>/dev/null || echo 'Unknown'")
+
+;; Disk usage
+(defpoll disk :interval "30s"
+  "df -h / | awk 'NR==2 {print int($5)}'")
+
+;; Temperature (fallback to a default if sensors not available)
+(defpoll temp :interval "1s"
+  "sensors 2>/dev/null | grep 'acpitz-acpi' -A2 | grep 'temp1:' | awk '{match($2, /[0-9]+\.[0-9]+/); print int(substr($2, RSTART, RLENGTH))}' || echo '28'")
+
+;; Power draw (simplified text version)
+(defpoll power_draw :interval "1s"
+  "~/.config/waybar/scripts/powerdraw.sh 2>/dev/null | jq -r '.text // \"⚡ N/A\"' || echo '⚡ N/A'")
+
+(defpoll power_draw_tooltip :interval "1s"
+  "~/.config/waybar/scripts/powerdraw.sh 2>/dev/null | jq -r '.tooltip // \"Power monitoring unavailable\"' || echo 'Power monitoring unavailable'")
+
+;; Hyprland active workspace
+(deflisten workspace_id :initial "1"
+  "hyprctl -j activeworkspace | jq -r '.id' 2>/dev/null || echo '1'")
+
+;; Hyprland active window (listen to hyprland events)
+(deflisten window_info :initial ""
+  "~/.config/eww/scripts/hypr-window-listener.sh")
+
+;; Network info
+(defpoll network_status :interval "5s"
+  "nmcli -t -f STATE,CONNECTION general 2>/dev/null | head -1 | cut -d: -f1 || echo 'unknown'")
+
+(defpoll network_name :interval "5s"
+  "nmcli -t -f STATE,CONNECTION general 2>/dev/null | head -1 | cut -d: -f2 || echo 'No Network'")
+
+;; Network speed (download/upload)
+(defpoll network_down :interval "1s"
+  "cat /proc/net/dev | awk '/wl/ || /eth/ || /enp/ {rx += $2} END {print rx/1024/1024}' | head -1 || echo '0'")
+
+(defpoll network_up :interval "1s"
+  "cat /proc/net/dev | awk '/wl/ || /eth/ || /enp/ {tx += $10} END {print tx/1024/1024}' | head -1 || echo '0'")
+
+;; Network speed formatted
+(defpoll network_speed :interval "1s"
+  "~/.config/eww/scripts/network-speed.sh")
+
+;; Bluetooth status
+(defpoll bluetooth_status :interval "5s"
+  "bluetoothctl show 2>/dev/null | grep 'Powered: yes' >/dev/null && echo 'on' || echo 'off'")
+
+;; Audio volume (fast polling for responsive updates)
+(defpoll volume :interval "100ms" :initial "50"
+  "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /%/) print $i}' | head -1 | sed 's/%//' || echo '50'")
+
+(defpoll volume_muted :interval "200ms" :initial "false"
+  "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -q 'yes' && echo 'true' || echo 'false'")
+
+;; Audio source (microphone)
+(defpoll mic_muted :interval "500ms" :initial "false"
+  "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | grep -q 'yes' && echo 'true' || echo 'false'")
+
+;; Idle inhibitor status (if using swayidle or similar)
+(defvar idle_inhibited false)
+
+;; Network hover state
+(defvar network_hover false)
+
+;; Volume hover state
+(defvar volume_hover false)
+
+;; Notification status (if using swaync)
+(deflisten notification_status :initial "{\"class\": \"none\"}"
+  "~/.config/eww/scripts/notification-status.sh")
+
+;; Color picker recent color
+(defpoll colorpicker_recent :interval "1s" :initial ""
+  "~/.config/eww/scripts/colorpicker.sh -e")
+
+
+
+;; Colorpicker hover state
+(defvar colorpicker_hover false)
+
+;; MPD status (if you use mpd)
+(deflisten mpd_status :initial ""
+  "mpc current 2>/dev/null || echo ''")

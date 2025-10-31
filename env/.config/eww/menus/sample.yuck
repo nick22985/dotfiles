@@ -1,0 +1,12 @@
+;; Sample menu - you can add your own menus here
+;; Example power menu or context menu
+
+;; (defwindow power-menu
+;;   :monitor 0
+;;   :geometry (geometry :x "50%" :y "50%" :width "200px" :height "150px")
+;;   :stacking "overlay"
+;;   :anchor "center"
+;;   (box :class "power-menu" :orientation "v" :spacing 10
+;;     (button :onclick "systemctl poweroff" "Shutdown")
+;;     (button :onclick "systemctl reboot" "Restart")
+;;     (button :onclick "eww close power-menu" "Cancel")))

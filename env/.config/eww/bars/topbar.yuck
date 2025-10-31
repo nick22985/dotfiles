@@ -1,0 +1,51 @@
+;; Top system bars for all monitors (Waybar-style layout)
+
+;; Waybar-style topbar content
+(defwidget waybar_topbar_content []
+  (centerbox
+    :orientation "h"
+    :class "topbar-centerbox"
+    (box :class "left-container" 
+         :halign "start"
+         :hexpand false
+      (left_modules))
+    (box :class "center-container"
+         :halign "center" 
+         :hexpand false
+      (center_modules))
+    (box :class "right-container"
+         :halign "end"
+         :hexpand false
+      (right_modules))))
+
+;; Monitor 0 - Primary monitor (Samsung Odyssey G95NC)  
+(defwindow topbar0
+  :monitor 0
+  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "35px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  (waybar_topbar_content))
+
+;; Monitor 1 - LG ULTRAGEAR (HDMI-A-1)
+(defwindow topbar1
+  :monitor 1
+  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "35px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  (waybar_topbar_content))
+
+;; Monitor 2 - LG ULTRAGEAR (HDMI-A-6)
+(defwindow topbar2
+  :monitor 2
+  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "35px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  (waybar_topbar_content))
+
+;; Legacy topbar for backwards compatibility
+(defwindow topbar
+  :monitor 0
+  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "35px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  (waybar_topbar_content))

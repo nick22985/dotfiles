@@ -1,0 +1,52 @@
+// Top bar specific styles (matching waybar)
+window#topbar0,
+window#topbar1, 
+window#topbar2,
+window#topbar {
+	background-color: rgba(0, 0, 0, 0);
+	margin: 5px;
+}
+
+.topbar-centerbox {
+	/* Ensure proper spacing */
+}
+
+.left-container,
+.center-container, 
+.right-container {
+	/* Container specific styling if needed */
+}
+
+.modules-left {
+	border-radius: 0 15px 15px 0;
+	margin-top: 2px;
+	background-color: #000000;
+	padding-right: 5px;
+	/* Only expand to content size */
+	min-width: 0;
+}
+
+.modules-center {
+	padding: 0 15px;
+	margin-top: 2px;
+	border-radius: 15px 15px 15px 15px;
+	background-color: #000000;
+	/* Only expand to content size */
+	min-width: 0;
+}
+
+.modules-right {
+	padding-left: 5px;
+	border-radius: 15px 0 0 15px;
+	margin-top: 2px;
+	background-color: #000000;
+	/* Only expand to content size */
+	min-width: 0;
+}
+
+.logo {
+	padding: 0 10px;
+	color: #89b4fa;
+	font-size: 16px;
+	font-weight: bold;
+}

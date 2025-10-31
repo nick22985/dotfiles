@@ -1,0 +1,4 @@
+;; Clock widget
+(defwidget clock []
+  (box :class "clock"
+    (label :text "${time}" :tooltip "Current date and time")))

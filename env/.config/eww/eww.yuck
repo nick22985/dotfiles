@@ -1,0 +1,13 @@
+;; ===============================
+;; Eww Main Configuration
+;; ===============================
+
+;; Include all modules
+(include "./modules/variables.yuck")
+(include "./widgets/clock.yuck")
+(include "./widgets/system.yuck")
+(include "./widgets/left-modules.yuck")
+(include "./widgets/center-modules.yuck")
+(include "./widgets/right-modules.yuck")
+(include "./widgets/colorpicker-popup.yuck")
+(include "./bars/topbar.yuck")

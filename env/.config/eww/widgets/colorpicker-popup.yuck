@@ -1,0 +1,52 @@
+;; Colorpicker popup showing recent colors with colored dots
+
+(defpoll colorpicker_colors :interval "2s" :initial "[]"
+  "~/.config/eww/scripts/colorpicker.sh -j")
+
+(defwidget colorpicker_popup_content []
+  (eventbox :onhover "eww update colorpicker_hover=true"
+            :onhoverlost "eww update colorpicker_hover=false && ~/.config/eww/scripts/close-colorpicker-popup.sh"
+    (box :class "colorpicker-popup"
+         :orientation "v"
+         :spacing 2
+      (box :orientation "v" :spacing 2
+        (box :class "colorpicker-popup-item"
+             :spacing 8
+          (label :class "colorpicker-popup-text"
+                 :text "Recent Colors:"))
+        (for color in colorpicker_colors
+          (box :class "colorpicker-popup-item"
+               :spacing 8
+            (label :class "colorpicker-popup-dot"
+                   :style "color: ${color}; font-size: 16px;"
+                   :text "")
+            (label :class "colorpicker-popup-text"
+                   :text "${color}")))))))
+
+;; Monitor-specific popups (opened intelligently based on focus)
+(defwindow colorpicker-popup0
+  :monitor 0
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))
+
+(defwindow colorpicker-popup1
+  :monitor 1
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))
+
+(defwindow colorpicker-popup2
+  :monitor 2
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))

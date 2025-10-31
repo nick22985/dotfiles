@@ -1,0 +1,43 @@
+;; Center modules widgets (workspaces and mpd)
+
+(defwidget workspace_button [id icon ?active]
+  (button :class "workspace ${active == 'true' ? 'active' : ''}"
+          :onclick "hyprctl dispatch workspace ${id}"
+    (label :text "${icon}")))
+
+(defwidget workspaces []
+  (box :class "workspaces"
+       :space-evenly false
+       :spacing 5
+    (workspace_button :id "1" 
+                     :icon "${workspace_id == '1' ? '' : ''}"
+                     :active "${workspace_id == '1' ? 'true' : 'false'}")
+    (workspace_button :id "2" 
+                     :icon "${workspace_id == '2' ? '' : ''}"
+                     :active "${workspace_id == '2' ? 'true' : 'false'}")
+    (workspace_button :id "3" 
+                     :icon "${workspace_id == '3' ? '' : ''}"
+                     :active "${workspace_id == '3' ? 'true' : 'false'}")
+    (workspace_button :id "4" 
+                     :icon "${workspace_id == '4' ? '' : ''}"
+                     :active "${workspace_id == '4' ? 'true' : 'false'}")
+    (workspace_button :id "5" 
+                     :icon "${workspace_id == '5' ? '' : ''}"
+                     :active "${workspace_id == '5' ? 'true' : 'false'}")
+    (workspace_button :id "6" 
+                     :icon "${workspace_id == '6' ? '' : ''}"
+                     :active "${workspace_id == '6' ? 'true' : 'false'}")))
+
+(defwidget mpd_widget []
+  (box :class "mpd"
+       :visible "${mpd_status != ''}"
+       :tooltip "MPD: ${mpd_status}"
+    (label :text " ${mpd_status != '' ? mpd_status : ''}")))
+
+;; Combined center modules
+(defwidget center_modules []
+  (box :class "modules-center"
+       :space-evenly false
+       :spacing 10
+    (workspaces)
+    (mpd_widget)))

@@ -408,6 +408,7 @@ handle_event() {
     case "$event_type" in
         "openwindow"|"closewindow")
             handle_window_event
+						# handle_special_windows
             ;;
         "movewindow")
             echo "Move window event detected: $event_data"
@@ -489,6 +490,23 @@ if [[ -n "$target_workspace" ]] && is_target_workspace; then
 else
     echo "Not currently on target monitor"
 fi
+
+handle_special_windows() {
+    # Wait to allow 1Password to finish resizing/shrinking on open
+    sleep 0.7
+
+    local win=$(hyprctl clients -j | jq -r '.[] | select(.class == "1Password" and .title == "1Password" and .floating == true) | .address')
+
+    if [[ -n "$win" ]]; then
+        echo "Resizing floating 1Password window to 800x500..."
+        hyprctl dispatch resizewindowpixel exact 800 500,address:"$win"
+
+        # Repeat after a short delay to enforce size if it shrinks back
+        sleep 0.5
+        hyprctl dispatch resizewindowpixel exact 800 500,address:"$win"
+    fi
+}
+
 
 echo "Listening for window events..."
 socat -t 10000 - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" | while read -r line; do

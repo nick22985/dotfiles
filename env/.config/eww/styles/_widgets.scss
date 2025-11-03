@@ -1,4 +1,4 @@
-// Widget specific styles (matching waybar)
+// Widget specific styles
 
 // Common widget padding
 .battery,
@@ -13,7 +13,7 @@
 .backlight,
 .cpu,
 .temperature,
-.idle-inhibitor,
+
 .tray,
 .window,
 .workspaces,
@@ -105,14 +105,25 @@
 
 // Workspace styling
 .workspace {
-	padding: 0 5px;
+	// padding: 4px 8px;
 	margin: 0 2px;
 	border-radius: 5px;
+	transition: background-color 0.2s ease;
+}
+
+.workspace:hover {
+	background-color: rgba(95, 209, 250, 0.3);
+}
+
+.workspace label {
+	font-size: 15px;
+	padding: 2px 4px;
+	min-width: 16px;
 }
 
 .workspace.active {
-	background-color: #5fd1fa;
-	color: #000000;
+	// background-color: #5fd1fa;
+	// color: #000000;
 }
 
 // Audio groups and network groups
@@ -148,6 +159,8 @@
 .temperature {
 	color: #ffffff;
 }
+
+
 
 .power-draw {
 	color: #f9e2af;

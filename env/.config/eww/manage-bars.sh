@@ -1,61 +1,54 @@
 #!/bin/bash
 
-# Eww multi-monitor bar management script
+# Dynamic eww multi-monitor bar management script
 
 case "$1" in
-    "start"|"launch")
-        echo "Starting topbars on all monitors..."
-        eww kill 2>/dev/null
-        eww open topbar0
-        eww open topbar1 
-        eww open topbar2
-        echo "All topbars launched!"
+    "start"|"launch"|"restart")
+        echo "Starting eww with dynamic monitor detection..."
+        ~/.config/eww/launch.sh
         ;;
     "stop"|"kill")
-        echo "Stopping all topbars..."
+        echo "Stopping eww and monitor watcher..."
         eww kill
-        echo "All topbars stopped!"
+        pkill -f monitor-watcher.sh 2>/dev/null || true
+        echo "All processes stopped!"
         ;;
-    "restart"|"reload")
-        echo "Restarting topbars..."
-        eww kill 2>/dev/null
+    "reload")
+        echo "Reloading eww configuration..."
         eww reload
-        sleep 1
-        eww open topbar0
-        eww open topbar1
-        eww open topbar2
-        echo "All topbars restarted!"
         ;;
     "status")
+        echo "=== EWW Status ==="
         echo "Active eww windows:"
-        eww active-windows
+        eww active-windows 2>/dev/null || echo "No eww windows active"
+        echo ""
+        echo "=== Processes ==="
+        echo "EWW processes:"
+        pgrep -f eww || echo "No eww processes found"
+        echo "Monitor watcher:"
+        pgrep -f monitor-watcher.sh || echo "No monitor watcher found"
+        echo ""
+        echo "=== Current Monitors ==="
+        hyprctl -j monitors 2>/dev/null | jq -r '.[].name' | nl || echo "Could not detect monitors"
         ;;
-    "monitor0"|"m0")
-        eww close topbar0 2>/dev/null
-        eww open topbar0
-        echo "Topbar on monitor 0 refreshed"
+    "logs")
+        echo "Monitor watcher log (last 20 lines):"
+        tail -20 ~/.cache/eww/monitor-watcher.log 2>/dev/null || echo "No monitor watcher log found"
         ;;
-    "monitor1"|"m1")
-        eww close topbar1 2>/dev/null
-        eww open topbar1
-        echo "Topbar on monitor 1 refreshed"
-        ;;
-    "monitor2"|"m2")
-        eww close topbar2 2>/dev/null
-        eww open topbar2
-        echo "Topbar on monitor 2 refreshed"
+    "watch")
+        echo "Watching monitor watcher log (Ctrl+C to exit):"
+        tail -f ~/.cache/eww/monitor-watcher.log 2>/dev/null || echo "No monitor watcher log found"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|monitor0|monitor1|monitor2}"
+        echo "Usage: $0 {start|stop|restart|reload|status|logs|watch}"
         echo ""
         echo "Commands:"
-        echo "  start/launch  - Start topbars on all monitors"
-        echo "  stop/kill     - Stop all topbars"
-        echo "  restart/reload- Restart all topbars"
-        echo "  status        - Show active windows"
-        echo "  monitor0/m0   - Refresh topbar on monitor 0"
-        echo "  monitor1/m1   - Refresh topbar on monitor 1" 
-        echo "  monitor2/m2   - Refresh topbar on monitor 2"
+        echo "  start/restart - Launch eww with dynamic monitor detection"
+        echo "  stop/kill     - Stop eww and monitor watcher"
+        echo "  reload        - Reload eww configuration only"
+        echo "  status        - Show running processes and monitor info"
+        echo "  logs          - Show monitor watcher logs"
+        echo "  watch         - Watch monitor watcher logs in real-time"
         exit 1
         ;;
 esac

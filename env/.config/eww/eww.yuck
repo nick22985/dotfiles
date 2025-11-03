@@ -11,3 +11,8 @@
 (include "./widgets/right-modules.yuck")
 (include "./widgets/colorpicker-popup.yuck")
 (include "./bars/topbar.yuck")
+
+;; Include auto-generated dynamic config (only if files exist)
+(include "./tmp/modules/variables.yuck")
+(include "./tmp/widgets/center-modules.yuck") 
+(include "./tmp/bars/topbar.yuck")

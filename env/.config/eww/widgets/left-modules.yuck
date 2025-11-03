@@ -1,4 +1,4 @@
-;; Left modules widgets (matching waybar left modules)
+;; Left modules widgets
 
 (defwidget logo []
   (button :class "logo"
@@ -29,10 +29,10 @@ ${calendar}"
     (label :text " ${cpu}%")))
 
 (defwidget temperature_widget []
-  (button :class "temperature ${temp > 80 ? 'critical' : ''}"
+  (button :class "temperature ${temp != '' && temp > 80 ? 'critical' : ''}"
           :onclick "htop"
           :tooltip "CPU Temperature: ${temp}°C (click to open btop)"
-    (label :text " ${temp}°C")))
+    (label :text "${temp}°C")))
 
 (defwidget power_draw_widget []
   (box :class "power-draw"

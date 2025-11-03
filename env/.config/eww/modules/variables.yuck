@@ -1,6 +1,6 @@
 ;; Variables and polls for system monitoring
 
-;; Clock (matching waybar format with seconds)
+;; Clock with seconds
 (defpoll time :interval "1s"
   "date '+%I:%M:%S %p'")
 
@@ -8,7 +8,7 @@
 (defpoll date_tooltip :interval "60s"
   "date '+%Y %B'")
 
-;; Calendar for tooltip  
+;; Calendar for tooltip
 (defpoll calendar :interval "3600s"
   "cal")
 
@@ -20,7 +20,7 @@
 (defpoll mem_percent :interval "5s"
   "free | awk '/Mem:/ {printf \"%.0f\", $3/$2 * 100.0}'")
 
-;; Memory usage (formatted like waybar)
+;; Memory usage (human readable format)
 (defpoll mem :interval "5s"
   "free -h | awk '/Mem:/ {print $3 \"/\" $2}'")
 
@@ -40,18 +40,22 @@
 
 ;; Temperature (fallback to a default if sensors not available)
 (defpoll temp :interval "1s"
-  "sensors 2>/dev/null | grep 'acpitz-acpi' -A2 | grep 'temp1:' | awk '{match($2, /[0-9]+\.[0-9]+/); print int(substr($2, RSTART, RLENGTH))}' || echo '28'")
+  "sensors 2>/dev/null | grep 'acpitz-acpi' -A2 | grep 'temp1:' | awk '{match($2, /[0-9]+\\.[0-9]+/); print int(substr($2, RSTART, RLENGTH))}' | head -1 || echo '28'")
 
 ;; Power draw (simplified text version)
 (defpoll power_draw :interval "1s"
-  "~/.config/waybar/scripts/powerdraw.sh 2>/dev/null | jq -r '.text // \"⚡ N/A\"' || echo '⚡ N/A'")
+  "~/.config/eww/scripts/powerdraw.sh 2>/dev/null | jq -r '.text // \"⚡ N/A\"' || echo '⚡ N/A'")
 
 (defpoll power_draw_tooltip :interval "1s"
-  "~/.config/waybar/scripts/powerdraw.sh 2>/dev/null | jq -r '.tooltip // \"Power monitoring unavailable\"' || echo 'Power monitoring unavailable'")
+  "~/.config/eww/scripts/powerdraw.sh 2>/dev/null | jq -r '.tooltip // \"Power monitoring unavailable\"' || echo 'Power monitoring unavailable'")
 
 ;; Hyprland active workspace
 (deflisten workspace_id :initial "1"
-  "hyprctl -j activeworkspace | jq -r '.id' 2>/dev/null || echo '1'")
+  "~/.config/eww/scripts/workspace-listener.sh")
+
+;; Global workspace info - shows all workspaces properly based on binding
+(deflisten workspaces_info :initial "{\"active\": 1, \"occupied\": [1,2,3,4,5,6]}"
+  "~/.config/eww/scripts/workspaces-listener.sh")
 
 ;; Hyprland active window (listen to hyprland events)
 (deflisten window_info :initial ""
@@ -90,8 +94,7 @@
 (defpoll mic_muted :interval "500ms" :initial "false"
   "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | grep -q 'yes' && echo 'true' || echo 'false'")
 
-;; Idle inhibitor status (if using swayidle or similar)
-(defvar idle_inhibited false)
+
 
 ;; Network hover state
 (defvar network_hover false)
@@ -111,6 +114,10 @@
 
 ;; Colorpicker hover state
 (defvar colorpicker_hover false)
+
+;; Brightness level (0-100) or "disabled" if no backlight control
+(defpoll brightness :interval "500ms" :initial "disabled"
+  "~/.config/eww/scripts/brightness.sh")
 
 ;; MPD status (if you use mpd)
 (deflisten mpd_status :initial ""

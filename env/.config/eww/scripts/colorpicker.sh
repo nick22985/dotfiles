@@ -62,7 +62,7 @@ echo "$color" >"$loc/colors"
 echo "$prevColors" >>"$loc/colors"
 sed -i '/^$/d' "$loc/colors"
 
-# Update eww instead of waybar
+# Update eww with new color
 eww update colorpicker_recent="$(head -n 1 "$loc/colors" 2>/dev/null || echo '')"
 
 notify "Color picked: $color" "Copied to clipboard"

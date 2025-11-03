@@ -16,27 +16,33 @@
            :icon-size 14
            :spacing 10))
 
-(defwidget idle_inhibitor []
-  (button :class "idle-inhibitor"
-          :onclick "pkill -USR1 swayidle || swayidle &"
-          :tooltip "${idle_inhibited ? 'Idle inhibited' : 'Idle allowed'}"
-    (label :text "${idle_inhibited ? '󰈈' : '󰈉'}")))
+
 
 (defwidget clipboard_widget []
   (button :class "clipboard"
           :onclick "cliphist list | rofi -dmenu | cliphist decode | wl-copy"
           :tooltip "Clipboard manager"
-    (label :text "")))
+    (label :text "")))
 
 (defwidget backlight_widget []
-  (eventbox :onscroll "[ {} == 'up' ] && brightnessctl set +10 || brightnessctl set 10-"
+  (box :visible "${brightness != 'disabled'}"
+  (eventbox :onscroll "[ {} == 'up' ] && (brightnessctl -d intel_backlight set +10% 2>/dev/null || brightnessctl set +10) || (brightnessctl -d intel_backlight set 10%- 2>/dev/null || brightnessctl set 10-)"
     (button :class "backlight"
-            :tooltip "Brightness control"
-      (label :text ""))))
+            :tooltip "Brightness: ${brightness}%"
+      (label :text "${brightness <= 5 ? '' :
+                     brightness <= 15 ? '' :
+                     brightness <= 25 ? '' :
+                     brightness <= 35 ? '' :
+                     brightness <= 45 ? '' :
+                     brightness <= 55 ? '' :
+                     brightness <= 65 ? '' :
+                     brightness <= 75 ? '' :
+                     brightness <= 85 ? '' :
+                     brightness <= 95 ? '' : '󰽢'}")))))
 
 (defwidget colorpicker_widget []
   (eventbox :onhover "~/.config/eww/scripts/show-colorpicker-popup.sh"
-            :onhoverlost "~/.config/eww/scripts/close-colorpicker-popup.sh"
+            :onhoverlost "eww update colorpicker_hover=false && ~/.config/eww/scripts/close-colorpicker-popup.sh"
     (button :class "colorpicker"
             :onclick "~/.config/eww/scripts/colorpicker.sh"
             :tooltip "Color picker"
@@ -86,7 +92,7 @@
 
 (defwidget hotspot_widget []
   (button :class "hotspot"
-          :onclick "waybar-hotspot -a toggle"
+          :onclick "hotspot toggle"
           :tooltip "Mobile hotspot"
     (label :text "󱜠")))
 
@@ -129,7 +135,6 @@
        :spacing 0
     (window_info)
     (tray_widget)
-    (idle_inhibitor)
     (clipboard_widget)
     (backlight_widget)
     (colorpicker_widget)

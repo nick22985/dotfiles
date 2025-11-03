@@ -1,0 +1,22 @@
+;; Auto-generated monitor-specific center widgets
+(defwidget center_modules_0 []
+  (box :class "modules-center"
+       :space-evenly false
+       :spacing 10
+    (workspaces :workspace_info workspaces_info_0)
+    (mpd_widget)))
+
+(defwidget center_modules_1 []
+  (box :class "modules-center"
+       :space-evenly false
+       :spacing 10
+    (workspaces :workspace_info workspaces_info_1)
+    (mpd_widget)))
+
+(defwidget center_modules_2 []
+  (box :class "modules-center"
+       :space-evenly false
+       :spacing 10
+    (workspaces :workspace_info workspaces_info_2)
+    (mpd_widget)))
+

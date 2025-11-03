@@ -1,0 +1,25 @@
+;; Template for topbar content widget
+(defwidget topbar_content_{{MONITOR_ID}} []
+  (centerbox
+    :orientation "h"
+    :class "topbar-centerbox"
+    (box :class "left-container" 
+         :halign "start"
+         :hexpand false
+      (left_modules))
+    (box :class "center-container"
+         :halign "center" 
+         :hexpand false
+      (center_modules_{{MONITOR_ID}}))
+    (box :class "right-container"
+         :halign "end"
+         :hexpand false
+      (right_modules))))
+
+;; Template for topbar window
+(defwindow topbar{{MONITOR_ID}}
+  :monitor {{MONITOR_ID}}
+  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "33px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  (topbar_content_{{MONITOR_ID}}))

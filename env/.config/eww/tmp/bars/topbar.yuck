@@ -1,4 +1,5 @@
-;; Auto-generated monitor-specific topbar content and windows
+;; Auto-generated from template: topbar-content.yuck.template
+;; Template for topbar content widget
 (defwidget topbar_content_0 []
   (centerbox
     :orientation "h"
@@ -16,13 +17,14 @@
          :hexpand false
       (right_modules))))
 
+;; Template for topbar window
 (defwindow topbar0
   :monitor 0
   :geometry (geometry :x "0%" :y "0%" :width "100%" :height "33px" :anchor "top center")
   :stacking "fg"
   :exclusive true
   (topbar_content_0))
-
+;; Template for topbar content widget
 (defwidget topbar_content_1 []
   (centerbox
     :orientation "h"
@@ -40,13 +42,14 @@
          :hexpand false
       (right_modules))))
 
+;; Template for topbar window
 (defwindow topbar1
   :monitor 1
   :geometry (geometry :x "0%" :y "0%" :width "100%" :height "33px" :anchor "top center")
   :stacking "fg"
   :exclusive true
   (topbar_content_1))
-
+;; Template for topbar content widget
 (defwidget topbar_content_2 []
   (centerbox
     :orientation "h"
@@ -64,10 +67,10 @@
          :hexpand false
       (right_modules))))
 
+;; Template for topbar window
 (defwindow topbar2
   :monitor 2
   :geometry (geometry :x "0%" :y "0%" :width "100%" :height "33px" :anchor "top center")
   :stacking "fg"
   :exclusive true
   (topbar_content_2))
-

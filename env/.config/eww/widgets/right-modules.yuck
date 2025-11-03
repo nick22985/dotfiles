@@ -29,7 +29,7 @@
   (eventbox :onscroll "[ {} == 'up' ] && (brightnessctl -d intel_backlight set +10% 2>/dev/null || brightnessctl set +10) || (brightnessctl -d intel_backlight set 10%- 2>/dev/null || brightnessctl set 10-)"
     (button :class "backlight"
             :tooltip "Brightness: ${brightness}%"
-      (label :text "${brightness <= 5 ? '' :
+      (label :text "${brightness == 'disabled' ? '' : brightness <= 5 ? '' :
                      brightness <= 15 ? '' :
                      brightness <= 25 ? '' :
                      brightness <= 35 ? '' :

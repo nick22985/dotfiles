@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Function to generate from template
+generate_from_template() {
+    local template_file="$1"
+    local output_file="$2"
+    local monitor_count="$3"
+    
+    {
+        echo ";; Auto-generated from template: $(basename "$template_file")"
+        for ((i=0; i<monitor_count; i++)); do
+            sed "s/{{MONITOR_ID}}/$i/g" "$template_file"
+            echo ""
+        done
+    } > "$output_file"
+}
+
 # Generate dynamic eww configuration based on detected monitors
 generate_monitor_config() {
     local monitors=$(hyprctl -j monitors | jq -r '.[].name')
@@ -7,6 +22,7 @@ generate_monitor_config() {
     
     # Create tmp directory structure
     mkdir -p ~/.config/eww/tmp/{bars,widgets,modules}
+    mkdir -p ~/.config/eww/templates
     
     # Generate variables for each monitor
     {
@@ -20,58 +36,23 @@ generate_monitor_config() {
         done <<< "$monitors"
     } > ~/.config/eww/tmp/modules/variables.yuck
     
-    # Generate center widgets for each monitor
-    {
-        echo ";; Auto-generated monitor-specific center widgets"
-        local i=0
-        while IFS= read -r monitor; do
-            cat << EOF
-(defwidget center_modules_${i} []
-  (box :class "modules-center"
-       :space-evenly false
-       :spacing 10
-    (workspaces :workspace_info workspaces_info_${i})
-    (mpd_widget)))
+    # Generate center widgets from template
+    generate_from_template \
+        ~/.config/eww/templates/center-modules.yuck.template \
+        ~/.config/eww/tmp/widgets/center-modules.yuck \
+        "$monitor_count"
 
-EOF
-            ((i++))
-        done <<< "$monitors"
-    } > ~/.config/eww/tmp/widgets/center-modules.yuck
+    # Generate topbar content and windows from template
+    generate_from_template \
+        ~/.config/eww/templates/topbar-content.yuck.template \
+        ~/.config/eww/tmp/bars/topbar.yuck \
+        "$monitor_count"
 
-    # Generate topbar content and windows for each monitor
-    {
-        echo ";; Auto-generated monitor-specific topbar content and windows"
-        local i=0
-        while IFS= read -r monitor; do
-            cat << EOF
-(defwidget topbar_content_${i} []
-  (centerbox
-    :orientation "h"
-    :class "topbar-centerbox"
-    (box :class "left-container" 
-         :halign "start"
-         :hexpand false
-      (left_modules))
-    (box :class "center-container"
-         :halign "center" 
-         :hexpand false
-      (center_modules_${i}))
-    (box :class "right-container"
-         :halign "end"
-         :hexpand false
-      (right_modules))))
-
-(defwindow topbar${i}
-  :monitor ${i}
-  :geometry (geometry :x "0%" :y "0%" :width "100%" :height "33px" :anchor "top center")
-  :stacking "fg"
-  :exclusive true
-  (topbar_content_${i}))
-
-EOF
-            ((i++))
-        done <<< "$monitors"
-    } > ~/.config/eww/tmp/bars/topbar.yuck
+    # Generate colorpicker popup windows from template
+    generate_from_template \
+        ~/.config/eww/templates/colorpicker-popup-window.yuck.template \
+        ~/.config/eww/tmp/widgets/colorpicker-popup-windows.yuck \
+        "$monitor_count"
     
     # Files are now generated in tmp directory - no need to modify main config files
     

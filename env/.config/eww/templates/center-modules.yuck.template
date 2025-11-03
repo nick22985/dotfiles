@@ -1,0 +1,7 @@
+;; Template for center modules widget
+(defwidget center_modules_{{MONITOR_ID}} []
+  (box :class "modules-center"
+       :space-evenly false
+       :spacing 10
+    (workspaces :workspace_info workspaces_info_{{MONITOR_ID}})
+    (mpd_widget)))

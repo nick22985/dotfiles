@@ -1,0 +1,28 @@
+;; Auto-generated from template: colorpicker-popup-window.yuck.template
+;; Template for colorpicker popup window
+(defwindow colorpicker-popup0
+  :monitor 0
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))
+;; Template for colorpicker popup window
+(defwindow colorpicker-popup1
+  :monitor 1
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))
+;; Template for colorpicker popup window
+(defwindow colorpicker-popup2
+  :monitor 2
+  :geometry (geometry :x "0%" :y "-5px" :width "180px" :height "170px" :anchor "top right")
+  :stacking "overlay"
+  :windowtype "dock"
+  :wm-ignore true
+  :focusable false
+  (colorpicker_popup_content))

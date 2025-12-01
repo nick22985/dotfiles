@@ -92,6 +92,13 @@ if command_exists pacman; then
 				"ntfs-3g" # ntfs support hdd
 				"sshs"
 				"ncdu"
+				# pipewire
+				"pipewire"
+				"pipewire-pulse"
+				"pipewire-jack"
+				"wireplumber"
+				"lib32-pipewire"
+				"pipewire-bluetooth"
     )
 
     install_packages_pacman "${packages[@]}"

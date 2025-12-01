@@ -173,6 +173,9 @@ parse_args() {
             --quiet|-q)
                 QUIET="1"
                 ;;
+            --link)
+                LINK_MODE="1"
+                ;;
             *)
                 # Return remaining args
                 echo "$@"

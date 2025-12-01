@@ -150,7 +150,7 @@
 	editor = nvim
 	excludesfile = ~/.gitignore
 	untrackedCache = true
-	hooksPath =  ~/.git/hooks
+	hooksPath = ~/.git/hooks
 
 [merge]
 	conflictStyle = diff3
@@ -198,6 +198,9 @@
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
 	required = true
+
+[include]
+    path = ~/.config/.nickInstall/install/configs/private/.gitconfig-work
 
 [include]
     # Load local configs

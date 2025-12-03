@@ -1,0 +1,23 @@
+#!/bin/sh
+
+has_conflicts=0
+
+for file in $(git diff --cached --name-only); do
+  if [ -f "$file" ]; then
+    conflict_lines=$(grep -n -E '^(<<<<<<<|=======|>>>>>>>)' "$file")
+    if [ -n "$conflict_lines" ]; then
+      echo "Merge conflict markers found in: $file"
+      echo "$conflict_lines"
+      has_conflicts=1
+    fi
+  fi
+done
+
+if [ $has_conflicts -eq 1 ]; then
+  echo "Please resolve conflicts before committing."
+  exit 1
+fi
+
+exit 0
+
+

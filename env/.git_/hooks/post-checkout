@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Only for branch checkouts (flag = 1)
+if [ "$3" = "1" ]; then
+  branch=$(git branch --show-current)
+  if [ -n "$branch" ]; then
+    if ! git rev-parse --abbrev-ref @{u} >/dev/null 2>&1; then
+      git branch --set-upstream-to=origin/"$branch" "$branch"
+    fi
+  fi
+fi

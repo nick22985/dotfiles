@@ -79,6 +79,14 @@ plugins=(
 	fast-syntax-highlighting
 	zsh-autocomplete
 )
+# Enable asynchronous suggestion fetching
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+
+# Limit buffer size to prevent lag on large inputs or pasting
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+
+# Disable automatic widget re-binding for better performance
+ZSH_AUTOSUGGEST_MANUAL_REBIND=1Copied!
 
 [ -f "$ZSH/oh-my-zsh.sh" ] && source $ZSH/oh-my-zsh.sh
 
@@ -117,8 +125,6 @@ export GPG_TTY
 path+=("$HOME/.local/bin")
 path+=("$HOME/install/configs/private/.local/bin")
 export PATH
-
-alias config='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 

@@ -1,2 +1,3 @@
 ./install/windows/nerd-fonts
 .backup/
+**/logs/*

@@ -221,3 +221,15 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 
+SSH_AUTH_SOCK="$HOME/.ssh/ssh-agent.sock"
+export SSH_AUTH_SOCK
+
+if ! ssh-add -l >/dev/null 2>&1; then
+  rm -f "$SSH_AUTH_SOCK"
+  eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+fi
+
+if command -v mise >/dev/null 2>&1; then
+  eval "$(mise activate zsh)"
+fi
+

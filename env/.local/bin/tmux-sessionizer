@@ -2,9 +2,9 @@
 
 switch_to() {
     if [[ -z $TMUX ]]; then
-        tmux attach-session -t $1
+        tmux attach-session -t "$1"
     else
-        tmux switch-client -t $1
+        tmux switch-client -t "$1"
     fi
 }
 
@@ -17,14 +17,14 @@ hydrate() {
     local project_name=$1
 
     # Check project dir
-    if [ -f $2/.tmux-sessionizer ]; then
-        tmux send-keys -t $1 "source $2/.tmux-sessionizer $1 $2" c-M
+    if [ -f "$2"/.tmux-sessionizer ]; then
+        tmux send-keys -t "$1" "source $2/.tmux-sessionizer $1 $2" c-M
     # check folder
     elif [ -d "$HOME/$sessionizer_dir" ] && [ -f "$HOME/$sessionizer_dir/${project_name}" ]; then
         tmux send-keys -t "$1" "source $HOME/$sessionizer_dir/${project_name} $1 $2" C-m
     # use default home dir
-    elif [ -f $HOME/.tmux-sessionizer ]; then
-        tmux send-keys -t $1 "source $HOME/.tmux-sessionizer $1 $2" c-M
+    elif [ -f "$HOME"/.tmux-sessionizer ]; then
+        tmux send-keys -t "$1" "source $HOME/.tmux-sessionizer $1 $2" c-M
     fi
 }
 
@@ -48,7 +48,7 @@ else
         local mindepth=${2:-1}
         local maxdepth=${3:-1}
         path="${path/\$HOME/$HOME}"
-        local results=$(find "$path" -mindepth $mindepth -maxdepth $maxdepth -type d 2>/dev/null)
+        local results=$(find "$path" -mindepth "$mindepth" -maxdepth "$maxdepth" -type d 2>/dev/null)
         if [ ! -z "$results" ]; then
             find_command+=("$results")
         fi
@@ -67,8 +67,15 @@ else
             add_to_find_command "$path" "$mindepth" "$maxdepth"
         done <"$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
     fi
-    # Extract SSH hosts
-    ssh_hosts=($(grep -E '^Host\s+' ~/.ssh/config | grep -v 'HostName' | awk '{print "ssh/"$2}'))
+
+		ssh_hosts=($(
+			grep -R "^Host " ~/.ssh/config ~/.ssh/config.d 2>/dev/null \
+			| awk '{for (i=2; i<=NF; i++) print $i}' \
+			| grep -v '^\*$' \
+			| sort -u \
+			| sed 's|^|ssh/|'
+		))
+
 
     selected=$(printf "%s\n" "${find_command[@]}" "${ssh_hosts[@]}" | fzf --tiebreak end,length,index)
 fi
@@ -87,23 +94,24 @@ tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
     if [[ $selected == ssh/* ]]; then
-        tmux new-session -s $selected_name "ssh $ssh_host"
-        tmux set-environment -t $selected_name TMUX_SSH_HOST $ssh_host
+        tmux new-session -s "$selected_name" "ssh $ssh_host"
+        tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
     else
-        tmux new-session -s $selected_name -c $selected
+        tmux new-session -s "$selected_name" -c "$selected"
     fi
-    hydrate $selected_name $selected
+    hydrate "$selected_name" "$selected"
     exit 0
 fi
 
-if ! has_session $selected_name; then
+if ! has_session "$selected_name"; then
     if [[ $selected == ssh/* ]]; then
-        tmux new-session -ds $selected_name "ssh $ssh_host"
-        tmux set-environment -t $selected_name TMUX_SSH_HOST $ssh_host
+        tmux new-session -ds "$selected_name" "ssh $ssh_host"
+        tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
     else
-        tmux new-session -ds $selected_name -c $selected
+        tmux new-session -ds "$selected_name" -c "$selected"
     fi
-    hydrate $selected_name $selected
+    hydrate "$selected_name" "$selected"
 fi
 
-switch_to $selected_name
+switch_to "$selected_name"
+

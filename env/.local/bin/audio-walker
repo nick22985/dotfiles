@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Audio profile switcher using Walker dmenu
+
+AUDIO_SCRIPT="$HOME/scripts/switch-audio-device"
+CONFIG_FILE="$HOME/.config/audio-switcher/profiles.conf"
+
+# Build menu from profiles config
+build_menu() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "No profiles found"
+        return 1
+    fi
+
+    while IFS='|' read -r name main_sink main_source comm_sink comm_source card_profile description; do
+        # Skip comments and empty lines
+        [[ "$name" =~ ^#.* ]] && continue
+        [ -z "$name" ] && continue
+        echo "$name: $description"
+    done < "$CONFIG_FILE"
+}
+
+# Show menu and get selection
+selection=$(build_menu | walker --dmenu --placeholder "Select audio profile...")
+
+# Exit if no selection
+[ -z "$selection" ] && exit 0
+
+# Extract profile name (before the colon)
+profile_name="${selection%%:*}"
+
+# Execute the switch
+exec "$AUDIO_SCRIPT" --use "$profile_name"

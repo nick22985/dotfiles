@@ -5,6 +5,7 @@
 
 [commit]
 	gpgsign = true
+	template = /home/nick/.git_/.gitcommittemplate
 
 [tag]
 	gpgsign = true
@@ -148,7 +149,7 @@
 	attributesfile = ~/.gitattributes
 	autocrlf = false
 	editor = nvim
-	excludesfile = ~/.gitignore
+	excludesfile = ~/.git_/.gitignore
 	untrackedCache = true
 	hooksPath = ~/.git_/hooks
 

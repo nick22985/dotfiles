@@ -95,10 +95,10 @@ create_default_profiles() {
 # Use "keep" to keep current setting
 
 # Gaming setup: GSX main + communication, Scarlett for recording
-gsx-scarlett|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-output-surround71|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.Direct__Direct__source|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-output|alsa_input.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-input|none|GSX Gaming + Scarlett Recording
+gsx-scarlett|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-output-surround71|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-output|alsa_input.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-input|none|GSX Gaming + Scarlett Recording
 
 # BTD 700 + Scarlett: Bluetooth main, Scarlett recording
-btd-scarlett|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.Direct__Direct__source|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.Direct__Direct__source|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 + Scarlett
+btd-scarlett|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 + Scarlett
 
 # Full BTD 700: All audio through Bluetooth headset (output only)
 btd-full|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|keep|same|keep|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 Only

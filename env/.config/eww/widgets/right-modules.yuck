@@ -7,6 +7,8 @@
                       window_info == 'org.telegram.desktop' ? '> Telegram' :
                       window_info == 'org.gnome.Nautilus' ? '> Nautilus' :
                       window_info == 'Alacritty' ? '> Terminal' :
+                      window_info == 'com.mitchellh.ghostty' ? '> Terminal' :
+                      window_info == 'kitty' ? '> Terminal' :
                       window_info == 'discord' ? 'Discord' :
                       window_info == 'Slack' ? 'Slack' :
                       window_info} )")))

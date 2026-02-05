@@ -7,3 +7,6 @@
 # Uncomment the lines below to ignore specific components:
 # 08-hyprland-packages
 # 16-kde-plasma
+
+# KDE Plasma disabled
+kde-plasma.disabled

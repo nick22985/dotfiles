@@ -18,6 +18,11 @@ set_context "Flatpak Overrides"
 # flatpak override --user --env=XDG_SESSION_DESKTOP=sway org.flameshot.Flameshot
 # flatpak override --user --env=XDG_CURRENT_DESKTOP=sway org.flameshot.Flameshot
 flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland --socket=wayland --socket=fallback-x11 --nosocket=x11 com.slack.Slack
+flatpak override --user \
+  --env=GTK_THEME=adw-gtk3-dark \
+  com.slack.Slack
+
 
 # discord crashing running in wayland???
 flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.discordapp.Discord
+

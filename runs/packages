@@ -74,11 +74,9 @@ if command_exists pacman; then
 				"bluez"
 				"bluez-utils"
 				"steam-native-runtime"
-				"kwallet"
-				"kwalletmanager"
-				"kwallet-pam"
-				"dolphin"
-				# open default files for dolphin
+
+				"gnome-keyring"
+				"seahorse"
 				"archlinux-xdg-menu"
 				"networkmanager-openvpn"
 				"vlc"

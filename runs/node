@@ -5,7 +5,7 @@ source "$DOTFILES_DIR/lib/utils.sh"
 
 parse_args "$@"
 
-log "Setting up JavaScript runtimes (NVM + Bun + Deno)..."
+log "Setting up JavaScript runtimes (mise + Bun + Deno)..."
 
 # Set context for error tracking
 set_context "JavaScript Runtimes"
@@ -15,62 +15,46 @@ if ! command_exists curl && ! command_exists wget; then
     exit 1
 fi
 
-NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if command_exists mise; then
+    current_version=$(mise --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    log "✓ mise already installed (version: $current_version)"
 
-if [[ -d "$NVM_DIR" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    log "✓ NVM already installed at $NVM_DIR"
-		# need to create .nvm file
-
-    source "$NVM_DIR/nvm.sh"
-    current_version=$(nvm --version 2>/dev/null || echo "unknown")
-    log "→ Current NVM version: $current_version"
-
-    if [[ "${UPDATE_NVM:-no}" == "yes" ]]; then
-        log "→ Updating NVM to latest version..."
+    if [[ "${UPDATE_MISE:-no}" == "yes" ]]; then
+        log "→ Updating mise to latest version..."
         if [[ $DRY_RUN == "0" ]]; then
-            if command_exists curl; then
-                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-            else
-                wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-            fi
+            mise self-update || log "⚠ Failed to update mise"
         fi
-        log "✓ NVM updated"
+        log "✓ mise updated"
     fi
 else
-    log "→ Installing NVM..."
+    log "→ Installing mise..."
     if [[ $DRY_RUN == "0" ]]; then
         if command_exists curl; then
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+            curl https://mise.run | sh
         else
-            wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+            wget -qO- https://mise.run | sh
         fi
-
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
-        [ -s "$NVM_DIR/bash_completion" ] && source "$NVM_DIR/bash_completion"
+        
+        # Add mise to PATH for this session
+        export PATH="$HOME/.local/bin:$PATH"
     else
-        log "Would install NVM from https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
+        log "Would install mise from https://mise.run"
     fi
-    log "✓ NVM installed"
+    log "✓ mise installed"
 fi
 
-if [[ $DRY_RUN == "0" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    source "$NVM_DIR/nvm.sh"
-fi
-
-if [[ $DRY_RUN == "0" ]] && command -v nvm &> /dev/null; then
+if [[ $DRY_RUN == "0" ]] && command -v mise &> /dev/null; then
     log "→ Installing Node.js versions..."
 
     log "→ Installing Node.js LTS..."
-    nvm install --lts
-    nvm use --lts
-    nvm alias default lts/*
+    mise install node@lts
+    mise use -g node@lts
 
     log "→ Installing Node.js latest..."
-    nvm install node
+    mise install node@latest
 
     log "✓ Installed Node.js versions:"
-    nvm list
+    mise ls node
 
     log "→ Installing global npm packages..."
     global_packages=()
@@ -87,50 +71,50 @@ elif [[ $DRY_RUN == "1" ]]; then
     log "Would install global packages: yarn pnpm typescript @angular/cli @vue/cli create-react-app next nuxt eslint prettier nodemon pm2 serve http-server live-server json-server"
 fi
 
-log "→ Configuring shell profiles for NVM..."
+log "→ Configuring shell profiles for mise..."
 
-add_nvm_to_profile() {
+add_mise_to_profile() {
     local profile_file="$1"
     local profile_name="$2"
 
     if [[ -f "$profile_file" ]]; then
-        if ! grep -q "# NVM (Node Version Manager)" "$profile_file" 2>/dev/null; then
-            log "→ Adding NVM to $profile_name"
+        if ! grep -q "# mise (development tool version manager)" "$profile_file" 2>/dev/null; then
+            log "→ Adding mise to $profile_name"
             if [[ $DRY_RUN == "0" ]]; then
                 cat >> "$profile_file" << 'EOF'
 
-# NVM (Node Version Manager)
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+# mise (development tool version manager)
+export PATH="$HOME/.local/bin:$PATH"
+if command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate $(basename "$SHELL") --shims)"
+fi
 EOF
             fi
         else
-            log "✓ NVM already configured in $profile_name"
+            log "✓ mise already configured in $profile_name"
         fi
     else
         log "→ $profile_name not found, skipping"
     fi
 }
 
-add_nvm_to_profile "$HOME/.bashrc" ".bashrc"
-add_nvm_to_profile "$HOME/.zshrc" ".zshrc"
-add_nvm_to_profile "$HOME/.profile" ".profile"
+add_mise_to_profile "$HOME/.bashrc" ".bashrc"
+add_mise_to_profile "$HOME/.zshrc" ".zshrc"
+add_mise_to_profile "$HOME/.profile" ".profile"
 
 if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
     fish_config="$HOME/.config/fish/config.fish"
     if [[ -f "$fish_config" ]]; then
-        if ! grep -q "# NVM (Node Version Manager)" "$fish_config" 2>/dev/null; then
-            log "→ Adding NVM to fish config"
+        if ! grep -q "# mise (development tool version manager)" "$fish_config" 2>/dev/null; then
+            log "→ Adding mise to fish config"
             if [[ $DRY_RUN == "0" ]]; then
                 echo "" >> "$fish_config"
-                echo "# NVM (Node Version Manager)" >> "$fish_config"
-                echo "function nvm" >> "$fish_config"
-                echo "    bass source ~/.nvm/nvm.sh --no-use ';' nvm \$argv" >> "$fish_config"
-                echo "end" >> "$fish_config"
+                echo "# mise (development tool version manager)" >> "$fish_config"
+                echo "fish_add_path \$HOME/.local/bin" >> "$fish_config"
+                echo "mise activate fish | source" >> "$fish_config"
             fi
         else
-            log "✓ NVM already configured in fish config"
+            log "✓ mise already configured in fish config"
         fi
     fi
 fi

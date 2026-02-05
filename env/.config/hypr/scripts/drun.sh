@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/bin/zsh
 
+# Keep the input
 input="$*"
 
+# Google search shortcut
 if [[ "$input" == !* ]]; then
     query="${input:1}"
     query="${query// /+}"
@@ -12,12 +14,12 @@ fi
 # Extract the first word (command)
 cmd=$(echo "$input" | awk '{print $1}')
 
-# If the first word is a valid executable, run the whole command line
+# If the first word is a valid executable
 if command -v "$cmd" >/dev/null 2>&1; then
-    eval "$input"
-    exit 0
+    exec "$@"
 fi
 
-# Otherwise fallback to web search
+# Fallback to web search
 query="${input// /+}"
 xdg-open "https://www.google.com/search?q=$query"
+

@@ -42,7 +42,6 @@
 # # Just for example:
 # resize-overlay-duration = 4s 200ms
 
-theme = catppuccin-mocha
-background-opacity = 0.8
+theme = Catppuccin Mocha
+background-opacity = 0.7
 confirm-close-surface = false
-

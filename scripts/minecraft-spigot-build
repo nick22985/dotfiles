@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FORCE=false
+if [[ "${1:-}" == "--force" ]]; then
+    FORCE=true
+fi
+
+if ! command -v mise >/dev/null 2>&1; then
+  echo "mise not found in PATH"
+  exit 1
+fi
+
+eval "$(mise activate bash)"
+
+BUILD_DIR="$HOME/.spigot-build"
+BUILDTOOLS_URL="https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar"
+
+declare -A SPIGOT_MATRIX=(
+  ["1.8.8"]="temurin-8"
+  ["1.12.2"]="temurin-8"
+  ["1.13.2"]="temurin-8"
+  ["1.16.1"]="temurin-8"
+  ["1.16.4"]="temurin-8"
+
+  ["1.18"]="temurin-17"
+  ["1.19"]="temurin-17"
+
+  ["1.20.1"]="temurin-21"
+  ["1.21.1"]="temurin-21"
+  ["1.21.10"]="temurin-21"
+)
+
+if [[ "$FORCE" == true ]]; then
+    echo "--force specified: wiping build directory and existing Spigot jars..."
+    rm -rf "$BUILD_DIR"
+    for MC_VERSION in "${!SPIGOT_MATRIX[@]}"; do
+        BUILD_REV="${MC_VERSION}-R0.1-SNAPSHOT"
+        M2_REPO="$HOME/.m2/repository/org/spigotmc/spigot/$BUILD_REV"
+        if [[ -d "$M2_REPO" ]]; then
+            rm -rf "$M2_REPO"
+            echo "Removed $M2_REPO"
+        fi
+    done
+fi
+
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+if [[ ! -f BuildTools.jar ]]; then
+  echo "Downloading BuildTools..."
+  curl -fsSL -o BuildTools.jar "$BUILDTOOLS_URL"
+fi
+
+for MC_VERSION in $(printf "%s\n" "${!SPIGOT_MATRIX[@]}" | sort -V); do
+  BUILD_REV="${MC_VERSION}-R0.1-SNAPSHOT"                      
+  JAVA_VERSION="${SPIGOT_MATRIX[$MC_VERSION]}" 
+
+  M2_REPO="$HOME/.m2/repository/org/spigotmc/spigot/$BUILD_REV/spigot-$BUILD_REV.jar"
+  echo "Checking if Spigot $BUILD_REV already exists at $M2_REPO..."
+  if [[ -f "$M2_REPO" ]]; then
+      echo "Spigot $BUILD_REV already exists, skipping..."
+      continue
+  fi
+
+  echo ""
+  echo "Building Spigot $BUILD_REV (requested: $MC_VERSION) with Java $JAVA_VERSION"
+  
+  mise use java@"$JAVA_VERSION"
+  JAVA_BIN="$(mise which java)"
+  echo "Using Java: $JAVA_BIN"
+  "$JAVA_BIN" -version
+
+  JAVA_VERSION_FULL="$("$JAVA_BIN" -version 2>&1 | awk -F'"' '/version/ {print $2}')"
+  if [[ "$JAVA_VERSION_FULL" == 1.* ]]; then
+      JAVA_MAJOR=8   
+  else
+      JAVA_MAJOR="${JAVA_VERSION_FULL%%.*}"
+  fi
+
+  EXPECTED_MAJOR="${JAVA_VERSION#temurin-}"
+  EXPECTED_MAJOR="${EXPECTED_MAJOR%%.*}"
+
+  echo "Detected Java major version: $JAVA_MAJOR, expected: $EXPECTED_MAJOR"
+  if [[ "$JAVA_MAJOR" != "$EXPECTED_MAJOR" ]]; then
+      echo "Expected Java $EXPECTED_MAJOR but got Java $JAVA_MAJOR"
+      exit 1
+  fi
+
+  "$JAVA_BIN" -jar BuildTools.jar --remapped --rev "${MC_VERSION}"
+done
+
+echo ""
+echo "All Spigot versions installed into ~/.m2"
+

@@ -1,5 +1,9 @@
-# Add deno completions to search path
-if [[ ":$FPATH:" != *":/home/nick/.zsh/completions:"* ]]; then export FPATH="/home/nick/.zsh/completions:$FPATH"; fi
+if [[ ${fpath[(Ie)/home/nick/.zsh/completions]} -eq 0 ]]; then
+  fpath=(/home/nick/.zsh/completions $fpath)
+fi
+autoload -Uz compinit
+compinit
+
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 
@@ -230,6 +234,8 @@ if ! ssh-add -l >/dev/null 2>&1; then
 fi
 
 if command -v mise >/dev/null 2>&1; then
+
   eval "$(mise activate zsh)"
+
 fi
 

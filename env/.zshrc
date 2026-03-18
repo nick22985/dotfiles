@@ -239,3 +239,5 @@ if command -v mise >/dev/null 2>&1; then
 
 fi
 
+alias ls='ls --block-size=MB'
+

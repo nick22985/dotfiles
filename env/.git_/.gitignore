@@ -1,5 +1,16 @@
+AGENTS.md
+mise.toml
+
+# java shit
 # Eclipse / JDTLS
 .classpath
 .project
 .settings/
 .factorypath
+
+**/.classpath
+**/.project
+**/.settings/
+**/.factorypath
+**.ipr
+

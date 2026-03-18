@@ -16,6 +16,7 @@ cmd=$(echo "$input" | awk '{print $1}')
 
 # If the first word is a valid executable
 if command -v "$cmd" >/dev/null 2>&1; then
+    # Run the command
     exec "$@"
 fi
 

@@ -256,7 +256,6 @@ take_screenshot_freeze() {
         # Start wayfreeze in background and get the geometry
         wayfreeze & 
         freeze_pid=$!
-        sleep 0.1
         
         # Get the region selection
         geom=$(slurp) || {
@@ -282,7 +281,6 @@ take_screenshot_freeze() {
         # Start wayfreeze in background
         wayfreeze &
         freeze_pid=$!
-        sleep 0.1
         
         # Get the region selection  
         geom=$(slurp) || {

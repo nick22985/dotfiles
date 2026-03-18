@@ -4,6 +4,23 @@ switch_to() {
     if [[ -z $TMUX ]]; then
         tmux attach-session -t "$1"
     else
+        # Push current session onto the history stack before switching
+        local from
+        from=$(tmux display-message -p '#S')
+        local raw
+        raw=$(tmux show-environment -g SESSION_STACK 2>/dev/null | sed 's/^SESSION_STACK=//')
+        [[ "$raw" == -* ]] && raw=""
+        # Dedup: rebuild stack without any existing entry for $from
+        local new_stack=""
+        local entry
+        IFS=':' read -ra _entries <<< "$raw"
+        for entry in "${_entries[@]}"; do
+            [[ -z "$entry" || "$entry" =~ ^[0-9]+$ || "$entry" == "$from" ]] && continue
+            new_stack="${new_stack:+$new_stack:}$entry"
+        done
+        new_stack="${new_stack:+$new_stack:}$from"
+        tmux set-environment -g SESSION_STACK "$new_stack"
+
         tmux switch-client -t "$1"
     fi
 }

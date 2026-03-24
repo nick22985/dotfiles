@@ -1,0 +1,23 @@
+#!/bin/bash
+# Push a session name onto SESSION_STACK (no duplicates, no empty/numeric entries).
+# Usage: tmux-session-push <session_name>
+#
+# Called by:
+#   - session-created hook  (push the new session)
+#   - client-session-changed hook (push the session we just left)
+
+SESSION="${1:-$(tmux display-message -p '#S')}"
+
+RAW=$(tmux show-environment -g SESSION_STACK 2>/dev/null | sed 's/^SESSION_STACK=//')
+[[ "$RAW" == -* ]] && RAW=""
+
+NEW_STACK=""
+IFS=':' read -ra ENTRIES <<< "$RAW"
+for entry in "${ENTRIES[@]}"; do
+  [[ -z "$entry" || "$entry" =~ ^[0-9]+$ || "$entry" == "$SESSION" ]] && continue
+  NEW_STACK="${NEW_STACK:+$NEW_STACK:}$entry"
+done
+
+NEW_STACK="${NEW_STACK:+$NEW_STACK:}$SESSION"
+
+tmux set-environment -g SESSION_STACK "$NEW_STACK"

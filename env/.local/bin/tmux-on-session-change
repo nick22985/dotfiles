@@ -1,0 +1,13 @@
+#!/bin/bash
+# Called by the client-session-changed hook.
+# #{hook_session_name} is the session we just arrived at (NEXT).
+#
+# Push NEXT onto the stack so the stack reflects visit order.
+# switch_and_kill walks right-to-left skipping CURRENT to find
+# the last place you were.
+
+NEXT="$1"   # session we just switched TO
+
+[[ -z "$NEXT" ]] && exit 0
+
+~/.local/bin/tmux-session-push "$NEXT"

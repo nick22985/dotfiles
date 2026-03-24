@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BACKUP_DIR="$(pwd)"
+
 LIMIT=1000
 EXCLUDE_REPOS=""
 PARALLEL_JOBS=1
@@ -16,7 +17,7 @@ usage() {
 
 while getopts ":d:e:j:" opt; do
     case $opt in
-        d) BACKUP_DIR="$OPTARG" ;;
+        d) BACKUP_DIR="$(realpath -m "$OPTARG")" ;;
         e) EXCLUDE_REPOS="$OPTARG" ;;
         j) PARALLEL_JOBS="$OPTARG" ;;
         *) usage ;;
@@ -48,22 +49,34 @@ clone_or_update_repo() {
     cd "$BACKUP_DIR"
 
     if [ -d "$name/.git" ]; then
-        echo "Checking for updates: $name"
         (
             cd "$name"
 
             if [ -n "$(git status --porcelain)" ]; then
-                echo "Skipping update for $name (local changes detected)"
+                echo "Skipping $name (local changes)"
+                echo "skipped" >> "$STATS_FILE"
                 return
             fi
 
             branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
-            git fetch origin
-            git pull --ff-only origin "$branch" || echo "Failed to update $name"
-        )
+            git fetch origin 2>/dev/null
+            result=$(git pull --ff-only origin "$branch" 2>/dev/null)
+            if echo "$result" | grep -q "Already up to date"; then
+                echo "Up to date: $name"
+                echo "up_to_date" >> "$STATS_FILE"
+            else
+                echo "Updated: $name"
+                echo "updated" >> "$STATS_FILE"
+            fi
+        ) || { echo "Failed: $name"; echo "failed" >> "$STATS_FILE"; }
     else
         echo "Cloning: $repo"
-        gh repo clone "$repo" || echo "Failed to clone $repo"
+        if gh repo clone "$repo" 2>/dev/null; then
+            echo "cloned" >> "$STATS_FILE"
+        else
+            echo "Failed to clone: $repo"
+            echo "failed" >> "$STATS_FILE"
+        fi
     fi
 }
 
@@ -96,11 +109,28 @@ if [ -n "$EXCLUDE_REPOS" ]; then
     echo "After exclusion: $new_count repositories"
 fi
 
+STATS_FILE="$(mktemp)"
+
 export -f clone_or_update_repo
 export BACKUP_DIR
+export STATS_FILE
 
 echo "$repos" | xargs -P "$PARALLEL_JOBS" -I {} bash -c 'clone_or_update_repo "$@"' _ {}
 
+cloned=$(grep -c "^cloned$"      "$STATS_FILE" || true)
+updated=$(grep -c "^updated$"    "$STATS_FILE" || true)
+up_to_date=$(grep -c "^up_to_date$" "$STATS_FILE" || true)
+skipped=$(grep -c "^skipped$"    "$STATS_FILE" || true)
+failed=$(grep -c "^failed$"      "$STATS_FILE" || true)
+rm -f "$STATS_FILE"
+
 echo
 echo "Backup complete! All repos saved in: ${BACKUP_DIR}"
+echo
+echo "Summary:"
+echo "  Cloned (new):            $cloned"
+echo "  Updated:                 $updated"
+echo "  Already up to date:      $up_to_date"
+echo "  Skipped (local changes): $skipped"
+[ "$failed" -gt 0 ] && echo "  Failed:                  $failed"
 

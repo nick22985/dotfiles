@@ -5,10 +5,10 @@ $localip\
 $shlvl\
 $singularity\
 $kubernetes\
-$directory\
+${custom.dir}\
+${custom.gitbranch}\
 $vcsh\
 $fossil_branch\
-$git_branch\
 $git_commit\
 $git_state\
 $git_metrics\
@@ -102,13 +102,53 @@ disabled = false
 
 # Third param
 [directory]
+disabled = true
+
+[custom.dir]
+description = "Worktree-aware directory display"
+command = '''
+common=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
+gitdir=$(cd "$(git rev-parse --git-dir 2>/dev/null)" 2>/dev/null && pwd)
+if [ -n "$common" ] && [ "$common" != "$gitdir" ]; then
+  case "$common" in
+    */.git) repo=$(basename "$(dirname "$common")") ;;
+    *)      repo=$(basename "$common") ;;
+  esac
+  toplevel=$(git rev-parse --show-toplevel)
+  rel=${PWD#"$toplevel"}
+  echo "${repo}${rel}"
+elif [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
+  echo "$(basename "$PWD")"
+else
+  toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "$toplevel" ]; then
+    repo=$(basename "$toplevel")
+    rel=${PWD#"$toplevel"}
+    echo "${repo}${rel}"
+  else
+    echo "${PWD/#$HOME/~}"
+  fi
+fi
+'''
+when = "true"
 style = "purple"
-truncation_length = 0
-truncate_to_repo = true
-truncation_symbol = ""
+format = "[$output]($style) "
 
 [git_branch]
+disabled = true
+
+[custom.gitbranch]
+description = "Branch display that shows 'bare' in bare repos"
+command = '''
+if [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
+  echo "bare"
+else
+  git rev-parse --abbrev-ref HEAD 2>/dev/null
+fi
+'''
+when = "git rev-parse --git-dir 2>/dev/null"
 style = "green"
+format = "on [$output]($style) "
 
 # Before all the version info (python, nodejs, php, etc.)
 [git_status]

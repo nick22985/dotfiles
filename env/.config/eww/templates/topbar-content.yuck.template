@@ -3,12 +3,12 @@
   (centerbox
     :orientation "h"
     :class "topbar-centerbox"
-    (box :class "left-container" 
+    (box :class "left-container"
          :halign "start"
          :hexpand false
       (left_modules))
     (box :class "center-container"
-         :halign "center" 
+         :halign "center"
          :hexpand false
       (center_modules_{{MONITOR_ID}}))
     (box :class "right-container"

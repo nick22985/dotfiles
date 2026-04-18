@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BACKUP_FILE=".git/.remotes-backup"
+
+usage() {
+    echo "Usage: git-remotes <command>"
+    echo ""
+    echo "Commands:"
+    echo "  save      Save all remotes to backup"
+    echo "  remove    Save and remove all remotes"
+    echo "  restore   Restore remotes from backup"
+    echo "  list      Show backed up remotes"
+    exit 1
+}
+
+require_git_repo() {
+    if ! git rev-parse --git-dir &>/dev/null; then
+        echo "Error: not a git repository"
+        exit 1
+    fi
+}
+
+save_remotes() {
+    require_git_repo
+    local remotes
+    remotes=$(git remote -v | grep '(push)' || true)
+    if [[ -z "$remotes" ]]; then
+        echo "No remotes to save"
+        exit 0
+    fi
+    echo "$remotes" | awk '{print $1, $2}' > "$BACKUP_FILE"
+    echo "Saved $(wc -l < "$BACKUP_FILE") remote(s) to $BACKUP_FILE"
+}
+
+remove_remotes() {
+    require_git_repo
+    save_remotes
+    local remotes
+    remotes=$(git remote)
+    if [[ -z "$remotes" ]]; then
+        echo "No remotes to remove"
+        return
+    fi
+    while IFS= read -r name; do
+        git remote remove "$name"
+        echo "Removed remote: $name"
+    done <<< "$remotes"
+}
+
+restore_remotes() {
+    require_git_repo
+    if [[ ! -f "$BACKUP_FILE" ]]; then
+        echo "Error: no backup found at $BACKUP_FILE"
+        echo "Run 'git-remotes save' first"
+        exit 1
+    fi
+    while IFS=' ' read -r name url; do
+        if git remote | grep -q "^${name}$"; then
+            echo "Remote '$name' already exists, skipping"
+        else
+            git remote add "$name" "$url"
+            echo "Restored remote: $name -> $url"
+        fi
+    done < "$BACKUP_FILE"
+}
+
+list_backup() {
+    require_git_repo
+    if [[ ! -f "$BACKUP_FILE" ]]; then
+        echo "No backup found"
+        exit 0
+    fi
+    cat "$BACKUP_FILE"
+}
+
+case "${1:-}" in
+    save)    save_remotes ;;
+    remove)  remove_remotes ;;
+    restore) restore_remotes ;;
+    list)    list_backup ;;
+    *)       usage ;;
+esac

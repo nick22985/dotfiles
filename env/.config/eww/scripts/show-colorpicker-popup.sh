@@ -1,11 +1,26 @@
 #!/bin/bash
+# Open the colorpicker popup on the currently focused monitor.
+#
+# eww binds windows by GDK monitor index, which corresponds to Hyprland
+# monitors sorted by their `.id` field. We must map the active monitor to
+# that same sorted position so the popup window name matches the bar we
+# generated in launch.sh.
 
-# Get the focused monitor ID from hyprland
-monitor_id=$(hyprctl activeworkspace -j | jq -r '.monitorID')
+active_monitor_name=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.monitor')
 
-# Open popup on the focused monitor
+if [[ -z "$active_monitor_name" || "$active_monitor_name" == "null" ]]; then
+    exit 0
+fi
+
+index=$(hyprctl -j monitors 2>/dev/null \
+    | jq -r --arg name "$active_monitor_name" \
+        'sort_by(.id) | map(.name) | index($name) // empty')
+
+if [[ -z "$index" ]]; then
+    exit 0
+fi
+
 eww update colorpicker_hover=true
-eww open colorpicker-popup$monitor_id 2>/dev/null
+eww open "colorpicker-popup${index}" 2>/dev/null
 
-# Start auto-close timer in background
 ~/.config/eww/scripts/auto-close-colorpicker.sh &

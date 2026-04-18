@@ -45,6 +45,7 @@ clone_or_update_repo() {
     local repo="$1"
     local name
     name=$(basename "$repo")
+    local url="https://github.com/${repo}"
 
     cd "$BACKUP_DIR"
 
@@ -54,28 +55,34 @@ clone_or_update_repo() {
 
             if [ -n "$(git status --porcelain)" ]; then
                 echo "Skipping $name (local changes)"
-                echo "skipped" >> "$STATS_FILE"
+                echo "skipped $name $url" >> "$STATS_FILE"
                 return
             fi
 
             branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
             git fetch origin 2>/dev/null
-            result=$(git pull --ff-only origin "$branch" 2>/dev/null)
-            if echo "$result" | grep -q "Already up to date"; then
-                echo "Up to date: $name"
-                echo "up_to_date" >> "$STATS_FILE"
+            local_head=$(git rev-parse HEAD)
+            if git pull --ff-only origin "$branch" &>/dev/null; then
+                new_head=$(git rev-parse HEAD)
+                if [ "$local_head" = "$new_head" ]; then
+                    echo "Up to date: $name"
+                    echo "up_to_date $name $url" >> "$STATS_FILE"
+                else
+                    echo "Updated: $name"
+                    echo "updated $name $url" >> "$STATS_FILE"
+                fi
             else
-                echo "Updated: $name"
-                echo "updated" >> "$STATS_FILE"
+                echo "Up to date: $name (can't fast-forward)"
+                echo "up_to_date $name $url" >> "$STATS_FILE"
             fi
-        ) || { echo "Failed: $name"; echo "failed" >> "$STATS_FILE"; }
+        ) || { echo "Failed: $name"; echo "failed $name $url" >> "$STATS_FILE"; }
     else
         echo "Cloning: $repo"
         if gh repo clone "$repo" 2>/dev/null; then
-            echo "cloned" >> "$STATS_FILE"
+            echo "cloned $name $url" >> "$STATS_FILE"
         else
             echo "Failed to clone: $repo"
-            echo "failed" >> "$STATS_FILE"
+            echo "failed $name $url" >> "$STATS_FILE"
         fi
     fi
 }
@@ -117,20 +124,34 @@ export STATS_FILE
 
 echo "$repos" | xargs -P "$PARALLEL_JOBS" -I {} bash -c 'clone_or_update_repo "$@"' _ {}
 
-cloned=$(grep -c "^cloned$"      "$STATS_FILE" || true)
-updated=$(grep -c "^updated$"    "$STATS_FILE" || true)
-up_to_date=$(grep -c "^up_to_date$" "$STATS_FILE" || true)
-skipped=$(grep -c "^skipped$"    "$STATS_FILE" || true)
-failed=$(grep -c "^failed$"      "$STATS_FILE" || true)
-rm -f "$STATS_FILE"
+cloned=$(grep -c "^cloned "      "$STATS_FILE" || true)
+updated=$(grep -c "^updated "    "$STATS_FILE" || true)
+up_to_date=$(grep -c "^up_to_date " "$STATS_FILE" || true)
+skipped=$(grep -c "^skipped "    "$STATS_FILE" || true)
+failed=$(grep -c "^failed "      "$STATS_FILE" || true)
+
+print_repos() {
+    local status="$1"
+    grep "^${status} " "$STATS_FILE" 2>/dev/null | while read -r _ name url; do
+        echo "    $name  $url"
+    done
+}
 
 echo
 echo "Backup complete! All repos saved in: ${BACKUP_DIR}"
 echo
 echo "Summary:"
 echo "  Cloned (new):            $cloned"
+[ "$cloned" -gt 0 ] && print_repos "cloned"
 echo "  Updated:                 $updated"
+[ "$updated" -gt 0 ] && print_repos "updated"
 echo "  Already up to date:      $up_to_date"
 echo "  Skipped (local changes): $skipped"
-[ "$failed" -gt 0 ] && echo "  Failed:                  $failed"
+[ "$skipped" -gt 0 ] && print_repos "skipped"
+if [ "$failed" -gt 0 ]; then
+    echo "  Failed:                  $failed"
+    print_repos "failed"
+fi
+
+rm -f "$STATS_FILE"
 

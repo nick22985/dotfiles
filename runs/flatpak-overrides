@@ -26,3 +26,9 @@ flatpak override --user \
 # discord crashing running in wayland???
 flatpak override --user --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.discordapp.Discord
 
+# Expose Spotify's MPRIS interface outside its sandbox so other apps (e.g. Discord) can see what's playing
+flatpak override --user com.spotify.Client --own-name='org.mpris.MediaPlayer2.spotify'
+
+# Let Discord access MPRIS interfaces to show "Listening to Spotify" status
+flatpak override --user com.discordapp.Discord --talk-name='org.mpris.MediaPlayer2.*'
+

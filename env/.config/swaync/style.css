@@ -143,6 +143,45 @@ slider {
 	color: #1e1e2e;
 }
 
+/* Grouped floating notifications: show compact stack, expand on hover */
+.floating-notifications.background .notification-group.collapsed .notification-row {
+	transition: margin-bottom 180ms ease, opacity 180ms ease, transform 180ms ease;
+}
+
+.floating-notifications.background .notification-group.collapsed .notification-row:not(:last-child) {
+	margin-bottom: -58px;
+	opacity: 0.7;
+	transform: scale(0.97);
+}
+
+.floating-notifications.background
+	.notification-group.collapsed
+	.notification-row:not(:last-child)
+	.notification-action,
+.floating-notifications.background
+	.notification-group.collapsed
+	.notification-row:not(:last-child)
+	.notification-default-action {
+	opacity: 0;
+}
+
+.floating-notifications.background .notification-group.collapsed:hover .notification-row:not(:last-child) {
+	margin-bottom: 0;
+	opacity: 1;
+	transform: scale(1);
+}
+
+.floating-notifications.background
+	.notification-group.collapsed:hover
+	.notification-row:not(:last-child)
+	.notification-action,
+.floating-notifications.background
+	.notification-group.collapsed:hover
+	.notification-row:not(:last-child)
+	.notification-default-action {
+	opacity: 1;
+}
+
 .control-center {
 	box-shadow:
 		0 0 8px 0 rgba(0, 0, 0, 0.8),

@@ -39,7 +39,11 @@ clone_or_update_repo() {
         )
     else
         echo "⬇️  Cloning: $repo"
-        gh repo clone "$repo" || echo "⚠️  Failed to clone $repo"
+        if gh repo clone "$repo"; then
+            new_repos+=("$repo")
+        else
+            echo "⚠️  Failed to clone $repo"
+        fi
     fi
 }
 
@@ -57,9 +61,19 @@ repos=$(printf "%s\n%s\n" "$repos_public" "$repos_private" | sort -u)
 count=$(echo "$repos" | grep -c . || true)
 echo "📦 Found $count personal repositories."
 
+new_repos=()
 for repo in $repos; do
     clone_or_update_repo "$repo"
 done
+
+if [ ${#new_repos[@]} -gt 0 ]; then
+    echo "✨ ${#new_repos[@]} new repo(s) cloned for ${USER}:"
+    for r in "${new_repos[@]}"; do
+        echo "   + $r"
+    done
+else
+    echo "ℹ️  No new repos for ${USER}."
+fi
 
 cd "$BACKUP_DIR"
 
@@ -85,9 +99,19 @@ else
         count=$(echo "$org_repos" | grep -c . || true)
         echo "📦 Found $count repos in ${org}"
 
+        new_repos=()
         for repo in $org_repos; do
             clone_or_update_repo "$repo"
         done
+
+        if [ ${#new_repos[@]} -gt 0 ]; then
+            echo "✨ ${#new_repos[@]} new repo(s) cloned for ${org}:"
+            for r in "${new_repos[@]}"; do
+                echo "   + $r"
+            done
+        else
+            echo "ℹ️  No new repos for ${org}."
+        fi
 
         cd "$BACKUP_DIR"
     done

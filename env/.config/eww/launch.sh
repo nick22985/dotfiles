@@ -3,12 +3,9 @@
 #
 # Monitor binding notes for eww 0.5.x:
 #   - `:monitor N` is an integer GDK monitor index.
-#   - GDK on Wayland enumerates outputs in Hyprland's wl_output advertisement
-#     order, which corresponds to Hyprland's `.id` field sorted ascending.
-#   - Hyprland `.id` values are NOT the same as the default order returned by
-#     `hyprctl -j monitors` and can have gaps (e.g. 0,1,3,2). We therefore
-#     sort by `.id` and use the resulting zero-based position as the
-#     `:monitor` index; that is what matches the GDK list that eww binds to.
+#   - GDK monitor ordering does NOT reliably match Hyprland's `.id` sort.
+#     GDK follows the wl_output advertisement order, which we obtain from
+#     wayland-info to build the correct GDK-index → Hyprland-name mapping.
 #
 # Concurrency notes:
 #   - flock serializes concurrent invocations so monitor hotplug bursts from
@@ -37,11 +34,19 @@ generate_from_template() {
 }
 
 generate_monitor_config() {
-    # Monitor names sorted by Hyprland .id — position in this list is the
-    # GDK monitor index that eww will bind `:monitor N` to.
+    # GDK enumerates monitors in wl_output advertisement order, NOT Hyprland
+    # .id order. wayland-info lists wl_outputs in advertisement order, so we
+    # parse monitor names from it to get the true GDK index mapping.
     local monitors
-    monitors=$(hyprctl -j monitors 2>/dev/null \
-        | jq -r 'sort_by(.id) | .[].name')
+    monitors=$(wayland-info 2>/dev/null \
+        | awk '/interface:.*wl_output/{found=1} found && /^\tname:/{print $2; found=0}')
+
+    # Fallback: if wayland-info isn't available, try hyprctl .id sort (old behavior)
+    if [[ -z "$monitors" ]]; then
+        monitors=$(hyprctl -j monitors 2>/dev/null \
+            | jq -r 'sort_by(.id) | .[].name')
+    fi
+
     local monitor_count
     monitor_count=$(printf '%s\n' "$monitors" | grep -c .)
 

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-BACKUP_FILE=".git/.remotes-backup"
+BACKUP_FILE=""
 
 usage() {
     echo "Usage: git-remotes <command>"
@@ -16,10 +16,12 @@ usage() {
 }
 
 require_git_repo() {
-    if ! git rev-parse --git-dir &>/dev/null; then
+    local git_dir
+    if ! git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); then
         echo "Error: not a git repository"
         exit 1
     fi
+    BACKUP_FILE="$git_dir/.remotes-backup"
 }
 
 save_remotes() {

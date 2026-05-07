@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# SSH wrapper that injects an OSC 7 emitter into the remote interactive
+# bash so tmux's #{pane_path} reflects the remote cwd. No remote files
+# are modified — the snippet is delivered via base64 and consumed by
+# bash --rcfile <(...) for this connection only.
+#
+# Used by tmux-ssh-window/tmux-ssh-pane in place of a bare `ssh $host`
+# so prefix+E (tmux-ssh-nvim) can open oil at the remote cwd.
+
+ssh_host=$1
+shift || true
+
+if [[ -z "$ssh_host" ]]; then
+    echo "usage: $(basename "$0") <ssh-host> [ssh args...]" >&2
+    exit 1
+fi
+
+snippet=$(cat <<'RCEOF'
+[ -r ~/.bashrc ] && . ~/.bashrc
+_osc7_cwd() { printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(hostname)}" "$PWD"; }
+case "$PROMPT_COMMAND" in
+    *_osc7_cwd*) ;;
+    *) PROMPT_COMMAND="_osc7_cwd${PROMPT_COMMAND:+; $PROMPT_COMMAND}" ;;
+esac
+RCEOF
+)
+b64=$(printf '%s' "$snippet" | base64 -w0)
+
+exec ssh -t "$@" "$ssh_host" "bash --rcfile <(echo $b64 | base64 -d) -i"

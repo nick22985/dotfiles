@@ -6,5 +6,5 @@ pane_id=$2
 ssh_host=$(tmux show-environment -t "$session_name" 2>/dev/null | grep '^TMUX_SSH_HOST=' | cut -d= -f2)
 
 if [[ -n "$ssh_host" ]]; then
-    tmux send-keys -t "$pane_id" "ssh $ssh_host" C-m
+    tmux send-keys -t "$pane_id" "tmux-ssh-connect $ssh_host" C-m
 fi

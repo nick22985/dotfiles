@@ -94,7 +94,7 @@ tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
     if [[ $selected == ssh/* ]]; then
-        tmux new-session -s "$selected_name" "ssh $ssh_host"
+        tmux new-session -s "$selected_name" "tmux-ssh-connect $ssh_host"
         tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
     else
         tmux new-session -s "$selected_name" -c "$selected"
@@ -105,7 +105,7 @@ fi
 
 if ! has_session "$selected_name"; then
     if [[ $selected == ssh/* ]]; then
-        tmux new-session -ds "$selected_name" "ssh $ssh_host"
+        tmux new-session -ds "$selected_name" "tmux-ssh-connect $ssh_host"
         tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
     else
         tmux new-session -ds "$selected_name" -c "$selected"

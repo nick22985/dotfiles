@@ -17,6 +17,18 @@ case "$1" in
         echo "Reloading eww configuration..."
         eww reload
         ;;
+    "reset"|"clear")
+        echo "Resetting eww completely..."
+        pkill -f monitor-watcher.sh 2>/dev/null || true
+        eww kill 2>/dev/null || true
+        pkill -f "eww" 2>/dev/null || true
+        sleep 0.3
+        echo "Clearing generated configs and cache..."
+        rm -rf ~/.config/eww/tmp/{bars,widgets,modules} 2>/dev/null || true
+        rm -rf ~/.cache/eww 2>/dev/null || true
+        echo "Relaunching eww..."
+        ~/.config/eww/launch.sh
+        ;;
     "status")
         echo "=== EWW Status ==="
         echo "Active eww windows:"
@@ -40,12 +52,13 @@ case "$1" in
         tail -f ~/.cache/eww/monitor-watcher.log 2>/dev/null || echo "No monitor watcher log found"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|reload|status|logs|watch}"
+        echo "Usage: $0 {start|stop|restart|reload|reset|status|logs|watch}"
         echo ""
         echo "Commands:"
         echo "  start/restart - Launch eww with dynamic monitor detection"
         echo "  stop/kill     - Stop eww and monitor watcher"
         echo "  reload        - Reload eww configuration only"
+        echo "  reset/clear   - Kill everything, clear generated configs/cache, relaunch"
         echo "  status        - Show running processes and monitor info"
         echo "  logs          - Show monitor watcher logs"
         echo "  watch         - Watch monitor watcher logs in real-time"

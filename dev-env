@@ -55,7 +55,7 @@ is_replaceable_dir() {
         relative_path="$item_name"
     else
         # Extract relative path from HOME
-        relative_path="${target_dir#$HOME/}/$item_name"
+        relative_path="${target_dir#"$HOME"/}/$item_name"
     fi
 
     for replaceable in "${REPLACEABLE_DIRS[@]}"; do
@@ -81,7 +81,7 @@ sync_directory_contents() {
         mkdir -p "$target_dir"
     fi
 
-    pushd "$source_dir" &> /dev/null
+    pushd "$source_dir" &> /dev/null || exit
     local items=$(find . -mindepth 1 -maxdepth 1)
     for item in $items; do
         local item_name=${item#./}
@@ -114,7 +114,7 @@ sync_directory_contents() {
             fi
         fi
     done
-    popd &> /dev/null
+    popd &> /dev/null || exit
 }
 
 
@@ -157,7 +157,7 @@ process_env_directory() {
 
     log "processing env directory: $source_base -> $target_base"
 
-    pushd "$source_base" &> /dev/null
+    pushd "$source_base" &> /dev/null || exit
     local items=$(find . -mindepth 1 -maxdepth 1)
 
     for item in $items; do
@@ -190,7 +190,7 @@ process_env_directory() {
         fi
     done
 
-    popd &> /dev/null
+    popd &> /dev/null || exit
 }
 
 # Process the entire env directory
@@ -252,7 +252,7 @@ if [[ -d "$system_dir" ]]; then
             return
         fi
 
-        pushd "$source_base" &> /dev/null
+        pushd "$source_base" &> /dev/null || exit
         local items=$(find . -type f)
 
         for item in $items; do
@@ -263,7 +263,7 @@ if [[ -d "$system_dir" ]]; then
             copy_system_file "$source_path" "$target_path"
         done
 
-        popd &> /dev/null
+        popd &> /dev/null || exit
     }
 
     process_system_directory "$system_dir" "/"

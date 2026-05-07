@@ -5,8 +5,9 @@ session_name=$1
 win_id=$(tmux list-windows -t "$session_name" -F "#{window_id}" | tail -n1)
 pane_start_command=$(tmux display-message -p -t "$session_name:$win_id" '#{pane_start_command}')
 
-# If the new window is running tmux-sessionizer, don't do anything
-if [[ "$pane_start_command" == *tmux-sessionizer* ]]; then
+# If the new window already has its own start command (e.g. tmux-sessionizer
+# or a local nvim opened against the remote), don't auto-inject an ssh.
+if [[ "$pane_start_command" == *tmux-sessionizer* || "$pane_start_command" == *nvim* ]]; then
     exit 0
 fi
 
@@ -14,5 +15,5 @@ ssh_host=$(tmux show-environment -t "$session_name" | grep '^TMUX_SSH_HOST=' | c
 
 if [[ -n "$ssh_host" ]]; then
     # Replace its first pane with ssh
-    tmux send-keys -t "$session_name:$win_id" "ssh $ssh_host" C-m
+    tmux send-keys -t "$session_name:$win_id" "tmux-ssh-connect $ssh_host" C-m
 fi

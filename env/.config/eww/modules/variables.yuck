@@ -83,16 +83,10 @@
 (defpoll bluetooth_status :interval "5s"
   "bluetoothctl show 2>/dev/null | grep 'Powered: yes' >/dev/null && echo 'on' || echo 'off'")
 
-;; Audio volume (fast polling for responsive updates)
-(defpoll volume :interval "100ms" :initial "50"
-  "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /%/) print $i}' | head -1 | sed 's/%//' || echo '50'")
-
-(defpoll volume_muted :interval "200ms" :initial "false"
-  "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -q 'yes' && echo 'true' || echo 'false'")
-
-;; Audio source (microphone)
-(defpoll mic_muted :interval "500ms" :initial "false"
-  "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | grep -q 'yes' && echo 'true' || echo 'false'")
+;; Audio state (volume, sink mute, source mute) — driven by `pactl subscribe`,
+;; so updates fire only on actual audio events instead of polling every 100ms.
+(deflisten audio_state :initial '{"volume":50,"muted":"false","mic_muted":"false"}'
+  "~/.config/eww/scripts/audio-state.sh")
 
 
 

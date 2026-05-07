@@ -13,4 +13,4 @@ mise.toml
 **/.settings/
 **/.factorypath
 **.ipr
-
+.claude/

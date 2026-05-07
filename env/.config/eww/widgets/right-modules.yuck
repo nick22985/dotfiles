@@ -80,17 +80,17 @@
                 :onclick "amixer sset Master toggle"
                 :onrightclick "pavucontrol &"
                 :tooltip "Left: toggle mute | Right: open pavucontrol | Scroll: adjust volume"
-        (box :class "pulseaudio ${volume_muted == 'true' ? 'muted' : ''}"
-          (label :text "${volume}% ${volume_muted == 'true' ? '' :
-                         volume <= 30 ? '🕨' :
-                         volume <= 60 ? '🕩' : '🕪'}")))
+        (box :class "pulseaudio ${audio_state.muted == 'true' ? 'muted' : ''}"
+          (label :text "${audio_state.volume}% ${audio_state.muted == 'true' ? '' :
+                         audio_state.volume <= 30 ? '🕨' :
+                         audio_state.volume <= 60 ? '🕩' : '🕪'}")))
       (revealer :reveal "${volume_hover ?: false}"
                 :transition "slideright"
                 :duration "200ms"
-        (button :class "pulseaudio-mic ${mic_muted == 'true' ? 'muted' : ''}"
+        (button :class "pulseaudio-mic ${audio_state.mic_muted == 'true' ? 'muted' : ''}"
                 :onclick "pactl set-source-mute @DEFAULT_SOURCE@ toggle"
-                :tooltip "Microphone: ${mic_muted == 'true' ? 'muted' : 'active'}"
-          (label :text "${mic_muted == 'true' ? '' : ''}"))))))
+                :tooltip "Microphone: ${audio_state.mic_muted == 'true' ? 'muted' : 'active'}"
+          (label :text "${audio_state.mic_muted == 'true' ? '' : ''}"))))))
 
 (defwidget hotspot_widget []
   (button :class "hotspot"

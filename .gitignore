@@ -1,3 +1,4 @@
 ./install/windows/nerd-fonts
 .backup/
 **/logs/*
+env/.config/sbx/env

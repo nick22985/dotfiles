@@ -103,6 +103,9 @@ btd-scarlett|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-s
 # Full BTD 700: All audio through Bluetooth headset (output only)
 btd-full|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|keep|same|keep|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 Only
 
+# BTD 700 with built-in mic: headset mode (stereo output + mono mic)
+btd-mic|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.mono-fallback|same|same|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo+input:mono-fallback|BTD 700 + BTD Mic
+
 EOF
     print_success "Created default profiles in $PROFILES_FILE"
     print_warning "Edit $PROFILES_FILE to customize your audio profiles"

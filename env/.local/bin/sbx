@@ -1,0 +1,1415 @@
+#!/usr/bin/env bash
+# sbx — sandboxed Docker dev environments for npm / bun / rust.
+#
+# Usage:
+#   sbx init <flavor>     Mark the current project's flavor and build the image.
+#   sbx shell             Enter the container for the current project.
+#                         Attaches to a running one (e.g. started by `sbx run`)
+#                         instead of spawning a new one when possible.
+#   sbx run               Run the command in .sbx/start (e.g. `npm run dev`).
+#   sbx stop              Stop the running container(s) for this project.
+#   sbx <flavor>          Ad-hoc shell in <flavor> using the current dir.
+#   sbx build [flavor]    (Re)build the image. Defaults to project flavor.
+#   sbx rebuild [flavor]  Build with --no-cache.
+#   sbx clean [flavor]    Remove cache volumes for a flavor (or all).
+#   sbx purge [flavor]    Remove caches + base + project images (asks first).
+#   sbx list              List available flavors.
+#
+#   sbx port [list]       List forwarded ports for this project.
+#   sbx port add <n>      Add port <n> to .sbx/ports.
+#   sbx port rm <n>       Remove port <n> from .sbx/ports.
+#   sbx env [list]        List vars in ~/.config/sbx/env (sensitive values masked).
+#   sbx env set K=V       Set or update a var in ~/.config/sbx/env.
+#   sbx env unset K       Remove a var from ~/.config/sbx/env.
+#   sbx start [show]      Show the project's .sbx/start command.
+#   sbx start set <cmd>   Set the project's .sbx/start command.
+#   sbx start clear       Remove the project's .sbx/start file.
+#   sbx scan [fs|image]   Run a full trivy scan on demand. `fs` (default) scans
+#                         the workspace; `image` scans the project image. Note:
+#                         a lighter `trivy fs --scanners vuln` already runs
+#                         automatically after every install.
+#
+#   sbx vpn [status]      Show VPN status for current project.
+#   sbx vpn use <spec>    Enable VPN for the current project. <spec> is either
+#                         an absolute/tilde path to a .ovpn file, or a bare
+#                         name resolved under $SBX_VPN_DIR/<name>.ovpn.
+#   sbx vpn auth          Prompt for OpenVPN username/password, save to
+#                         <ovpn-path>.auth (chmod 600, alongside the .ovpn).
+#   sbx vpn inline [file] Inline external ca/cert/key/tls-auth/tls-crypt refs
+#                         from absolute host paths into the .ovpn so it is
+#                         self-contained (needed for nmcli exports). Defaults
+#                         to the project's configured .ovpn.
+#   sbx vpn off           Disable VPN for the current project.
+#                         When .sbx/vpn is set, a gluetun sidecar runs alongside
+#                         the dev container; the dev container shares its netns
+#                         so all traffic exits via the VPN. Ports forward via
+#                         the sidecar; host.docker.internal is not reachable.
+#
+#   sbx service [list]    List services configured for this project.
+#   sbx service add <s>   Add a service to .sbx/services (e.g. redis).
+#   sbx service rm <s>    Remove a service from .sbx/services.
+#                         Built-in templates: redis, postgres, mongo, mysql,
+#                         mailpit. Bare image refs ("foo/bar:tag") also work.
+#                         Services share a network namespace with the dev
+#                         container — they're reachable on localhost:<port>
+#                         from app code. Ephemeral; stopped on session exit.
+#
+# Files:
+#   ${XDG_CONFIG_HOME:-~/.config}/sbx/<flavor>/Dockerfile  — base image source
+#   ./.sbx/flavor                                          — per-project marker
+#   ./.sbx/Dockerfile                                      — optional, extends base
+#                                                            (FROM sbx-<flavor>:latest).
+#                                                            Built/rebuilt automatically
+#                                                            when newer than the image.
+#   ./.sbx/ports                                           — optional, one port per line.
+#                                                            Published as 127.0.0.1:N:N
+#                                                            (host-localhost only).
+#   ./.sbx/start                                           — optional, shell command for
+#                                                            `sbx run` (e.g. npm run dev).
+#   ./.sbx/vpn                                             — optional, one line: an absolute
+#                                                            path (or ~/path) to a .ovpn file,
+#                                                            or a bare name resolved under
+#                                                            $SBX_VPN_DIR/<name>.ovpn.
+#                                                            Auth creds (if any) live at
+#                                                            <ovpn-path>.auth (chmod 600).
+#   ./.sbx/services                                        — optional, one service per line
+#                                                            (redis|postgres|mongo|mysql|mailpit
+#                                                            or a raw image:tag). Sidecars
+#                                                            share the dev container's netns
+#                                                            so app code uses localhost:<port>.
+#   ./.sbx/audit.log                                       — written by container wrappers:
+#                                                            install args + osv-scanner
+#                                                            output for review on host.
+#
+# Env:
+#   SBX_PORTS=3000,8080  Extra ports to publish (merged with .sbx/ports).
+#   SBX_RUN_SCRIPTS=1    Allow npm/bun postinstall scripts (off by default).
+#   SBX_SCANNERS=osv,socket
+#                        Comma-separated scanner allowlist. Defaults to "all".
+#                        Known names: osv, socket, guarddog, trivy,
+#                        npm-audit (npm), bun-audit (bun), cargo-audit (rust).
+#                        Use "none" to disable all post-install scanning.
+#   SOCKET_CLI_API_TOKEN=...
+#                        API token for socket.dev malicious-package detection
+#                        (v1+ env var; older SOCKET_API_KEY is also accepted).
+#   SOCKET_ORG_SLUG=...  Default org slug for `socket scan create --org`.
+#   SBX_VPN_DIR=...      Directory to resolve bare VPN names against
+#                        (e.g. ~/.secrets/sbx-vpn). Optional; absolute paths
+#                        in .sbx/vpn work without it.
+#
+# Persist any of these in ${XDG_CONFIG_HOME:-~/.config}/sbx/env
+# (KEY=value lines, chmod 600). Host env wins over the file.
+
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sbx"
+ENV_FILE="$CONFIG_DIR/env"
+
+FORWARDED_VARS=(SBX_RUN_SCRIPTS SBX_SCANNERS SOCKET_API_KEY SOCKET_CLI_API_TOKEN SOCKET_ORG_SLUG)
+
+_SBX_ACTIVE_SIDECAR=""
+_SBX_ACTIVE_SERVICES=()
+_SBX_HOSTS_FILE=""
+_sbx_cleanup_sidecar() {
+    local s
+    if [ "${#_SBX_ACTIVE_SERVICES[@]}" -gt 0 ]; then
+        for s in "${_SBX_ACTIVE_SERVICES[@]}"; do
+            stop_service "$s"
+        done
+        _SBX_ACTIVE_SERVICES=()
+    fi
+    if [ -n "$_SBX_ACTIVE_SIDECAR" ]; then
+        stop_vpn_sidecar_if_idle "$_SBX_ACTIVE_SIDECAR"
+        _SBX_ACTIVE_SIDECAR=""
+    fi
+    if [ -n "$_SBX_HOSTS_FILE" ]; then
+        rm -f "$_SBX_HOSTS_FILE" 2>/dev/null || true
+        _SBX_HOSTS_FILE=""
+    fi
+}
+
+die() { printf 'sbx: %s\n' "$*" >&2; exit 1; }
+log() { printf 'sbx: %s\n' "$*" >&2; }
+
+load_env_file() {
+    [ -f "$ENV_FILE" ] || return 0
+    local perms
+    perms="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo 600)"
+    case "$perms" in
+        600|400) ;;
+        *) log "warning: $ENV_FILE has perms $perms (chmod 600 recommended)" ;;
+    esac
+    local line key val
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"  # ltrim
+        [ -z "$line" ] && continue
+        [ "${line:0:1}" = "#" ] && continue
+        [[ "$line" == *=* ]] || { log "ignoring malformed env line: $line"; continue; }
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="${key#export }"
+        key="${key//[[:space:]]/}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { log "ignoring invalid var name: $key"; continue; }
+        if [[ "$val" =~ ^\".*\"$ ]]; then val="${val:1:-1}"; fi
+        if [[ "$val" =~ ^\'.*\'$ ]]; then val="${val:1:-1}"; fi
+        if [ -z "${!key:-}" ]; then
+            export "$key=$val"
+        fi
+    done < "$ENV_FILE"
+}
+
+load_env_file
+
+list_flavors() {
+    [ -d "$CONFIG_DIR" ] || return 0
+    find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+}
+
+is_flavor() {
+    local f="$1"
+    [ -f "$CONFIG_DIR/$f/Dockerfile" ]
+}
+
+image_name()  { printf 'sbx-%s:latest' "$1"; }
+
+cache_args() {
+    case "$1" in
+        npm)
+            printf -- '-v sbx-npm-cache:/home/dev/.npm '
+            ;;
+        bun)
+            printf -- '-v sbx-bun-cache:/home/dev/.bun/install/cache '
+            ;;
+        rust)
+            printf -- '-v sbx-rust-registry:/home/dev/.cargo/registry '
+            printf -- '-v sbx-rust-git:/home/dev/.cargo/git '
+            ;;
+    esac
+}
+
+image_exists() {
+    docker image inspect "$1" >/dev/null 2>&1
+}
+
+build_image() {
+    local flavor="$1" no_cache="${2:-}"
+    is_flavor "$flavor" || die "unknown flavor: $flavor (have: $(list_flavors | paste -sd, -))"
+    local ctx="$CONFIG_DIR/$flavor"
+    log "building $(image_name "$flavor") from $ctx"
+    DOCKER_BUILDKIT=1 docker build \
+        ${no_cache:+--no-cache} \
+        --build-arg "USER_UID=$(id -u)" \
+        --build-arg "USER_GID=$(id -g)" \
+        -t "$(image_name "$flavor")" \
+        "$ctx"
+}
+
+sanitize_tag() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]/-/g'
+}
+
+project_image_tag() {
+    local flavor="$1" project_root="$2"
+    printf 'sbx-%s-%s:latest' "$flavor" "$(project_name "$project_root")"
+}
+
+resolve_image() {
+    local flavor="$1" project_root="$2" no_cache="${3:-}"
+    image_exists "$(image_name "$flavor")" || build_image "$flavor"
+
+    local project_df; project_df="$(sbx_file "$project_root" Dockerfile)"
+    if [ ! -f "$project_df" ]; then
+        printf '%s\n' "$(image_name "$flavor")"
+        return
+    fi
+
+    local img; img="$(project_image_tag "$flavor" "$project_root")"
+    local needs_build=0
+    if ! image_exists "$img"; then
+        needs_build=1
+    else
+        local df_mtime img_mtime
+        df_mtime="$(stat -c %Y "$project_df")"
+        img_mtime="$(date -d "$(docker image inspect "$img" --format '{{.Created}}')" +%s 2>/dev/null || echo 0)"
+        [ "$df_mtime" -gt "$img_mtime" ] && needs_build=1
+    fi
+    if [ -n "$no_cache" ] || [ "$needs_build" -eq 1 ]; then
+        log "building project image $img from $project_df"
+        DOCKER_BUILDKIT=1 docker build \
+            ${no_cache:+--no-cache} \
+            --build-arg "USER_UID=$(id -u)" \
+            --build-arg "USER_GID=$(id -g)" \
+            -t "$img" \
+            -f "$project_df" \
+            "$(dirname "$project_df")" >&2
+    fi
+    printf '%s\n' "$img"
+}
+
+shared_root() {
+    local dir="$1" gdir cdir
+    gdir="$(git -C "$dir" rev-parse --git-dir 2>/dev/null)" || return 0
+    cdir="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)" || return 0
+    [ -d "$gdir" ] || gdir="$dir/$gdir"
+    [ -d "$cdir" ] || cdir="$dir/$cdir"
+    gdir="$(cd "$gdir" 2>/dev/null && pwd)" || return 0
+    cdir="$(cd "$cdir" 2>/dev/null && pwd)" || return 0
+    if [ "$gdir" != "$cdir" ] && [ -d "$cdir/worktrees" ]; then
+        printf '%s' "$cdir"
+    fi
+}
+
+sbx_file() {
+    local root="$1" name="$2"
+    if [ -e "$root/.sbx/$name" ]; then
+        printf '%s' "$root/.sbx/$name"; return
+    fi
+    local shared; shared="$(shared_root "$root")"
+    if [ -n "$shared" ] && [ -e "$shared/.sbx/$name" ]; then
+        printf '%s' "$shared/.sbx/$name"; return
+    fi
+    printf '%s' "$root/.sbx/$name"
+}
+
+sbx_write_dir() {
+    local root="$1"
+    if [ -f "$root/.sbx/flavor" ]; then
+        printf '%s' "$root/.sbx"; return
+    fi
+    local shared; shared="$(shared_root "$root")"
+    if [ -n "$shared" ] && [ -f "$shared/.sbx/flavor" ]; then
+        printf '%s' "$shared/.sbx"; return
+    fi
+    if [ -n "$shared" ]; then
+        printf '%s' "$shared/.sbx"
+    else
+        printf '%s' "$root/.sbx"
+    fi
+}
+
+project_name() {
+    local root="$1"
+    local shared; shared="$(shared_root "$root")"
+    if [ -n "$shared" ]; then
+        sanitize_tag "$(basename "$shared")"
+    else
+        sanitize_tag "$(basename "$root")"
+    fi
+}
+
+project_flavor() {
+    local dir; dir="$(pwd)"
+    while :; do
+        if [ -f "$dir/.sbx/flavor" ]; then
+            printf '%s\t%s\n' "$(cat "$dir/.sbx/flavor")" "$dir"
+            return 0
+        fi
+        local shared; shared="$(shared_root "$dir")"
+        if [ -n "$shared" ] && [ -f "$shared/.sbx/flavor" ]; then
+            printf '%s\t%s\n' "$(cat "$shared/.sbx/flavor")" "$dir"
+            return 0
+        fi
+        [ "$dir" = "/" ] && return 1
+        dir="$(dirname "$dir")"
+    done
+}
+
+port_args() {
+    local project_root="$1"
+    local -A seen=()
+    local ports=()
+    local p
+    local ports_file; ports_file="$(sbx_file "$project_root" ports)"
+    if [ -f "$ports_file" ]; then
+        while IFS= read -r p; do
+            p="${p%%#*}"; p="${p//[[:space:]]/}"
+            [ -z "$p" ] && continue
+            [[ "$p" =~ ^[0-9]+$ ]] || { log "ignoring invalid port: $p"; continue; }
+            [ -n "${seen[$p]:-}" ] || { seen[$p]=1; ports+=("$p"); }
+        done < "$ports_file"
+    fi
+    if [ -n "${SBX_PORTS:-}" ]; then
+        IFS=',' read -r -a extra <<< "$SBX_PORTS"
+        for p in "${extra[@]}"; do
+            p="${p//[[:space:]]/}"
+            [ -z "$p" ] && continue
+            [[ "$p" =~ ^[0-9]+$ ]] || { log "ignoring invalid SBX_PORTS entry: $p"; continue; }
+            [ -n "${seen[$p]:-}" ] || { seen[$p]=1; ports+=("$p"); }
+        done
+    fi
+    if [ "${#ports[@]}" -gt 0 ]; then
+        log "forwarding 127.0.0.1 -> container: ${ports[*]}"
+        log "hint: dev server must bind to 0.0.0.0 in the container (e.g. vite --host, HOST=0.0.0.0)"
+        for p in "${ports[@]}"; do
+            printf -- '-p 127.0.0.1:%s:%s ' "$p" "$p"
+        done
+    fi
+}
+
+worktree_mount_args() {
+    local project_root="$1"
+    local dotgit="$project_root/.git"
+    [ -f "$dotgit" ] || return 0
+    local gitdir
+    gitdir="$(sed -n 's/^gitdir: //p' "$dotgit" | head -1)"
+    [ -n "$gitdir" ] || return 0
+    case "$gitdir" in
+        /*) ;;
+        *) gitdir="$project_root/$gitdir" ;;
+    esac
+    [ -d "$gitdir" ] || return 0
+    printf -- '-v %s:%s ' "$gitdir" "$gitdir"
+    if [ -f "$gitdir/commondir" ]; then
+        local commondir
+        commondir="$(head -1 "$gitdir/commondir")"
+        case "$commondir" in
+            /*) ;;
+            *) commondir="$(cd "$gitdir" && cd "$commondir" 2>/dev/null && pwd)" ;;
+        esac
+        if [ -n "$commondir" ] && [ -d "$commondir" ] && [ "$commondir" != "$gitdir" ]; then
+            printf -- '-v %s:%s ' "$commondir" "$commondir"
+        fi
+    fi
+}
+
+project_vpn_name() {
+    local project_root="$1"
+    local vpn_file; vpn_file="$(sbx_file "$project_root" vpn 2>/dev/null)" || return 0
+    [ -f "$vpn_file" ] || return 0
+    local name; name="$(tr -d '[:space:]' < "$vpn_file")"
+    [ -z "$name" ] && return 0
+    printf '%s' "$name"
+}
+
+project_ssh_enabled() {
+    local project_root="$1"
+    local f; f="$(sbx_file "$project_root" ssh 2>/dev/null)" || return 1
+    [ -f "$f" ] || return 1
+    return 0
+}
+
+ssh_mount_args() {
+    local project_root="$1"
+    project_ssh_enabled "$project_root" || return 0
+    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+        log "sbx: .sbx/ssh set but SSH_AUTH_SOCK is empty on host; skipping agent forward" >&2
+        return 0
+    fi
+    [ -S "$SSH_AUTH_SOCK" ] || { log "sbx: SSH_AUTH_SOCK=$SSH_AUTH_SOCK is not a socket; skipping" >&2; return 0; }
+    printf -- '-v %s:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent -e HOME=/home/dev ' "$SSH_AUTH_SOCK"
+    if [ -f "$HOME/.ssh/known_hosts" ]; then
+        printf -- '-v %s:/home/dev/.ssh/known_hosts:ro ' "$HOME/.ssh/known_hosts"
+    fi
+    if [ -f "$HOME/.ssh/config" ]; then
+        printf -- '-v %s:/home/dev/.ssh/config:ro ' "$HOME/.ssh/config"
+    fi
+}
+
+resolve_ovpn() {
+    local spec="$1"
+    [ -n "$spec" ] || return 1
+    case "$spec" in
+        /*) printf '%s' "$spec" ;;
+        '~/'*) printf '%s' "$HOME/${spec:2}" ;;
+        *)
+            local base="${SBX_VPN_DIR:-}"
+            [ -n "$base" ] || return 1
+            case "$base" in '~/'*) base="$HOME/${base:2}" ;; esac
+            printf '%s/%s.ovpn' "$base" "$spec"
+            ;;
+    esac
+}
+
+vpn_sidecar_name() {
+    printf 'sbx-vpn-%s' "$1"
+}
+
+vpn_sidecar_running() {
+    docker ps --filter "name=^$1$" --format '{{.Names}}' | head -n1
+}
+
+vpn_sidecar_exists() {
+    docker ps -a --filter "name=^$1$" --format '{{.Names}}' | head -n1
+}
+
+vpn_sidecar_attached_count() {
+    local sidecar="$1"
+    docker ps --filter "network=container:$sidecar" --format '{{.Names}}' | wc -l
+}
+
+start_vpn_sidecar() {
+    local spec="$1" project_root="$2"
+    local pname; pname="$(project_name "$project_root")"
+    local sidecar; sidecar="$(vpn_sidecar_name "$pname")"
+    if [ -n "$(vpn_sidecar_running "$sidecar")" ]; then
+        local attached; attached="$(vpn_sidecar_attached_count "$sidecar")"
+        if [ "$attached" -gt 0 ]; then
+            log "reusing vpn sidecar: $sidecar (serving $attached container(s))" >&2
+            printf '%s' "$sidecar"
+            return 0
+        fi
+        log "vpn sidecar $sidecar is up but idle; recycling" >&2
+        docker rm -f "$sidecar" >/dev/null 2>&1 || true
+    fi
+    local ovpn
+    ovpn="$(resolve_ovpn "$spec")" \
+        || die "cannot resolve '$spec' — set SBX_VPN_DIR or use a full path"
+    [ -f "$ovpn" ] || die "no VPN config: $ovpn"
+    local auth="$ovpn.auth"
+    local auth_env=()
+    if [ -f "$auth" ]; then
+        local u p
+        IFS= read -r u < "$auth" || true
+        p="$(tail -n +2 "$auth")"
+        [ -n "$u" ] && auth_env+=(-e "OPENVPN_USER=$u")
+        [ -n "$p" ] && auth_env+=(-e "OPENVPN_PASSWORD=$p")
+    fi
+    local bridge_subnet
+    bridge_subnet="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null)"
+    [ -z "$bridge_subnet" ] && bridge_subnet="172.17.0.0/16"
+
+    log "starting vpn sidecar: $sidecar" >&2
+    log "  config: $ovpn" >&2
+    log "  allowing host bridge: $bridge_subnet" >&2
+    [ -n "$(vpn_sidecar_exists "$sidecar")" ] && docker rm -f "$sidecar" >/dev/null 2>&1 || true
+    # shellcheck disable=SC2046
+    docker run -d \
+        --name "$sidecar" \
+        --cap-add=NET_ADMIN \
+        --device=/dev/net/tun \
+        --add-host=host.docker.internal:host-gateway \
+        -e VPN_SERVICE_PROVIDER=custom \
+        -e VPN_TYPE=openvpn \
+        -e OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf \
+        -e FIREWALL_OUTBOUND_SUBNETS="$bridge_subnet" \
+        "${auth_env[@]}" \
+        -v "$ovpn":/gluetun/custom.conf:ro \
+        $(port_args "$project_root") \
+        qmcgaw/gluetun >/dev/null \
+        || die "failed to start vpn sidecar"
+    local i
+    for i in $(seq 1 30); do
+        if [ -z "$(vpn_sidecar_running "$sidecar")" ]; then
+            log "vpn sidecar exited unexpectedly; logs:" >&2
+            docker logs --tail 80 "$sidecar" >&2 2>/dev/null || true
+            log "(container kept for inspection: docker logs $sidecar; clean with: docker rm $sidecar)" >&2
+            die "vpn sidecar failed to start"
+        fi
+        if docker exec "$sidecar" wget -qO- -T 2 https://api.ipify.org >/dev/null 2>&1; then
+            log "vpn sidecar up: $sidecar" >&2
+            printf '%s' "$sidecar"
+            return 0
+        fi
+        sleep 1
+    done
+    log "vpn sidecar didn't reach the internet in 30s; logs:" >&2
+    docker logs --tail 80 "$sidecar" >&2 2>/dev/null || true
+    docker rm -f "$sidecar" >/dev/null 2>&1 || true
+    die "vpn sidecar didn't come up in 30s"
+}
+
+stop_vpn_sidecar() {
+    local sidecar="$1"
+    [ -n "$sidecar" ] || return 0
+    [ -n "$(vpn_sidecar_exists "$sidecar")" ] || return 0
+    log "stopping vpn sidecar: $sidecar" >&2
+    docker rm -f "$sidecar" >/dev/null 2>&1 || true
+}
+
+stop_vpn_sidecar_if_idle() {
+    local sidecar="$1"
+    [ -n "$sidecar" ] || return 0
+    [ -n "$(vpn_sidecar_running "$sidecar")" ] || return 0
+    local n; n="$(vpn_sidecar_attached_count "$sidecar")"
+    if [ "$n" -gt 0 ]; then
+        log "vpn sidecar still has $n attached container(s); leaving $sidecar up" >&2
+        return 0
+    fi
+    stop_vpn_sidecar "$sidecar"
+}
+
+project_services() {
+    local project_root="$1"
+    local file; file="$(sbx_file "$project_root" services 2>/dev/null)" || return 0
+    [ -f "$file" ] || return 0
+    awk '{ sub(/#.*$/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, "") } NF' "$file"
+}
+
+service_template() {
+    case "$1" in
+        redis)
+            printf 'image:redis:alpine\n'
+            ;;
+        postgres|postgresql)
+            printf 'env:POSTGRES_PASSWORD=postgres\n'
+            printf 'env:POSTGRES_USER=postgres\n'
+            printf 'env:POSTGRES_DB=postgres\n'
+            printf 'image:postgres:16-alpine\n'
+            ;;
+        mongo|mongodb)
+            printf 'image:mongo:7\n'
+            ;;
+        mysql)
+            printf 'env:MYSQL_ALLOW_EMPTY_PASSWORD=yes\n'
+            printf 'image:mysql:8\n'
+            ;;
+        mailpit)
+            printf 'image:axllent/mailpit\n'
+            ;;
+        *)
+            case "$1" in
+                */*|*:*) printf 'image:%s\n' "$1" ;;
+                *) return 1 ;;
+            esac
+            ;;
+    esac
+}
+
+service_short_name() {
+    local s="$1"
+    s="${s##*/}"; s="${s%%:*}"; s="${s%%@*}"
+    printf '%s' "$s" | tr -c 'A-Za-z0-9._-' '-' | sed 's/--*/-/g; s/^-//; s/-$//'
+}
+
+service_container_name() {
+    printf 'sbx-svc-%s-%s' "$1" "$2"
+}
+
+start_service() {
+    local spec="$1" project_root="$2" netns_owner="${3:-}" port_args="${4:-}"
+    local pname; pname="$(project_name "$project_root")"
+    local short; short="$(service_short_name "$spec")"
+    local cname; cname="$(service_container_name "$pname" "$short")"
+    if [ -n "$(docker ps --filter "name=^$cname$" --format '{{.Names}}' | head -n1)" ]; then
+        log "service already up: $cname" >&2
+        printf '%s' "$cname"
+        return 0
+    fi
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+    local template
+    template="$(service_template "$spec")" \
+        || die "unknown service: '$spec' (built-ins: redis postgres mongo mysql mailpit; or pass an image like 'ghcr.io/foo/bar:tag')"
+    local image="" envs=() line
+    while IFS= read -r line; do
+        case "$line" in
+            env:*) envs+=(-e "${line#env:}") ;;
+            image:*) image="${line#image:}" ;;
+        esac
+    done <<< "$template"
+    [ -n "$image" ] || die "service template missing image: $spec"
+    local net_args=()
+    if [ -n "$netns_owner" ]; then
+        net_args=(--network "container:$netns_owner")
+    fi
+    log "starting service: $cname (image: $image)" >&2
+    # shellcheck disable=SC2086
+    docker run -d \
+        --name "$cname" \
+        --cap-drop=ALL --security-opt=no-new-privileges \
+        "${envs[@]}" \
+        "${net_args[@]}" \
+        $port_args \
+        "$image" >/dev/null \
+        || die "failed to start service: $cname"
+    printf '%s' "$cname"
+}
+
+stop_service() {
+    local cname="$1"
+    [ -n "$cname" ] || return 0
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+}
+
+stop_all_services_for_project() {
+    local pname="$1" c
+    while IFS= read -r c; do
+        [ -z "$c" ] && continue
+        log "stopping service: $c" >&2
+        docker rm -f "$c" >/dev/null 2>&1 || true
+    done < <(docker ps -a --filter "name=^sbx-svc-${pname}-" --format '{{.Names}}')
+}
+
+find_running_container() {
+    local flavor="$1" pname="$2"
+    docker ps --filter "name=^sbx-${flavor}-${pname}-" --format '{{.Names}}' | head -n1
+}
+
+exec_into() {
+    local container="$1"; shift
+    local entry=("/bin/bash")
+    [ $# -gt 0 ] && entry=("$@")
+    local tty_flag=(-i)
+    [ -t 0 ] && [ -t 1 ] && tty_flag=(-i -t)
+    local env_args=()
+    for v in "${FORWARDED_VARS[@]}"; do
+        [ -n "${!v:-}" ] && env_args+=(-e "$v=${!v}")
+    done
+    log "attaching to running container: $container"
+    exec docker exec "${tty_flag[@]}" \
+        -e TERM="${TERM:-xterm-256color}" \
+        -e COLORTERM="${COLORTERM:-}" \
+        "${env_args[@]}" \
+        -w /workspace \
+        "$container" \
+        "${entry[@]}"
+}
+
+run_container() {
+    local flavor="$1" project_root="$2"
+    shift 2
+    is_flavor "$flavor" || die "unknown flavor: $flavor"
+    local image; image="$(resolve_image "$flavor" "$project_root")"
+
+    local project_name; project_name="$(project_name "$project_root")"
+    local entry=("/bin/bash")
+    [ $# -gt 0 ] && entry=("$@")
+    local tty_flag=(-i)
+    [ -t 0 ] && [ -t 1 ] && tty_flag=(-i -t)
+    local env_args=()
+    for v in "${FORWARDED_VARS[@]}"; do
+        if [ -n "${!v:-}" ]; then
+            env_args+=(-e "$v=${!v}")
+        fi
+    done
+
+    local network_args=()
+    local extra_host_args=(--add-host=host.docker.internal:host-gateway)
+    local hostname_args=(--hostname "sbx-$flavor")
+    local port_args_str; port_args_str="$(port_args "$project_root")"
+    local vpn_name; vpn_name="$(project_vpn_name "$project_root")"
+    local netns_owner=""
+    local need_trap=0
+    if [ -n "$vpn_name" ]; then
+        _SBX_ACTIVE_SIDECAR="$(start_vpn_sidecar "$vpn_name" "$project_root")"
+        netns_owner="$_SBX_ACTIVE_SIDECAR"
+        port_args_str=""
+        need_trap=1
+    fi
+
+    local svc cname
+    while IFS= read -r svc; do
+        [ -z "$svc" ] && continue
+        local svc_ports=""
+        if [ -z "$netns_owner" ]; then
+            svc_ports="$port_args_str"
+            port_args_str=""
+        fi
+        cname="$(start_service "$svc" "$project_root" "$netns_owner" "$svc_ports")"
+        _SBX_ACTIVE_SERVICES+=("$cname")
+        [ -z "$netns_owner" ] && netns_owner="$cname"
+        need_trap=1
+    done < <(project_services "$project_root")
+
+    if [ -n "$netns_owner" ]; then
+        network_args=(--network "container:$netns_owner")
+        hostname_args=()
+        local bridge_gw
+        bridge_gw="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)"
+        [ -z "$bridge_gw" ] && bridge_gw="172.17.0.1"
+        _SBX_HOSTS_FILE="$(mktemp /tmp/sbx-hosts.XXXXXX)"
+        cat > "$_SBX_HOSTS_FILE" <<EOF
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+$bridge_gw  host.docker.internal
+EOF
+        chmod 644 "$_SBX_HOSTS_FILE"
+        extra_host_args=(-v "$_SBX_HOSTS_FILE:/etc/hosts:ro")
+    fi
+    if [ "$need_trap" -eq 1 ]; then
+        trap _sbx_cleanup_sidecar EXIT INT TERM
+    fi
+
+    local rc=0
+    # shellcheck disable=SC2046
+    docker run --rm "${tty_flag[@]}" \
+        "${hostname_args[@]}" \
+        --name "sbx-${flavor}-${project_name}-$$" \
+        --user "$(id -u):$(id -g)" \
+        --cap-drop=ALL \
+        --security-opt=no-new-privileges \
+        "${extra_host_args[@]}" \
+        "${network_args[@]}" \
+        -e TERM="${TERM:-xterm-256color}" \
+        -e COLORTERM="${COLORTERM:-}" \
+        "${env_args[@]}" \
+        -w /workspace \
+        -v "$project_root":/workspace \
+        $(worktree_mount_args "$project_root") \
+        $(ssh_mount_args "$project_root") \
+        $(cache_args "$flavor") \
+        "$port_args_str" \
+        "$image" \
+        "${entry[@]}" \
+        || rc=$?
+    _sbx_cleanup_sidecar
+    [ "$need_trap" -eq 1 ] && trap - EXIT INT TERM
+    exit "$rc"
+}
+
+cmd_init() {
+    local flavor="${1:-}"
+    [ -n "$flavor" ] || die "usage: sbx init <flavor>"
+    is_flavor "$flavor" || die "unknown flavor: $flavor (have: $(list_flavors | paste -sd, -))"
+    local write_dir; write_dir="$(sbx_write_dir "$(pwd)")"
+    mkdir -p "$write_dir"
+    printf '%s\n' "$flavor" > "$write_dir/flavor"
+    log "marked $write_dir as flavor=$flavor"
+    image_exists "$(image_name "$flavor")" || build_image "$flavor"
+    log "ready. run 'sbx' to enter."
+    log "extra deps: create $write_dir/Dockerfile starting with 'FROM $(image_name "$flavor")'"
+}
+
+cmd_shell() {
+    local entry; entry="$(project_flavor)" \
+        || die "no .sbx/flavor here. run 'sbx init <flavor>' first, or 'sbx <flavor>' for ad-hoc."
+    local flavor="${entry%%	*}"
+    local root="${entry#*	}"
+    local pname; pname="$(project_name "$root")"
+    local existing; existing="$(find_running_container "$flavor" "$pname")"
+    if [ -n "$existing" ]; then
+        exec_into "$existing"
+    fi
+    run_container "$flavor" "$root"
+}
+
+cmd_run() {
+    local entry; entry="$(project_flavor)" \
+        || die "no .sbx/flavor here. run 'sbx init <flavor>' first."
+    local flavor="${entry%%	*}"
+    local root="${entry#*	}"
+    local start_file; start_file="$(sbx_file "$root" start)"
+    [ -f "$start_file" ] \
+        || die "no .sbx/start file. put a shell command there (e.g. 'npm run dev')."
+    local pname; pname="$(project_name "$root")"
+    local existing; existing="$(find_running_container "$flavor" "$pname")"
+    if [ -n "$existing" ]; then
+        die "container already running for $flavor/$pname: $existing
+  - stop it:  sbx stop
+  - attach:   sbx shell"
+    fi
+    local start_cmd; start_cmd="$(cat "$start_file")"
+    log "running: $start_cmd"
+    run_container "$flavor" "$root" /bin/bash -c "$start_cmd"
+}
+
+cmd_stop() {
+    local entry; entry="$(project_flavor)" \
+        || die "no .sbx/flavor here."
+    local flavor="${entry%%	*}"
+    local root="${entry#*	}"
+    local pname; pname="$(project_name "$root")"
+    local running
+    mapfile -t running < <(docker ps --filter "name=^sbx-${flavor}-${pname}-" --format '{{.Names}}')
+    if [ "${#running[@]}" -eq 0 ]; then
+        log "no running container for $flavor/$pname"
+        return
+    fi
+    for c in "${running[@]}"; do
+        log "stopping $c"
+        docker stop "$c" >/dev/null
+    done
+    stop_all_services_for_project "$pname"
+    local sidecar; sidecar="$(vpn_sidecar_name "$pname")"
+    stop_vpn_sidecar "$sidecar"
+}
+
+cmd_scan() {
+    local entry; entry="$(project_flavor)" \
+        || die "no .sbx/flavor here. run 'sbx init <flavor>' first."
+    local flavor="${entry%%	*}"
+    local root="${entry#*	}"
+    local pname; pname="$(project_name "$root")"
+    local existing; existing="$(find_running_container "$flavor" "$pname")"
+    local target="${1:-fs}"
+    case "$target" in
+        fs|filesystem)
+            if [ -n "$existing" ]; then
+                log "trivy fs /workspace (via $existing)"
+                exec docker exec -i "$existing" trivy fs --no-progress /workspace
+            fi
+            local image; image="$(resolve_image "$flavor" "$root")"
+            log "trivy fs /workspace (transient $image)"
+            exec docker run --rm -i \
+                --user "$(id -u):$(id -g)" \
+                --cap-drop=ALL \
+                --security-opt=no-new-privileges \
+                -v "$root":/workspace:ro \
+                -w /workspace \
+                "$image" trivy fs --no-progress /workspace
+            ;;
+        image)
+            local image; image="$(resolve_image "$flavor" "$root")"
+            log "trivy image $image"
+            exec trivy image --no-progress "$image"
+            ;;
+        *)
+            die "usage: sbx scan [fs|image]"
+            ;;
+    esac
+}
+
+flavor_volumes() {
+    case "$1" in
+        npm)  printf 'sbx-npm-cache\n' ;;
+        bun)  printf 'sbx-bun-cache\n' ;;
+        rust) printf 'sbx-rust-registry\nsbx-rust-git\n' ;;
+    esac
+}
+
+cmd_clean() {
+    local flavor="${1:-}"
+    local vols=()
+    if [ -n "$flavor" ]; then
+        case "$flavor" in
+            npm|bun|rust) mapfile -t vols < <(flavor_volumes "$flavor") ;;
+            *) die "unknown flavor: $flavor" ;;
+        esac
+    else
+        for f in npm bun rust; do
+            while IFS= read -r v; do vols+=("$v"); done < <(flavor_volumes "$f")
+        done
+    fi
+    for v in "${vols[@]}"; do
+        if docker volume inspect "$v" >/dev/null 2>&1; then
+            log "removing volume $v"
+            docker volume rm "$v" >/dev/null
+        fi
+    done
+}
+
+images_for_flavor() {
+    docker images --format '{{.Repository}}:{{.Tag}}' \
+        | grep -E "^sbx-$1(-[^:]*)?:" || true
+}
+
+cmd_purge() {
+    local flavor="${1:-}"
+    local flavors=()
+    if [ -n "$flavor" ]; then
+        case "$flavor" in
+            npm|bun|rust) flavors=("$flavor") ;;
+            *) die "unknown flavor: $flavor" ;;
+        esac
+    else
+        flavors=(npm bun rust)
+    fi
+
+    local vols=() imgs=()
+    for f in "${flavors[@]}"; do
+        while IFS= read -r v; do vols+=("$v"); done < <(flavor_volumes "$f")
+        while IFS= read -r i; do [ -n "$i" ] && imgs+=("$i"); done < <(images_for_flavor "$f")
+    done
+
+    if [ "${#vols[@]}" -eq 0 ] && [ "${#imgs[@]}" -eq 0 ]; then
+        log "nothing to purge for: ${flavors[*]}"
+        return
+    fi
+
+    printf 'sbx: will purge:\n' >&2
+    [ "${#imgs[@]}" -gt 0 ] && printf '  image: %s\n' "${imgs[@]}" >&2
+    [ "${#vols[@]}" -gt 0 ] && printf '  volume: %s\n' "${vols[@]}" >&2
+    printf 'sbx: continue? [y/N] ' >&2
+    local ans; read -r ans </dev/tty
+    case "$ans" in
+        y|Y|yes|YES) ;;
+        *) log "aborted"; return ;;
+    esac
+
+    for i in "${imgs[@]}"; do
+        log "removing image $i"
+        docker image rm "$i" >/dev/null 2>&1 || log "  (failed; in use?)"
+    done
+    for v in "${vols[@]}"; do
+        if docker volume inspect "$v" >/dev/null 2>&1; then
+            log "removing volume $v"
+            docker volume rm "$v" >/dev/null
+        fi
+    done
+}
+
+cmd_build() {
+    local no_cache="${1:-}" arg="${2:-}"
+    if [ -n "$arg" ]; then
+        build_image "$arg" "$no_cache"
+        return
+    fi
+    local entry; entry="$(project_flavor)" \
+        || die "specify a flavor or run from a project with .sbx/flavor"
+    local flavor="${entry%%	*}"
+    local root="${entry#*	}"
+    local project_df; project_df="$(sbx_file "$root" Dockerfile)"
+    if [ -f "$project_df" ]; then
+        image_exists "$(image_name "$flavor")" || build_image "$flavor"
+        local img; img="$(project_image_tag "$flavor" "$root")"
+        log "building project image $img from $project_df"
+        DOCKER_BUILDKIT=1 docker build \
+            ${no_cache:+--no-cache} \
+            --build-arg "USER_UID=$(id -u)" \
+            --build-arg "USER_GID=$(id -g)" \
+            -t "$img" \
+            -f "$project_df" \
+            "$(dirname "$project_df")"
+    else
+        build_image "$flavor" "$no_cache"
+    fi
+}
+
+require_project() {
+    local entry; entry="$(project_flavor)" \
+        || die "no .sbx/flavor here. run 'sbx init <flavor>' first."
+    printf '%s' "$entry"
+}
+
+cmd_port() {
+    local sub="${1:-list}"; shift || true
+    local entry; entry="$(require_project)"
+    local root="${entry#*	}"
+    local read_file; read_file="$(sbx_file "$root" ports)"
+    local write_dir; write_dir="$(sbx_write_dir "$root")"
+    local write_file="$write_dir/ports"
+    case "$sub" in
+        ls|list)
+            if [ ! -s "$read_file" ]; then
+                log "no ports configured"
+                return
+            fi
+            log "from $read_file:"
+            cat "$read_file"
+            ;;
+        add)
+            local p="${1:-}"
+            [ -n "$p" ] || die "usage: sbx port add <port>"
+            [[ "$p" =~ ^[0-9]+$ ]] || die "invalid port: $p"
+            mkdir -p "$write_dir"
+            touch "$write_file"
+            if grep -qE "^[[:space:]]*$p([[:space:]]|#|$)" "$write_file"; then
+                log "port $p already present in $write_file"
+                return
+            fi
+            printf '%s\n' "$p" >> "$write_file"
+            log "added $p to $write_file"
+            ;;
+        rm|remove|del|delete)
+            local p="${1:-}"
+            [ -n "$p" ] || die "usage: sbx port rm <port>"
+            [ -f "$write_file" ] || die "no $write_file"
+            local tmp; tmp="$(mktemp)"
+            awk -v target="$p" '{
+                line=$0; sub(/#.*$/,"",line); gsub(/[[:space:]]/,"",line);
+                if (line == target) next; print
+            }' "$write_file" > "$tmp"
+            mv "$tmp" "$write_file"
+            log "removed $p from $write_file"
+            ;;
+        *) die "usage: sbx port [list|add <n>|rm <n>]" ;;
+    esac
+}
+
+mask_value() {
+    local key="$1" val="$2"
+    case "$key" in
+        *KEY*|*TOKEN*|*SECRET*|*PASSWORD*|*PASS*)
+            local n="${#val}"
+            if [ "$n" -le 4 ]; then printf '****'
+            else printf '%s****%s' "${val:0:2}" "${val: -2}"
+            fi
+            ;;
+        *) printf '%s' "$val" ;;
+    esac
+}
+
+ensure_env_file() {
+    mkdir -p "$CONFIG_DIR"
+    if [ ! -f "$ENV_FILE" ]; then
+        : > "$ENV_FILE"
+    fi
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+}
+
+cmd_env() {
+    local sub="${1:-list}"; shift || true
+    case "$sub" in
+        ls|list)
+            if [ ! -f "$ENV_FILE" ]; then
+                log "no env file at $ENV_FILE"
+                return
+            fi
+            local line key val
+            while IFS= read -r line || [ -n "$line" ]; do
+                line="${line#"${line%%[![:space:]]*}"}"
+                [ -z "$line" ] && continue
+                [ "${line:0:1}" = "#" ] && continue
+                [[ "$line" == *=* ]] || continue
+                key="${line%%=*}"; val="${line#*=}"
+                key="${key#export }"; key="${key//[[:space:]]/}"
+                if [[ "$val" =~ ^\".*\"$ ]]; then val="${val:1:-1}"; fi
+                if [[ "$val" =~ ^\'.*\'$ ]]; then val="${val:1:-1}"; fi
+                printf '%s=%s\n' "$key" "$(mask_value "$key" "$val")"
+            done < "$ENV_FILE"
+            ;;
+        set)
+            local arg="${1:-}"
+            [ -n "$arg" ] || die "usage: sbx env set KEY=VALUE  (or: sbx env set KEY VALUE)"
+            local key val
+            if [[ "$arg" == *=* ]]; then
+                key="${arg%%=*}"; val="${arg#*=}"
+            else
+                key="$arg"; val="${2:-}"
+                [ -n "$val" ] || die "usage: sbx env set KEY=VALUE"
+            fi
+            [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid var name: $key"
+            ensure_env_file
+            local tmp; tmp="$(mktemp)"
+            chmod 600 "$tmp"
+            awk -v k="$key" -v v="$val" '
+                BEGIN { done = 0 }
+                {
+                    line=$0
+                    s=line; sub(/^[[:space:]]+/, "", s); sub(/^export[[:space:]]+/, "", s)
+                    pos=index(s, "=")
+                    if (pos > 0) {
+                        cur=substr(s, 1, pos-1); gsub(/[[:space:]]/, "", cur)
+                        if (cur == k) { print k "=" v; done=1; next }
+                    }
+                    print line
+                }
+                END { if (!done) print k "=" v }
+            ' "$ENV_FILE" > "$tmp"
+            mv "$tmp" "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
+            log "set $key in $ENV_FILE"
+            ;;
+        unset|rm|remove|del)
+            local key="${1:-}"
+            [ -n "$key" ] || die "usage: sbx env unset KEY"
+            [ -f "$ENV_FILE" ] || die "no $ENV_FILE"
+            local tmp; tmp="$(mktemp)"
+            chmod 600 "$tmp"
+            awk -v k="$key" '
+                {
+                    line=$0
+                    s=line; sub(/^[[:space:]]+/, "", s); sub(/^export[[:space:]]+/, "", s)
+                    pos=index(s, "=")
+                    if (pos > 0) {
+                        cur=substr(s, 1, pos-1); gsub(/[[:space:]]/, "", cur)
+                        if (cur == k) next
+                    }
+                    print line
+                }
+            ' "$ENV_FILE" > "$tmp"
+            mv "$tmp" "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
+            log "unset $key in $ENV_FILE"
+            ;;
+        *) die "usage: sbx env [list|set KEY=VALUE|unset KEY]" ;;
+    esac
+}
+
+cmd_start() {
+    local sub="${1:-show}"; shift || true
+    local entry; entry="$(require_project)"
+    local root="${entry#*	}"
+    local read_file; read_file="$(sbx_file "$root" start)"
+    local write_dir; write_dir="$(sbx_write_dir "$root")"
+    local write_file="$write_dir/start"
+    case "$sub" in
+        show)
+            [ -f "$read_file" ] || { log "no start file"; return; }
+            log "from $read_file:"
+            cat "$read_file"
+            ;;
+        set)
+            [ $# -gt 0 ] || die "usage: sbx start set <command...>"
+            mkdir -p "$write_dir"
+            printf '%s\n' "$*" > "$write_file"
+            log "wrote $write_file: $*"
+            ;;
+        clear|rm|remove|unset)
+            local target=""
+            [ -f "$write_file" ] && target="$write_file"
+            [ -z "$target" ] && [ -f "$read_file" ] && target="$read_file"
+            [ -n "$target" ] || { log "no start file"; return; }
+            rm -f "$target"
+            log "removed $target"
+            ;;
+        *)
+            mkdir -p "$write_dir"
+            printf '%s\n' "$sub${*:+ $*}" > "$write_file"
+            log "wrote $write_file: $sub${*:+ $*}"
+            ;;
+    esac
+}
+
+cmd_service() {
+    local sub="${1:-list}"; shift || true
+    local entry; entry="$(require_project)"
+    local root="${entry#*	}"
+    local read_file; read_file="$(sbx_file "$root" services)"
+    local write_dir; write_dir="$(sbx_write_dir "$root")"
+    local write_file="$write_dir/services"
+    case "$sub" in
+        ls|list)
+            local svcs; svcs="$(project_services "$root")"
+            if [ -z "$svcs" ]; then
+                log "no services configured"
+                return
+            fi
+            log "from $read_file:"
+            printf '%s\n' "$svcs"
+            ;;
+        add)
+            local s="${1:-}"
+            [ -n "$s" ] || die "usage: sbx service add <name|image>"
+            service_template "$s" >/dev/null \
+                || die "unknown service: '$s' (built-ins: redis postgres mongo mysql mailpit; or pass an image like 'ghcr.io/foo/bar:tag')"
+            mkdir -p "$write_dir"
+            touch "$write_file"
+            if grep -qxE "[[:space:]]*$s[[:space:]]*(#.*)?" "$write_file"; then
+                log "already present: $s"
+                return
+            fi
+            printf '%s\n' "$s" >> "$write_file"
+            log "added $s to $write_file"
+            ;;
+        rm|remove|del|delete)
+            local s="${1:-}"
+            [ -n "$s" ] || die "usage: sbx service rm <name>"
+            [ -f "$write_file" ] || die "no $write_file"
+            local tmp; tmp="$(mktemp)"
+            awk -v target="$s" '{
+                line=$0; sub(/#.*$/,"",line); gsub(/^[[:space:]]+|[[:space:]]+$/,"",line);
+                if (line == target) next; print
+            }' "$write_file" > "$tmp"
+            mv "$tmp" "$write_file"
+            log "removed $s from $write_file"
+            ;;
+        *) die "usage: sbx service [list|add <name>|rm <name>]" ;;
+    esac
+}
+
+cmd_ssh() {
+    local sub="${1:-status}"; shift || true
+    local entry; entry="$(require_project)"
+    local root="${entry#*	}"
+    local write_dir; write_dir="$(sbx_write_dir "$root")"
+    local write_file="$write_dir/ssh"
+    case "$sub" in
+        on|enable)
+            mkdir -p "$write_dir"
+            touch "$write_file"
+            log "ssh agent forwarding enabled for this project ($write_file)"
+            log "next container start will mount \$SSH_AUTH_SOCK + ~/.ssh/{config,known_hosts} (ro)"
+            ;;
+        off|disable)
+            rm -f "$write_file"
+            log "ssh agent forwarding disabled"
+            ;;
+        status)
+            if project_ssh_enabled "$root"; then
+                log "ssh agent forwarding: ON"
+                [ -n "${SSH_AUTH_SOCK:-}" ] \
+                    && log "host SSH_AUTH_SOCK=$SSH_AUTH_SOCK" \
+                    || log "warning: SSH_AUTH_SOCK not set on host"
+            else
+                log "ssh agent forwarding: off"
+            fi
+            ;;
+        *) die "usage: sbx ssh [on|off|status]" ;;
+    esac
+}
+
+cmd_vpn() {
+    local sub="${1:-status}"; shift || true
+    case "$sub" in
+        use)
+            local spec="${1:-}"
+            [ -n "$spec" ] || die "usage: sbx vpn use <path-to-ovpn|name>"
+            local resolved
+            resolved="$(resolve_ovpn "$spec")" \
+                || die "'$spec' is a bare name but SBX_VPN_DIR is not set"
+            [ -f "$resolved" ] || die "no such file: $resolved"
+            local entry; entry="$(require_project)"
+            local root="${entry#*	}"
+            local write_dir; write_dir="$(sbx_write_dir "$root")"
+            mkdir -p "$write_dir"
+            printf '%s\n' "$spec" > "$write_dir/vpn"
+            log "$write_dir/vpn -> $spec"
+            log "resolved: $resolved"
+            ;;
+        auth)
+            local entry; entry="$(require_project)"
+            local root="${entry#*	}"
+            local spec; spec="$(project_vpn_name "$root")"
+            [ -n "$spec" ] || die "no .sbx/vpn here (run 'sbx vpn use ...' first)"
+            local resolved
+            resolved="$(resolve_ovpn "$spec")" \
+                || die "cannot resolve '$spec' — set SBX_VPN_DIR or use a full path in .sbx/vpn"
+            local auth="$resolved.auth"
+            local u p
+            printf 'VPN username: ' >&2
+            IFS= read -r u
+            printf 'VPN password: ' >&2
+            stty -echo 2>/dev/null || true
+            IFS= read -r p
+            stty echo 2>/dev/null || true
+            printf '\n' >&2
+            ( umask 077 && printf '%s\n%s\n' "$u" "$p" > "$auth" )
+            log "saved credentials to $auth (chmod 600)"
+            ;;
+        inline)
+            local target="${1:-}"
+            if [ -z "$target" ]; then
+                local entry; entry="$(require_project)"
+                local root="${entry#*	}"
+                local spec; spec="$(project_vpn_name "$root")"
+                [ -n "$spec" ] || die "no .sbx/vpn here (run 'sbx vpn use ...' first)"
+                target="$(resolve_ovpn "$spec")" \
+                    || die "cannot resolve '$spec' — set SBX_VPN_DIR or use a full path"
+            fi
+            [ -f "$target" ] || die "no such file: $target"
+            local tmp; tmp="$(mktemp "$(dirname "$target")/.sbx-vpn-inline.XXXXXX")" \
+                || die "mktemp failed"
+            local line dir path kd replaced=0 missing=0 unquoted=0 dropped=0
+            while IFS= read -r line || [ -n "$line" ]; do
+                local orig="$line"
+                line="$(printf '%s' "$line" | sed -E "s/'([^'[:space:]]+)'/\1/g")"
+                [ "$line" != "$orig" ] && unquoted=$((unquoted + 1))
+                # shellcheck disable=SC2086
+                set -- $line
+                dir="${1:-}"
+                case "$dir" in
+                    user|group|up|down|script-security)
+                        log "dropping host-side directive: $line"
+                        dropped=$((dropped + 1))
+                        continue
+                        ;;
+                    auth-user-pass)
+                        if [ $# -ge 2 ]; then
+                            printf 'auth-user-pass\n' >> "$tmp"
+                            log "rewrote: $line  ->  auth-user-pass"
+                            dropped=$((dropped + 1))
+                            continue
+                        fi
+                        ;;
+                    ca|cert|key|tls-auth|tls-crypt|tls-crypt-v2)
+                        path="${2:-}"
+                        kd="${3:-}"
+                        path="${path#\'}"; path="${path%\'}"
+                        path="${path#\"}"; path="${path%\"}"
+                        kd="${kd#\'}"; kd="${kd%\'}"
+                        if [ -n "$path" ] && [ -f "$path" ]; then
+                            printf '<%s>\n' "$dir" >> "$tmp"
+                            cat "$path" >> "$tmp"
+                            printf '</%s>\n' "$dir" >> "$tmp"
+                            if [ "$dir" = "tls-auth" ] && [ -n "$kd" ]; then
+                                printf 'key-direction %s\n' "$kd" >> "$tmp"
+                            fi
+                            replaced=$((replaced + 1))
+                            continue
+                        elif [ -n "$path" ]; then
+                            log "missing $dir file: $path (leaving directive as-is)"
+                            missing=$((missing + 1))
+                        fi
+                        ;;
+                esac
+                printf '%s\n' "$line" >> "$tmp"
+            done < "$target"
+            chmod --reference="$target" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+            mv "$tmp" "$target"
+            log "inlined $replaced reference(s) into $target"
+            [ "$unquoted" -gt 0 ] && log "stripped nmcli single-quotes from $unquoted line(s)"
+            [ "$dropped" -gt 0 ] && log "dropped/rewrote $dropped host-side directive(s)"
+            [ "$missing" -gt 0 ] && log "warning: $missing referenced file(s) were missing"
+            ;;
+        off|unuse|clear)
+            local entry; entry="$(require_project)"
+            local root="${entry#*	}"
+            local write_dir; write_dir="$(sbx_write_dir "$root")"
+            if [ -f "$write_dir/vpn" ]; then
+                rm -f "$write_dir/vpn"
+                log "removed $write_dir/vpn"
+            else
+                log "no project VPN to clear"
+            fi
+            ;;
+        status|show|"")
+            if [ -n "${SBX_VPN_DIR:-}" ]; then
+                log "SBX_VPN_DIR=$SBX_VPN_DIR"
+            else
+                log "SBX_VPN_DIR not set — use absolute paths in .sbx/vpn"
+            fi
+            local entry root pname
+            if ! entry="$(require_project 2>/dev/null)"; then
+                log "not in a project"
+                return 0
+            fi
+            root="${entry#*	}"
+            pname="$(project_name "$root")"
+            local spec; spec="$(project_vpn_name "$root")"
+            if [ -z "$spec" ]; then
+                log "project $pname: no vpn configured"
+                return 0
+            fi
+            log "project $pname: vpn=$spec"
+            local resolved
+            if resolved="$(resolve_ovpn "$spec")"; then
+                if [ -f "$resolved" ]; then
+                    log "  resolved: $resolved (ok)"
+                else
+                    log "  resolved: $resolved (MISSING)"
+                fi
+                [ -f "$resolved.auth" ] && log "  auth: $resolved.auth"
+            else
+                log "  cannot resolve (SBX_VPN_DIR not set?)"
+            fi
+            local sidecar; sidecar="$(vpn_sidecar_name "$pname")"
+            local running; running="$(vpn_sidecar_running "$sidecar")"
+            if [ -n "$running" ]; then
+                local n; n="$(vpn_sidecar_attached_count "$sidecar")"
+                log "sidecar: $running ($n attached)"
+            fi
+            ;;
+        *) die "usage: sbx vpn [status|use <path-or-name>|auth|inline|off]" ;;
+    esac
+}
+
+main() {
+    if [ $# -eq 0 ]; then
+        cmd_shell
+        return
+    fi
+    case "$1" in
+        init)    shift; cmd_init "$@" ;;
+        shell)   shift; cmd_shell ;;
+        run)     shift; cmd_run ;;
+        stop)    shift; cmd_stop ;;
+        build)   shift; cmd_build "" "${1:-}" ;;
+        rebuild) shift; cmd_build no-cache "${1:-}" ;;
+        clean)   shift; cmd_clean "${1:-}" ;;
+        purge)   shift; cmd_purge "${1:-}" ;;
+        port|ports) shift; cmd_port "$@" ;;
+        env)     shift; cmd_env "$@" ;;
+        start)   shift; cmd_start "$@" ;;
+        scan)    shift; cmd_scan "$@" ;;
+        vpn)     shift; cmd_vpn "$@" ;;
+        ssh)     shift; cmd_ssh "$@" ;;
+        service|services) shift; cmd_service "$@" ;;
+        list)    list_flavors ;;
+        -h|--help|help)
+                 sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
+        *)
+                 if is_flavor "$1"; then
+                     local pname; pname="$(project_name "$(pwd)")"
+                     local existing; existing="$(find_running_container "$1" "$pname")"
+                     if [ -n "$existing" ]; then
+                         exec_into "$existing"
+                     fi
+                     run_container "$1" "$(pwd)"
+                 else
+                     die "unknown command or flavor: $1 (try: $(list_flavors | paste -sd, -))"
+                 fi
+                 ;;
+    esac
+}
+
+main "$@"

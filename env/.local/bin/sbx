@@ -96,6 +96,15 @@
 #   SBX_VPN_DIR=...      Directory to resolve bare VPN names against
 #                        (e.g. ~/.secrets/sbx-vpn). Optional; absolute paths
 #                        in .sbx/vpn work without it.
+#   SBX_PRIVATE_DIR=...  Read-only overlay for .sbx configs. When a project has
+#                        no .sbx/<file> in its worktree or bare repo, sbx falls
+#                        back to $SBX_PRIVATE_DIR/<rel-path>/.sbx/<file>, where
+#                        <rel-path> is the bare-repo (or project) path relative
+#                        to $HOME. Defaults to the dotfiles' private submodule
+#                        at ~/dotfiles/env/.config/.nickInstall/install/configs/private/sbx.
+#                        Writes (e.g. `sbx port add`) target the private dir if
+#                        the existing config lives there, otherwise the bare
+#                        repo or worktree.
 #
 # Persist any of these in ${XDG_CONFIG_HOME:-~/.config}/sbx/env
 # (KEY=value lines, chmod 600). Host env wins over the file.
@@ -104,6 +113,7 @@ set -euo pipefail
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sbx"
 ENV_FILE="$CONFIG_DIR/env"
+SBX_PRIVATE_DIR="${SBX_PRIVATE_DIR:-$HOME/dotfiles/env/.config/.nickInstall/install/configs/private/sbx}"
 
 FORWARDED_VARS=(SBX_RUN_SCRIPTS SBX_SCANNERS SOCKET_API_KEY SOCKET_CLI_API_TOKEN SOCKET_ORG_SLUG)
 
@@ -259,6 +269,23 @@ shared_root() {
     fi
 }
 
+private_key() {
+    local base="$1"
+    case "$base" in
+        "$HOME"/*) printf '%s' "${base#"$HOME"/}" ;;
+        /*) printf '%s' "${base#/}" ;;
+        *) printf '%s' "$base" ;;
+    esac
+}
+
+private_sbx_dir() {
+    local root="$1"
+    [ -d "$SBX_PRIVATE_DIR" ] || return 1
+    local shared; shared="$(shared_root "$root")"
+    local base="${shared:-$root}"
+    printf '%s' "$SBX_PRIVATE_DIR/$(private_key "$base")/.sbx"
+}
+
 sbx_file() {
     local root="$1" name="$2"
     if [ -e "$root/.sbx/$name" ]; then
@@ -267,6 +294,10 @@ sbx_file() {
     local shared; shared="$(shared_root "$root")"
     if [ -n "$shared" ] && [ -e "$shared/.sbx/$name" ]; then
         printf '%s' "$shared/.sbx/$name"; return
+    fi
+    local priv; priv="$(private_sbx_dir "$root" 2>/dev/null)"
+    if [ -n "$priv" ] && [ -e "$priv/$name" ]; then
+        printf '%s' "$priv/$name"; return
     fi
     printf '%s' "$root/.sbx/$name"
 }
@@ -279,6 +310,10 @@ sbx_write_dir() {
     local shared; shared="$(shared_root "$root")"
     if [ -n "$shared" ] && [ -f "$shared/.sbx/flavor" ]; then
         printf '%s' "$shared/.sbx"; return
+    fi
+    local priv; priv="$(private_sbx_dir "$root" 2>/dev/null)"
+    if [ -n "$priv" ] && [ -f "$priv/flavor" ]; then
+        printf '%s' "$priv"; return
     fi
     if [ -n "$shared" ]; then
         printf '%s' "$shared/.sbx"
@@ -307,6 +342,11 @@ project_flavor() {
         local shared; shared="$(shared_root "$dir")"
         if [ -n "$shared" ] && [ -f "$shared/.sbx/flavor" ]; then
             printf '%s\t%s\n' "$(cat "$shared/.sbx/flavor")" "$dir"
+            return 0
+        fi
+        local priv; priv="$(private_sbx_dir "$dir" 2>/dev/null)"
+        if [ -n "$priv" ] && [ -f "$priv/flavor" ]; then
+            printf '%s\t%s\n' "$(cat "$priv/flavor")" "$dir"
             return 0
         fi
         [ "$dir" = "/" ] && return 1
@@ -737,7 +777,7 @@ EOF
         $(worktree_mount_args "$project_root") \
         $(ssh_mount_args "$project_root") \
         $(cache_args "$flavor") \
-        "$port_args_str" \
+        $port_args_str \
         "$image" \
         "${entry[@]}" \
         || rc=$?
@@ -747,10 +787,27 @@ EOF
 }
 
 cmd_init() {
-    local flavor="${1:-}"
-    [ -n "$flavor" ] || die "usage: sbx init <flavor>"
+    local private=0 flavor=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -p|--private) private=1; shift ;;
+            -h|--help) die "usage: sbx init [-p|--private] <flavor>" ;;
+            --) shift; break ;;
+            -*) die "unknown option: $1 (usage: sbx init [-p|--private] <flavor>)" ;;
+            *) flavor="$1"; shift; break ;;
+        esac
+    done
+    [ -n "$flavor" ] || die "usage: sbx init [-p|--private] <flavor>"
     is_flavor "$flavor" || die "unknown flavor: $flavor (have: $(list_flavors | paste -sd, -))"
-    local write_dir; write_dir="$(sbx_write_dir "$(pwd)")"
+
+    local write_dir
+    if [ "$private" -eq 1 ]; then
+        local shared; shared="$(shared_root "$(pwd)")"
+        local base="${shared:-$(pwd)}"
+        write_dir="$SBX_PRIVATE_DIR/$(private_key "$base")/.sbx"
+    else
+        write_dir="$(sbx_write_dir "$(pwd)")"
+    fi
     mkdir -p "$write_dir"
     printf '%s\n' "$flavor" > "$write_dir/flavor"
     log "marked $write_dir as flavor=$flavor"

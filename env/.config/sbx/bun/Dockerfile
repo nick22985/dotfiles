@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:latest
+FROM debian:bookworm-slim
 
 ARG USER_UID=1000
 ARG USER_GID=1000
-
-USER root
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -16,7 +14,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         curl \
         less \
         ripgrep \
-        vim-tiny
+        vim-tiny \
+        unzip \
+        xz-utils
 
 RUN if getent group "$USER_GID" >/dev/null; then \
         EXISTING_GROUP="$(getent group "$USER_GID" | cut -d: -f1)"; \
@@ -68,37 +68,47 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
         && guarddog --version ; \
     fi
 
-RUN mv /usr/local/bin/bun /usr/local/bin/bun.real
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    --mount=type=cache,target=/tmp/sbx-dl,sharing=locked \
-    if [ ! -f /tmp/sbx-dl/nodesource-setup.sh ]; then \
-        curl -fsSL https://deb.nodesource.com/setup_lts.x -o /tmp/sbx-dl/nodesource-setup.sh; \
-    fi \
-    && bash /tmp/sbx-dl/nodesource-setup.sh \
-    && apt-get install -y --no-install-recommends nodejs \
-    && node --version
-
-RUN --mount=type=cache,target=/home/dev/.bun/install/cache,sharing=locked,uid=0,gid=0 \
-    mkdir -p /opt/socket-cli \
-    && cd /opt/socket-cli \
-    && /usr/local/bin/bun.real init -y >/dev/null \
-    && /usr/local/bin/bun.real add @socketsecurity/cli \
-    && printf '#!/bin/sh\nexec node /opt/socket-cli/node_modules/@socketsecurity/cli/dist/cli.js "$@"\n' > /usr/local/bin/socket \
-    && chmod +x /usr/local/bin/socket \
-    && chmod -R a+rX /opt/socket-cli \
-    && /usr/local/bin/socket --version
+# mise — polyglot tool-version manager. Bun + node come from mise; projects
+# can pin different versions via mise.toml / .tool-versions. (node is also
+# pulled in because @socketsecurity/cli is a node program.)
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
+    if [ ! -f /tmp/sbx-dl/mise-install.sh ]; then \
+        curl -fsSL https://mise.run -o /tmp/sbx-dl/mise-install.sh; \
+    fi; \
+    MISE_INSTALL_PATH=/usr/local/bin/mise sh /tmp/sbx-dl/mise-install.sh; \
+    mise --version
 
 COPY wrappers/bun /opt/sbx/bin/bun
 RUN chmod +x /opt/sbx/bin/bun \
-    && printf 'export PATH=/opt/sbx/bin:/home/dev/.bun/bin:$PATH\n' > /etc/profile.d/sbx.sh
+    && printf 'export PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:/home/dev/.bun/bin:$PATH\nexport MISE_INSTALL_MISSING_TOOLS=1\neval "$(/usr/local/bin/mise activate bash)" 2>/dev/null || true\n' > /etc/profile.d/sbx.sh
+
+ARG SBX_BUN_VERSION=latest
+ARG SBX_NODE_VERSION=lts
+
+USER dev
+WORKDIR /home/dev
+RUN --mount=type=cache,target=/home/dev/.cache/mise,uid=1000,gid=1000,sharing=locked \
+    /usr/local/bin/mise use --global "bun@${SBX_BUN_VERSION}" "node@${SBX_NODE_VERSION}" \
+    && /usr/local/bin/mise which bun \
+    && /usr/local/bin/mise which node
+
+RUN --mount=type=cache,target=/home/dev/.bun/install/cache,uid=1000,gid=1000,sharing=locked \
+    mkdir -p /home/dev/.sbx/socket-cli \
+    && cd /home/dev/.sbx/socket-cli \
+    && BUN="$(/usr/local/bin/mise which bun)" \
+    && "$BUN" init -y >/dev/null \
+    && "$BUN" add @socketsecurity/cli
+
+USER root
+RUN printf '#!/bin/sh\nNODE="$(/usr/local/bin/mise which node 2>/dev/null)" || NODE=node\nexec "$NODE" /home/dev/.sbx/socket-cli/node_modules/@socketsecurity/cli/dist/cli.js "$@"\n' > /opt/sbx/bin/socket \
+    && chmod +x /opt/sbx/bin/socket
 
 USER dev
 WORKDIR /workspace
 
 ENV BUN_INSTALL_CACHE_DIR=/home/dev/.bun/install/cache \
     SHELL=/bin/bash \
-    PATH=/opt/sbx/bin:/home/dev/.bun/bin:$PATH
+    MISE_INSTALL_MISSING_TOOLS=1 \
+    PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:/home/dev/.bun/bin:$PATH
 
 CMD ["/bin/bash"]

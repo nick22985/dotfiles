@@ -1,81 +1,23 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-REAL=/usr/local/bin/bun.real
 AUDIT_LOG=/workspace/.sbx/audit.log
+
+# Resolve real bun via mise (project mise.toml overrides global mise.toml).
+REAL=""
+if command -v mise >/dev/null 2>&1; then
+    if mise_bun="$(mise which bun 2>/dev/null)" && [ -n "$mise_bun" ]; then
+        REAL="$mise_bun"
+    fi
+fi
+if [ -z "$REAL" ]; then
+    echo "sbx: no bun found — add 'bun' to mise.toml or .tool-versions." >&2
+    exit 127
+fi
 
 audit() {
     mkdir -p /workspace/.sbx 2>/dev/null || return 0
     printf '%s\t%s\tbun %s\n' "$(date -Iseconds)" "$PWD" "$*" >> "$AUDIT_LOG" 2>/dev/null || true
-}
-
-scanner_enabled() {
-    local name="$1"
-    local list="${SBX_SCANNERS:-all}"
-    [ "$list" = "none" ] && return 1
-    [ "$list" = "all" ] && return 0
-    case ",$list," in
-        *",$name,"*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-declare -a SCAN_PIDS=() SCAN_NAMES=() SCAN_LOGS=()
-scan_start() {
-    local name="$1"; shift
-    local log; log="$(mktemp)"
-    ( "$@" >"$log" 2>&1 ) &
-    SCAN_PIDS+=($!); SCAN_NAMES+=("$name"); SCAN_LOGS+=("$log")
-    printf 'sbx: started %s (pid %s)\n' "$name" "$!" >&2
-}
-scan_drain() {
-    local i=0 n="${#SCAN_PIDS[@]}"
-    while [ "$i" -lt "$n" ]; do
-        wait "${SCAN_PIDS[$i]}" || true
-        printf 'sbx: --- %s ---\n' "${SCAN_NAMES[$i]}" >&2
-        cat "${SCAN_LOGS[$i]}" >&2
-        cat "${SCAN_LOGS[$i]}" >> "$AUDIT_LOG" 2>/dev/null || true
-        rm -f "${SCAN_LOGS[$i]}"
-        i=$((i+1))
-    done
-    SCAN_PIDS=(); SCAN_NAMES=(); SCAN_LOGS=()
-}
-
-socket_scan_with_retry() {
-    local org="$1"
-    local attempt=1 max=3 delay=3
-    while [ "$attempt" -le "$max" ]; do
-        if socket scan create . --report --no-interactive --org "$org"; then
-            return 0
-        fi
-        if [ "$attempt" -lt "$max" ]; then
-            printf 'sbx: socket scan failed, retrying (%d/%d) in %ds...\n' "$attempt" "$max" "$delay" >&2
-            sleep "$delay"
-            delay=$((delay * 2))
-        fi
-        attempt=$((attempt + 1))
-    done
-    return 1
-}
-
-guarddog_scan_pkgjson() {
-    [ -f package.json ] || return 0
-    local pkglist
-    pkglist="$(python3 -c '
-import json, sys
-try:
-    with open("package.json") as f: d = json.load(f)
-except Exception:
-    sys.exit(0)
-deps = {**(d.get("dependencies") or {}), **(d.get("devDependencies") or {})}
-for k in deps: print(k)
-' 2>/dev/null)" || return 0
-    [ -z "$pkglist" ] && return 0
-    printf '%s\n' "$pkglist" | xargs -I {} -P 4 bash -c '
-        out="$(guarddog npm scan "$1" 2>&1)"
-        echo "=== $1 ==="
-        echo "$out"
-    ' _ {}
 }
 
 case "${1:-}" in
@@ -98,37 +40,7 @@ case "${1:-}" in
             esac
         fi
         "$REAL" "$@" "${extra[@]}"
-        rc=$?
-        lock=""
-        if [ -f bun.lock ]; then lock=bun.lock
-        elif [ -f bun.lockb ]; then lock=bun.lockb
-        elif [ -f package-lock.json ]; then lock=package-lock.json
-        fi
-        if scanner_enabled osv && [ -n "$lock" ] && command -v osv-scanner >/dev/null 2>&1; then
-            scan_start "osv-scanner ($lock)" osv-scanner --lockfile "$lock"
-        fi
-        if scanner_enabled bun-audit && [ -f bun.lock ]; then
-            scan_start "bun audit" "$REAL" audit
-        fi
-        if scanner_enabled guarddog && command -v guarddog >/dev/null 2>&1 && [ -f package.json ]; then
-            scan_start "guarddog (top-level deps)" guarddog_scan_pkgjson
-        fi
-        if scanner_enabled trivy && command -v trivy >/dev/null 2>&1; then
-            scan_start "trivy fs (vuln)" trivy fs --scanners vuln --no-progress .
-        fi
-        if scanner_enabled socket && command -v socket >/dev/null 2>&1; then
-            token="${SOCKET_CLI_API_TOKEN:-${SOCKET_API_KEY:-}}"
-            if [ -z "$token" ]; then
-                printf 'sbx: skipping socket.dev (set SOCKET_CLI_API_TOKEN in ~/.config/sbx/env)\n' >&2
-            elif [ -z "${SOCKET_ORG_SLUG:-}" ]; then
-                printf 'sbx: skipping socket.dev (set SOCKET_ORG_SLUG in ~/.config/sbx/env)\n' >&2
-            else
-                export SOCKET_CLI_API_TOKEN="$token"
-                scan_start "socket.dev" socket_scan_with_retry "$SOCKET_ORG_SLUG"
-            fi
-        fi
-        scan_drain
-        exit "$rc"
+        exit $?
         ;;
     *)
         exec "$REAL" "$@"

@@ -1,0 +1,21 @@
+services:
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    container_name: mitmproxy
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    command: >
+      mitmweb
+      --listen-host 127.0.0.1
+      --listen-port 8080
+      --web-host 127.0.0.1
+      --web-port 8081
+      --set web_open_browser=false
+      --set web_password=${WEB_PASSWORD:?WEB_PASSWORD missing — run "mitm on" via the wrapper}
+    volumes:
+      - mitm-data:/home/mitmproxy/.mitmproxy
+
+volumes:
+  mitm-data:

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:lts-bookworm
+FROM debian:bookworm-slim
 
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -14,7 +14,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         curl \
         less \
         ripgrep \
-        vim-tiny
+        vim-tiny \
+        unzip \
+        xz-utils
 
 RUN if getent group "$USER_GID" >/dev/null; then \
         EXISTING_GROUP="$(getent group "$USER_GID" | cut -d: -f1)"; \
@@ -66,19 +68,45 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
         && guarddog --version ; \
     fi
 
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    /usr/local/bin/npm install -g @socketsecurity/cli
+# mise — polyglot tool-version manager. Node + npm come from mise; projects
+# can pin a different version via mise.toml / .tool-versions.
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
+    if [ ! -f /tmp/sbx-dl/mise-install.sh ]; then \
+        curl -fsSL https://mise.run -o /tmp/sbx-dl/mise-install.sh; \
+    fi; \
+    MISE_INSTALL_PATH=/usr/local/bin/mise sh /tmp/sbx-dl/mise-install.sh; \
+    mise --version
 
-RUN mv /usr/local/bin/npm /usr/local/bin/npm.real
 COPY wrappers/npm /opt/sbx/bin/npm
 RUN chmod +x /opt/sbx/bin/npm \
-    && printf 'export PATH=/opt/sbx/bin:$PATH\n' > /etc/profile.d/sbx.sh
+    && printf 'export PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:$PATH\nexport MISE_INSTALL_MISSING_TOOLS=1\neval "$(/usr/local/bin/mise activate bash)" 2>/dev/null || true\n' > /etc/profile.d/sbx.sh
+
+ARG SBX_NODE_VERSION=lts
+
+USER dev
+WORKDIR /home/dev
+RUN --mount=type=cache,target=/home/dev/.cache/mise,uid=1000,gid=1000,sharing=locked \
+    /usr/local/bin/mise use --global "node@${SBX_NODE_VERSION}" \
+    && /usr/local/bin/mise which node \
+    && /usr/local/bin/mise which npm
+
+RUN --mount=type=cache,target=/home/dev/.npm,uid=1000,gid=1000,sharing=locked \
+    mkdir -p /home/dev/.sbx/socket-cli \
+    && cd /home/dev/.sbx/socket-cli \
+    && NPM="$(/usr/local/bin/mise which npm)" \
+    && "$NPM" init -y >/dev/null \
+    && "$NPM" install @socketsecurity/cli
+
+USER root
+RUN printf '#!/bin/sh\nNODE="$(/usr/local/bin/mise which node 2>/dev/null)" || NODE=node\nexec "$NODE" /home/dev/.sbx/socket-cli/node_modules/@socketsecurity/cli/dist/cli.js "$@"\n' > /opt/sbx/bin/socket \
+    && chmod +x /opt/sbx/bin/socket
 
 USER dev
 WORKDIR /workspace
 
 ENV NPM_CONFIG_CACHE=/home/dev/.npm \
     SHELL=/bin/bash \
-    PATH=/opt/sbx/bin:$PATH
+    MISE_INSTALL_MISSING_TOOLS=1 \
+    PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:$PATH
 
 CMD ["/bin/bash"]

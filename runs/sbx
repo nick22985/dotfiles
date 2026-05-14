@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+set_context "sbx"
+
+log "Setting up sbx (sandboxed Docker dev environments)..."
+
+SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
+DEST="$HOME/.local/bin/sbx"
+
+if [[ ! -f "$SBX_SRC/Cargo.toml" ]]; then
+    log_warn "sbx source not found at $SBX_SRC, skipping"
+    log_info "clone the repo (or add it to repos.txt) and re-run this script"
+    log_info "override the path with SBX_SRC=/path/to/sbx"
+    exit 0
+fi
+
+if ! command_exists cargo; then
+    log_error "cargo not found — install Rust before this script runs"
+    log_info "e.g. add rust to runs/node's mise stack, or run 'rustup-init'"
+    exit 1
+fi
+
+log "→ Building sbx from $SBX_SRC..."
+if [[ $DRY_RUN == "0" ]]; then
+    if ! (cd "$SBX_SRC" && cargo build --release --quiet); then
+        log_error "cargo build failed"
+        exit 1
+    fi
+else
+    log "Would run: cargo build --release in $SBX_SRC"
+fi
+
+log "→ Installing to $DEST..."
+if [[ $DRY_RUN == "0" ]]; then
+    mkdir -p "$(dirname "$DEST")"
+    cp "$SBX_SRC/target/release/sbx" "$DEST"
+    chmod +x "$DEST"
+else
+    log "Would copy $SBX_SRC/target/release/sbx → $DEST"
+fi
+
+log_success "sbx installed to $DEST"
+log_info "completions: 'source <(COMPLETE=\$(basename \$SHELL) sbx)' in your rc file"

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM rust:latest
+FROM debian:bookworm-slim
 
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -15,8 +15,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         less \
         ripgrep \
         vim-tiny \
-        pkg-config \
-        libssl-dev
+        unzip \
+        xz-utils
 
 RUN if getent group "$USER_GID" >/dev/null; then \
         EXISTING_GROUP="$(getent group "$USER_GID" | cut -d: -f1)"; \
@@ -31,9 +31,7 @@ RUN if getent group "$USER_GID" >/dev/null; then \
     else \
         useradd -m -u "$USER_UID" -g dev -s /bin/bash dev; \
     fi \
-    && mkdir -p /home/dev/.cargo /home/dev/.rustup /workspace /opt/sbx/bin \
-    && cp -a /usr/local/cargo/. /home/dev/.cargo/ \
-    && cp -a /usr/local/rustup/. /home/dev/.rustup/ \
+    && mkdir -p /home/dev/.m2 /workspace /opt/sbx/bin \
     && chown -R dev:dev /home/dev /workspace
 
 RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
@@ -55,15 +53,9 @@ RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked \
         | sh -s -- -b /usr/local/bin \
     && trivy --version
 
-USER dev
-RUN --mount=type=cache,target=/home/dev/.cargo/registry,uid=1000,gid=1000,sharing=locked \
-    /home/dev/.cargo/bin/cargo install cargo-audit --locked --no-default-features
-
-USER root
-
-# mise — polyglot tool-version manager. Lets projects pin tool versions
-# via mise.toml / .tool-versions; falls back to the FROM-image's tools
-# when no config is present.
+# mise — polyglot tool-version manager. We pre-install a default Java +
+# Maven so the image works out of the box; projects can still pin their
+# own versions via mise.toml / .tool-versions.
 RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
     if [ ! -f /tmp/sbx-dl/mise-install.sh ]; then \
         curl -fsSL https://mise.run -o /tmp/sbx-dl/mise-install.sh; \
@@ -71,19 +63,25 @@ RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
     MISE_INSTALL_PATH=/usr/local/bin/mise sh /tmp/sbx-dl/mise-install.sh; \
     mise --version
 
-RUN mv /home/dev/.cargo/bin/cargo /home/dev/.cargo/bin/cargo.real
-COPY wrappers/cargo /opt/sbx/bin/cargo
-RUN chmod +x /opt/sbx/bin/cargo \
-    && chown dev:dev /home/dev/.cargo/bin/cargo.real \
-    && printf 'export CARGO_HOME=/home/dev/.cargo\nexport RUSTUP_HOME=/home/dev/.rustup\nexport PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:/home/dev/.cargo/bin:$PATH\nexport MISE_INSTALL_MISSING_TOOLS=1\neval "$(/usr/local/bin/mise activate bash)" 2>/dev/null || true\n' > /etc/profile.d/sbx.sh
+COPY wrappers/mvn /opt/sbx/bin/mvn
+RUN chmod +x /opt/sbx/bin/mvn \
+    && printf 'export PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:$PATH\nexport MAVEN_OPTS="${MAVEN_OPTS:--Dmaven.repo.local=/home/dev/.m2/repository}"\nexport MISE_INSTALL_MISSING_TOOLS=1\neval "$(/usr/local/bin/mise activate bash)" 2>/dev/null || true\n' > /etc/profile.d/sbx.sh
+
+ARG SBX_JAVA_VERSION=21
+ARG SBX_MAVEN_VERSION=latest
 
 USER dev
+WORKDIR /home/dev
+RUN --mount=type=cache,target=/home/dev/.cache/mise,uid=1000,gid=1000,sharing=locked \
+    /usr/local/bin/mise use --global "java@${SBX_JAVA_VERSION}" "maven@${SBX_MAVEN_VERSION}" \
+    && /usr/local/bin/mise which java \
+    && /usr/local/bin/mise which mvn
+
 WORKDIR /workspace
 
-ENV CARGO_HOME=/home/dev/.cargo \
-    RUSTUP_HOME=/home/dev/.rustup \
+ENV SHELL=/bin/bash \
     MISE_INSTALL_MISSING_TOOLS=1 \
-    PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:/home/dev/.cargo/bin:$PATH \
-    SHELL=/bin/bash
+    MAVEN_OPTS=-Dmaven.repo.local=/home/dev/.m2/repository \
+    PATH=/opt/sbx/bin:/home/dev/.local/share/mise/shims:$PATH
 
 CMD ["/bin/bash"]

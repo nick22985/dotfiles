@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+AUDIT_LOG=/workspace/.sbx/audit.log
+
+# Resolve a real mvn:
+#   1. ./mvnw   — the project's pinned wrapper (Spring Boot, etc.)
+#   2. mise     — version from mise.toml / .tool-versions
+#   3. nothing  — bail with a hint
+REAL=""
+if [ -x "./mvnw" ] && [ "${SBX_NO_MVNW:-0}" != "1" ]; then
+    REAL="./mvnw"
+elif command -v mise >/dev/null 2>&1; then
+    if mise_mvn="$(mise which mvn 2>/dev/null)" && [ -n "$mise_mvn" ]; then
+        REAL="$mise_mvn"
+    fi
+fi
+
+if [ -z "$REAL" ]; then
+    cat >&2 <<'EOF'
+sbx: no mvn found.
+  - add `maven` to mise.toml or .tool-versions, or
+  - include a ./mvnw wrapper in the project.
+EOF
+    exit 127
+fi
+
+audit() {
+    mkdir -p /workspace/.sbx 2>/dev/null || return 0
+    printf '%s\t%s\tmvn %s\n' "$(date -Iseconds)" "$PWD" "$*" >> "$AUDIT_LOG" 2>/dev/null || true
+}
+
+audited=0
+for arg in "$@"; do
+    case "$arg" in
+        dependency:*|install|deploy|verify|package|compile|test-compile|generate-sources|generate-resources)
+            audited=1
+            break
+            ;;
+    esac
+done
+
+if [ "$audited" = "1" ]; then
+    audit "$@"
+    "$REAL" "$@"
+    exit $?
+fi
+
+exec "$REAL" "$@"

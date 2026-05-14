@@ -4,64 +4,24 @@ set -uo pipefail
 REAL=/home/dev/.cargo/bin/cargo.real
 AUDIT_LOG=/workspace/.sbx/audit.log
 
+# If the project has a mise config, route to mise's cargo so tool versions
+# pin per-project. Falls back to the FROM-image's cargo when no config.
+if command -v mise >/dev/null 2>&1; then
+    if mise_cargo="$(mise which cargo 2>/dev/null)" && [ -n "$mise_cargo" ]; then
+        REAL="$mise_cargo"
+    fi
+fi
+
 audit() {
     mkdir -p /workspace/.sbx 2>/dev/null || return 0
     printf '%s\t%s\tcargo %s\n' "$(date -Iseconds)" "$PWD" "$*" >> "$AUDIT_LOG" 2>/dev/null || true
-}
-
-scanner_enabled() {
-    local name="$1"
-    local list="${SBX_SCANNERS:-all}"
-    [ "$list" = "none" ] && return 1
-    [ "$list" = "all" ] && return 0
-    case ",$list," in
-        *",$name,"*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-declare -a SCAN_PIDS=() SCAN_NAMES=() SCAN_LOGS=()
-scan_start() {
-    local name="$1"; shift
-    local log; log="$(mktemp)"
-    ( "$@" >"$log" 2>&1 ) &
-    SCAN_PIDS+=($!); SCAN_NAMES+=("$name"); SCAN_LOGS+=("$log")
-    printf 'sbx: started %s (pid %s)\n' "$name" "$!" >&2
-}
-scan_drain() {
-    local i=0 n="${#SCAN_PIDS[@]}"
-    while [ "$i" -lt "$n" ]; do
-        wait "${SCAN_PIDS[$i]}" || true
-        printf 'sbx: --- %s ---\n' "${SCAN_NAMES[$i]}" >&2
-        cat "${SCAN_LOGS[$i]}" >&2
-        cat "${SCAN_LOGS[$i]}" >> "$AUDIT_LOG" 2>/dev/null || true
-        rm -f "${SCAN_LOGS[$i]}"
-        i=$((i+1))
-    done
-    SCAN_PIDS=(); SCAN_NAMES=(); SCAN_LOGS=()
-}
-
-scan_if_lockfile() {
-    [ -f Cargo.lock ] || return 0
-    if scanner_enabled osv && command -v osv-scanner >/dev/null 2>&1; then
-        scan_start "osv-scanner (Cargo.lock)" osv-scanner --lockfile Cargo.lock
-    fi
-    if scanner_enabled cargo-audit && command -v cargo-audit >/dev/null 2>&1; then
-        scan_start "cargo audit" "$REAL" audit
-    fi
-    if scanner_enabled trivy && command -v trivy >/dev/null 2>&1; then
-        scan_start "trivy fs (vuln)" trivy fs --scanners vuln --no-progress .
-    fi
-    scan_drain
 }
 
 case "${1:-}" in
     add|update|install|build|fetch|generate-lockfile)
         audit "$@"
         "$REAL" "$@"
-        rc=$?
-        scan_if_lockfile
-        exit "$rc"
+        exit $?
         ;;
     *)
         exec "$REAL" "$@"

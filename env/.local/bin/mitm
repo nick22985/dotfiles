@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# mitm — opt-in HTTPS interception proxy (dockerized mitmweb).
+#
+# Usage:
+#   mitm on              Start mitmproxy (proxy 8080 + web UI 8081)
+#   mitm off             Stop mitmproxy
+#   mitm restart         Restart mitmproxy
+#   mitm status          Show container status
+#   mitm ui              Open the web UI in a browser
+#   mitm logs [-f]       Show mitmproxy logs
+#   mitm env             Print proxy env exports — eval "$(mitm env)"
+#   mitm unenv           Print unsets — eval "$(mitm unenv)"
+#   mitm ca-install      Install mitmproxy CA into system trust store
+#   mitm ca-uninstall    Remove mitmproxy CA from system trust store
+#   mitm ca-path         Print path to the CA cert (after extracting from container)
+#   mitm token           Print the web UI password/token
+#   mitm browser [-f]    Launch chromium/brave/chrome routed through the proxy
+#                        in an isolated profile. -f / --fresh wipes the profile.
+
+set -euo pipefail
+
+MITM_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mitmproxy"
+COMPOSE_FILE="$MITM_DIR/docker-compose.yml"
+ENV_FILE="$MITM_DIR/.env"
+PROXY_URL="http://127.0.0.1:8080"
+UI_URL="http://127.0.0.1:8081"
+CONTAINER="mitmproxy"
+CA_IN_CONTAINER="/home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem"
+CA_ANCHOR="/etc/ca-certificates/trust-source/anchors/mitmproxy-ca-cert.pem"
+
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+
+BROWSER_PROFILE="${XDG_CACHE_HOME:-$HOME/.cache}/mitmproxy/browser-profile"
+BROWSER_CANDIDATES=(google-chrome google-chrome-stable chromium chromium-browser brave brave-browser)
+
+ensure_env() {
+  [[ -f "$ENV_FILE" ]] && return
+  umask 077
+  local pw
+  pw="$(dd if=/dev/urandom bs=24 count=1 status=none | base64 | tr -dc 'A-Za-z0-9' | cut -c1-32)"
+  printf 'WEB_PASSWORD=%s\n' "$pw" >"$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+}
+
+read_token() {
+  [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE — run: mitm on" >&2; exit 1; }
+  awk -F= '$1=="WEB_PASSWORD"{print $2; exit}' "$ENV_FILE"
+}
+
+compose() { ensure_env; docker compose -f "$COMPOSE_FILE" "$@"; }
+
+require_compose_file() {
+  [[ -f "$COMPOSE_FILE" ]] || { echo "Missing $COMPOSE_FILE" >&2; exit 1; }
+}
+
+container_running() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == "true" ]]
+}
+
+cmd_on() {
+  require_compose_file
+  compose up -d
+  echo "mitmproxy: proxy $PROXY_URL  ui $UI_URL/?token=$(read_token)"
+  echo "Route this shell:  eval \"\$(mitm env)\""
+}
+
+cmd_off() { require_compose_file; compose down; }
+
+cmd_restart() { require_compose_file; compose restart; }
+
+cmd_status() {
+  require_compose_file
+  compose ps
+  if container_running; then
+    echo
+    echo "proxy: $PROXY_URL"
+    echo "ui:    $UI_URL"
+  fi
+}
+
+cmd_ui() {
+  container_running || { echo "mitmproxy not running — run: mitm on" >&2; exit 1; }
+  xdg-open "$UI_URL/?token=$(read_token)" >/dev/null 2>&1 &
+}
+
+cmd_token() { read_token; }
+
+cmd_logs() { require_compose_file; compose logs "$@"; }
+
+cmd_env() {
+  cat <<EOF
+export HTTP_PROXY=$PROXY_URL
+export HTTPS_PROXY=$PROXY_URL
+export http_proxy=$PROXY_URL
+export https_proxy=$PROXY_URL
+export NO_PROXY=localhost,127.0.0.1,::1
+export no_proxy=localhost,127.0.0.1,::1
+EOF
+}
+
+cmd_unenv() {
+  echo "unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy"
+}
+
+extract_ca() {
+  container_running || { echo "mitmproxy not running — run: mitm on" >&2; exit 1; }
+  local out="$1"
+  docker cp "$CONTAINER:$CA_IN_CONTAINER" "$out" >/dev/null
+}
+
+cmd_ca_path() {
+  local tmp
+  tmp="$(mktemp -t mitmproxy-ca.XXXXXX.pem)"
+  extract_ca "$tmp"
+  echo "$tmp"
+}
+
+cmd_ca_install() {
+  local tmp
+  tmp="$(mktemp -t mitmproxy-ca.XXXXXX.pem)"
+  extract_ca "$tmp"
+  sudo install -m 0644 "$tmp" "$CA_ANCHOR"
+  sudo trust extract-compat
+  rm -f "$tmp"
+  echo "Installed mitmproxy CA → $CA_ANCHOR"
+}
+
+cmd_ca_uninstall() {
+  sudo rm -f "$CA_ANCHOR"
+  sudo trust extract-compat
+  echo "Removed mitmproxy CA from system trust store."
+}
+
+cmd_browser() {
+  container_running || { echo "mitmproxy not running — run: mitm on" >&2; exit 1; }
+  local fresh=0
+  while (($#)); do
+    case "$1" in
+      -f|--fresh) fresh=1; shift ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  local bin=""
+  for b in "${BROWSER_CANDIDATES[@]}"; do
+    if command -v "$b" >/dev/null 2>&1; then bin="$b"; break; fi
+  done
+  [[ -n "$bin" ]] || { echo "No chromium-family browser found (tried: ${BROWSER_CANDIDATES[*]})" >&2; exit 1; }
+  ((fresh)) && rm -rf "$BROWSER_PROFILE"
+  mkdir -p "$BROWSER_PROFILE"
+  local cert_flag=()
+  [[ -f "$CA_ANCHOR" ]] || cert_flag=(--ignore-certificate-errors)
+  echo "Launching $bin via $PROXY_URL (profile: $BROWSER_PROFILE)"
+  ((${#cert_flag[@]})) && echo "Note: --ignore-certificate-errors active. Run 'mitm ca-install' to remove this."
+  setsid "$bin" \
+    --proxy-server="$PROXY_URL" \
+    --user-data-dir="$BROWSER_PROFILE" \
+    --no-first-run --no-default-browser-check \
+    "${cert_flag[@]}" \
+    "$@" >/dev/null 2>&1 < /dev/null &
+  disown
+}
+
+case "${1:-}" in
+  on|up|start)        shift; cmd_on "$@" ;;
+  off|down|stop)      shift; cmd_off "$@" ;;
+  restart)            shift; cmd_restart "$@" ;;
+  status|ps)          shift; cmd_status "$@" ;;
+  ui|web)             shift; cmd_ui "$@" ;;
+  logs)               shift; cmd_logs "$@" ;;
+  env)                shift; cmd_env ;;
+  unenv)              shift; cmd_unenv ;;
+  ca-path)            shift; cmd_ca_path ;;
+  token|password)     shift; cmd_token ;;
+  ca-install)         shift; cmd_ca_install ;;
+  ca-uninstall)       shift; cmd_ca_uninstall ;;
+  browser|chrome|brave|chromium) shift; cmd_browser "$@" ;;
+  ""|-h|--help|help)  usage ;;
+  *) echo "Unknown command: $1" >&2; usage; exit 2 ;;
+esac

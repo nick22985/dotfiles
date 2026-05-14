@@ -4,6 +4,10 @@ fi
 autoload -Uz compinit
 compinit
 
+source <(COMPLETE=zsh sbx)
+source <(COMPLETE=zsh snd)
+
+
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 
@@ -81,7 +85,7 @@ plugins=(
 	zsh-autosuggestions
 	history-substring-search
 	fast-syntax-highlighting
-	zsh-autocomplete
+	# zsh-autocomplete  # disabled: heap-corruption SIGABRT in complist.so on zsh 5.9+/glibc
 )
 # Enable asynchronous suggestion fetching
 ZSH_AUTOSUGGEST_USE_ASYNC=1

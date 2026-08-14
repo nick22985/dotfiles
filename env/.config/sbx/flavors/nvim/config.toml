@@ -1,0 +1,45 @@
+mounts = [
+    "~/.config/nvim",
+    "~/.config/treesitterCustom",
+    "~/projects/personal/neovim/plugins",
+    "~/.solidtime_api_config",
+    "~/.config/solidtime",
+    "~/.gitconfig",
+    "~/dotfiles/env/.git_:~/.git_",
+    "~/.config/gh",
+]
+
+caches = [
+    ".local/share/nvim",
+    ".local/state/nvim",
+    ".cache/nvim",
+    ".vim/undodir",
+    ".supermaven",
+    "@sbx-nvim-rocks:.local/share/nvim/lazy/luarocks.nvim/.rocks",
+
+    ".m2",
+    ".gradle",
+
+    ".cargo/registry",
+    ".cargo/git",
+]
+
+ports = [63343]
+
+gpg = true
+
+start = 'nvim "${@:-.}"'
+
+allow-bare-repo = true
+
+no-network = true
+
+no-project-dockerfile = true
+
+clipboard = true
+
+open-host = true
+
+forward-sockets = [
+    "discord-ipc-0",
+]

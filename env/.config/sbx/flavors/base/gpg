@@ -1,0 +1,12 @@
+#!/bin/sh
+for arg in "$@"; do
+    case "$arg" in
+        --pinentry-mode | --pinentry-mode=*) exec /usr/bin/gpg "$@" ;;
+    esac
+done
+
+if [ "${SBX_GPG_PINENTRY:-}" = "loopback" ]; then
+    exec /usr/bin/gpg --pinentry-mode loopback "$@"
+fi
+
+exec /usr/bin/gpg "$@"

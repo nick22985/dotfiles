@@ -1,0 +1,10 @@
+caches = [
+    ".npm",
+]
+
+[agent]
+persist = [".copilot"]
+autonomy = ["--allow-all"]
+autonomy-detect = ["--allow-all-tools", "--yolo"]
+forward-env = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]
+profiles = true

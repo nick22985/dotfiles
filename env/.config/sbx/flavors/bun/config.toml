@@ -1,0 +1,5 @@
+caches = [
+    ".bun/install/cache",
+    "@sbx-mise-bun:.local/share/mise",
+    "@sbx-mise-state-bun:.local/state/mise",
+]

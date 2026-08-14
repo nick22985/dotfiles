@@ -1,0 +1,6 @@
+caches = [
+    ".m2",
+    ".gradle",
+    "@sbx-mise-java:.local/share/mise",
+    "@sbx-mise-state-java:.local/state/mise",
+]

@@ -19,189 +19,38 @@ parse_args "$@"
 # The backup tracking system will prevent duplicate backups
 create_dotfiles_backup "dev-env-sync" "$@"
 
-# Directories that can be completely replaced (whitelist)
-# These directories will be completely removed and replaced with new versions
-# Use full paths relative to the target directory (e.g., ".config/nvim", ".local/bin/somedir")
-REPLACEABLE_DIRS=(
-    ".config/nvim"
-    ".config/tmux"
-    ".config/entr"
-    ".config/treesitterCustom"
-    ".config/alacritty"
-    ".config/kitty"
-    ".config/rofi"
-    ".config/waybar"
-    ".config/hypr"
-    ".config/swaync"
-    ".config/wofi"
-    ".config/fish"
-    ".config/networkmanager-dmenu"
-    ".config/activitywatch"
-    ".config/ghostty"
-    ".config/.nickInstall"
-    ".oh-my-zsh/custom/plugins"
-    # Add more directories here as needed
-)
-
-# Check if a directory path is in the replaceable whitelist
-is_replaceable_dir() {
-    local source_dir="$1"
-    local target_dir="$2"
-    local item_name="$3"
-
-    # Build the relative path from HOME
-    local relative_path=""
-    if [[ "$target_dir" == "$HOME" ]]; then
-        relative_path="$item_name"
-    else
-        # Extract relative path from HOME
-        relative_path="${target_dir#"$HOME"/}/$item_name"
-    fi
-
-    for replaceable in "${REPLACEABLE_DIRS[@]}"; do
-        if [[ "$relative_path" == "$replaceable" ]]; then
-            return 0
-        fi
-    done
-    return 1
-}
-# Recursively sync directory contents without removing the parent
-sync_directory_contents() {
-    local source_dir="$1"
-    local target_dir="$2"
-
-    if [[ ! -d "$source_dir" ]]; then
-        return
-    fi
-
-    log "    syncing contents of directory: $source_dir -> $target_dir"
-
-    # Create target directory if it doesn't exist
-    if [[ $DRY_RUN == "0" ]]; then
-        mkdir -p "$target_dir"
-    fi
-
-    pushd "$source_dir" &> /dev/null || exit
-    local items=$(find . -mindepth 1 -maxdepth 1)
-    for item in $items; do
-        local item_name=${item#./}
-        local source_path="$source_dir/$item_name"
-        local target_path="$target_dir/$item_name"
-
-        if [[ -d "$item" ]]; then
-            # Check if this subdirectory should be completely replaced
-            if is_replaceable_dir "$source_dir" "$target_dir" "$item_name"; then
-                # For whitelisted directories, do full replacement
-                log "      removing replaceable subdirectory: rm -rf $target_path"
-                if [[ $DRY_RUN == "0" ]]; then
-                    rm -rf "$target_path"
-                fi
-
-                log "      copying directory: cp -r $item $target_dir"
-                if [[ $DRY_RUN == "0" ]]; then
-                    mkdir -p "$target_dir"
-                    cp -r "./$item" "$target_dir"
-                fi
-            else
-                # Recursively sync subdirectories
-                sync_directory_contents "$source_path" "$target_path"
-            fi
-        elif [[ -f "$item" ]]; then
-            # Copy individual files
-            log "      copying file: $item_name"
-            if [[ $DRY_RUN == "0" ]]; then
-                cp "$source_path" "$target_path"
-            fi
-        fi
-    done
-    popd &> /dev/null || exit
-}
-
-
-copy() {
-    local source="$1"
-    local target="$2"
-
-    if [[ ! -f "$source" ]]; then
-        log "⚠ Source file $source does not exist, skipping..."
-        return
-    fi
-
-    local target_dir=$(dirname "$target")
-    if [[ $DRY_RUN == "0" ]]; then
-        mkdir -p "$target_dir"
-    fi
-
-    log "removing: $target"
-    if [[ $DRY_RUN == "0" ]]; then
-        rm -f "$target"
-    fi
-
-    log "copying: $source to $target"
-    if [[ $DRY_RUN == "0" ]]; then
-        cp "$source" "$target"
-    fi
-}
-
 log "env: $script_dir"
 
-# Process all items in env directory recursively
-process_env_directory() {
-    local source_base="$1"  # e.g., /path/to/dotfiles/env
-    local target_base="$2"  # e.g., /home/user
-
-    if [[ ! -d "$source_base" ]]; then
-        log "⚠ Source directory $source_base does not exist, skipping..."
-        return
+deploy_env() {
+    if ! command_exists stow; then
+        log_error "GNU stow is not installed. Install it (pacman -S stow / apt install stow), or run: runs/packages"
+        return 1
     fi
 
-    log "processing env directory: $source_base -> $target_base"
+    local stow_args=(--dir "$DOTFILES_DIR" --target "$HOME" --restow)
+    if [[ "${DRY_RUN:-0}" != "0" ]]; then
+        stow_args+=(--no --verbose)
+        log "DRY RUN: simulating stow"
+    fi
 
-    pushd "$source_base" &> /dev/null || exit
-    local items=$(find . -mindepth 1 -maxdepth 1)
-
-    for item in $items; do
-        local item_name=${item#./}
-        local source_path="$source_base/$item_name"
-        local target_path="$target_base/$item_name"
-
-        if [[ -d "$item" ]]; then
-            # Check if this directory path is replaceable
-            if is_replaceable_dir "$source_base" "$target_base" "$item_name"; then
-                # For whitelisted directories, do full replacement
-                log "    removing replaceable directory: rm -rf $target_path"
-                if [[ $DRY_RUN == "0" ]]; then
-                    rm -rf "$target_path"
-                fi
-
-                log "    copying directory: cp -r $item $target_base"
-                if [[ $DRY_RUN == "0" ]]; then
-                    mkdir -p "$target_base"
-                    cp -r "./$item" "$target_base"
-                fi
-            else
-                # For other directories, sync contents recursively
-                sync_directory_contents "$source_path" "$target_path"
-            fi
-        elif [[ -f "$item" ]]; then
-            # Handle individual files
-            log "    copying file: $item_name"
-            copy "$source_path" "$target_path"
-        fi
-    done
-
-    popd &> /dev/null || exit
+    log "stowing env/ -> $HOME"
+    if stow "${stow_args[@]}" env; then
+        log "✓ symlinks in place"
+    else
+        log_error "stow failed. If this machine still has real config copies (not symlinks),"
+        log_error "run the one-time cutover first:  scripts/migrate-to-stow --apply"
+        log_error "(without --apply it only DRY-RUNS and changes nothing)"
+        return 1
+    fi
 }
 
-# Process the entire env directory
-process_env_directory "$env_dir" "$HOME"
+deploy_env || log_error "dotfiles deploy (stow) failed"
 
-# Process system files that require sudo
 system_dir="$script_dir/system"
 if [[ -d "$system_dir" ]]; then
     log "Processing system files (requires sudo)..."
 
-    # Function to copy system files with sudo (mirrors the copy() function)
+    # Function to copy system files with sudo
     copy_system_file() {
         local source="$1"
         local target="$2"
@@ -269,7 +118,6 @@ if [[ -d "$system_dir" ]]; then
     process_system_directory "$system_dir" "/"
 fi
 
-# Special handling for .gnupg permissions
 if [[ -d "$HOME/.gnupg" ]]; then
     log "Setting .gnupg permissions..."
     if [[ $DRY_RUN == "0" ]]; then
@@ -277,15 +125,6 @@ if [[ -d "$HOME/.gnupg" ]]; then
         find "$HOME/.gnupg" -type f -exec chmod 600 {} \;
     else
         log "Would set .gnupg permissions"
-    fi
-fi
-
-if [[ -d "$HOME/.local/bin" ]]; then
-    log "Making local bin scripts executable..."
-    if [[ $DRY_RUN == "0" ]]; then
-        find "$HOME/.local/bin" -type f -exec chmod +x {} \;
-    else
-        log "Would make scripts in $HOME/.local/bin executable"
     fi
 fi
 

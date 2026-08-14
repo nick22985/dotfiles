@@ -1,0 +1,6 @@
+caches = [
+    "go/pkg/mod",
+    ".cache/go-build",
+    "@sbx-mise-go:.local/share/mise",
+    "@sbx-mise-state-go:.local/state/mise",
+]

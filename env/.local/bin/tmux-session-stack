@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+stack_read() {
+  local raw
+  raw=$(tmux show-environment -g SESSION_STACK 2>/dev/null | sed 's/^SESSION_STACK=//')
+  [[ "$raw" == -* ]] && raw=""
+  printf '%s' "$raw"
+}
+
+session_live() { tmux has-session -t "$1" 2>/dev/null; }
+
+prev_live_session() {
+  local current="$1" cand i
+  local -a s
+  IFS=':' read -ra s <<< "$(stack_read)"
+  for (( i = ${#s[@]} - 1; i >= 0; i-- )); do
+    cand="${s[$i]}"
+    [[ -z "$cand" || "$cand" == "$current" ]] && continue
+    session_live "$cand" && { printf '%s' "$cand"; return 0; }
+  done
+  return 1
+}
+
+stack_push() {
+  local session="$1" out="" e
+  local -a s
+  IFS=':' read -ra s <<< "$(stack_read)"
+  for e in "${s[@]}"; do
+    [[ -z "$e" || "$e" =~ ^[0-9]+$ || "$e" == "$session" ]] && continue
+    out="${out:+$out:}$e"
+  done
+  out="${out:+$out:}$session"
+  tmux set-environment -g SESSION_STACK "$out"
+  local -a final
+  IFS=':' read -ra final <<< "$out"
+  printf '%s' "${#final[@]}"
+}
+
+session_pop() {
+  local target="$1" out="" e
+  local -a s
+  IFS=':' read -ra s <<< "$(stack_read)"
+  for e in "${s[@]}"; do
+    [[ -z "$e" || "$e" == "$target" ]] && continue
+    out="${out:+$out:}$e"
+  done
+  tmux set-environment -g SESSION_STACK "$out"
+}

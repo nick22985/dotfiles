@@ -1,0 +1,7 @@
+caches = [
+    ".npm",
+]
+
+[agent]
+persist = [".config/opencode", ".local/share/opencode"]
+profiles = true

@@ -1,0 +1,45 @@
+#!/bin/bash
+source "$HOME/.local/bin/tmux-session-stack"
+
+DIR="${1:-back}"
+
+IFS=':' read -ra STACK <<< "$(stack_read)"
+LEN=${#STACK[@]}
+(( LEN == 0 )) && { tmux display-message "jumplist empty"; exit 0; }
+
+CURRENT=$(tmux display-message -p '#S')
+
+POS=$(tmux show-environment -g SESSION_STACK_POS 2>/dev/null | sed 's/^SESSION_STACK_POS=//')
+[[ "$POS" =~ ^[0-9]+$ ]] || POS=$((LEN - 1))
+(( POS < 0 )) && POS=0
+(( POS > LEN - 1 )) && POS=$((LEN - 1))
+
+if [[ "${STACK[$POS]}" != "$CURRENT" ]]; then
+  for (( j = LEN - 1; j >= 0; j-- )); do
+    [[ "${STACK[$j]}" == "$CURRENT" ]] && { POS=$j; break; }
+  done
+fi
+
+step=-1
+[[ "$DIR" == "forward" ]] && step=1
+
+i=$POS
+TARGET=""
+while true; do
+  i=$((i + step))
+  if (( i < 0 || i > LEN - 1 )); then
+    tmux display-message "no $DIR jump"
+    exit 0
+  fi
+  cand="${STACK[$i]}"
+  [[ -z "$cand" || "$cand" == "$CURRENT" ]] && continue
+  if session_live "$cand"; then
+    TARGET="$cand"
+    NEWPOS=$i
+    break
+  fi
+done
+
+tmux set-environment -g SESSION_JUMP_NAV 1
+tmux set-environment -g SESSION_STACK_POS "$NEWPOS"
+tmux switch-client -t "$TARGET"

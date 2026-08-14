@@ -19,5 +19,3 @@ if [ $has_conflicts -eq 1 ]; then
 fi
 
 exit 0
-
-

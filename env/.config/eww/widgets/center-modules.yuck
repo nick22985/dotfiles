@@ -3,7 +3,7 @@
 (defwidget workspace_button [id workspace_info]
   (button :class "workspace ${workspace_info.active == id ? 'active' : ''}"
           :halign "center"
-          :onclick "hyprctl dispatch workspace ${id}"
+          :onclick "hyprctl dispatch 'hl.dsp.focus({ workspace = ${id} })'"
     (label :class "workspace-label"
            :text "${workspace_info.active == id ? '':
                    id <= 6 ? '' : ''}")))

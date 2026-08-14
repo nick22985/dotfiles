@@ -1,0 +1,7 @@
+caches = [
+    ".npm",
+    ".cache/yarn",
+    ".local/share/pnpm/store",
+    "@sbx-mise-npm:.local/share/mise",
+    "@sbx-mise-state-npm:.local/state/mise",
+]

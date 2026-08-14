@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTFILES_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_DIR="$DOTFILES_DIR/env"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+APPLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --apply|-y) APPLY=1 ;;
+        -h|--help) sed -n '3,33p' "$0" | sed 's/^#\s\{0,1\}//'; exit 0 ;;
+        *) log_error "unknown arg: $arg"; exit 2 ;;
+    esac
+done
+
+run() {
+    if [[ $APPLY == 1 ]]; then
+        "$@"
+    else
+        echo "  DRY: $*"
+    fi
+}
+
+if ! command_exists stow; then
+    log_error "GNU stow is not installed. Install it first: pacman -S stow  (or: apt install stow)"
+    exit 1
+fi
+
+cd "$DOTFILES_DIR"
+
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    log_warn "dotfiles working tree is not clean. --adopt will mix existing changes with"
+    log_warn "adopted live drift; review 'git status' carefully afterwards."
+fi
+
+log_info "Initializing submodules (content must be present before stow folds links)..."
+run git submodule update --init --recursive
+
+mapfile -t MANAGED_RELS < <(
+    cd "$ENV_DIR" && find . -name .git -prune -o \( -type f -o -type l \) -printf '%P\n' | sort
+)
+
+REPLACEABLE_DIRS=(
+    ".config/nvim" ".config/tmux" ".config/entr" ".config/treesitterCustom"
+    ".config/alacritty" ".config/kitty" ".config/rofi" ".config/waybar"
+    ".config/hypr" ".config/swaync" ".config/wofi" ".config/fish"
+    ".config/networkmanager-dmenu" ".config/activitywatch" ".config/ghostty"
+    ".config/.nickInstall" ".config/sbx" ".oh-my-zsh/custom/plugins"
+)
+EXCLUDE_FROM_FOLD=(
+    ".config/docker-compose"
+)
+declare -A EXCLUDE_SEEN=()
+for rel in "${EXCLUDE_FROM_FOLD[@]}"; do EXCLUDE_SEEN[$rel]=1; done
+
+mapfile -t SUBMODULE_RELS < <(
+    git config -f .gitmodules --get-regexp '\.path$' 2>/dev/null \
+        | awk '{print $2}' | sed 's#^env/##' | sort -u
+)
+declare -A FOLD_SEEN=()
+FOLD_DIRS=()
+for rel in "${REPLACEABLE_DIRS[@]}" "${SUBMODULE_RELS[@]}"; do
+    [[ -n "${FOLD_SEEN[$rel]:-}" ]] && continue
+    [[ -n "${EXCLUDE_SEEN[$rel]:-}" ]] && continue
+    FOLD_SEEN[$rel]=1
+    FOLD_DIRS+=("$rel")
+done
+
+create_dotfiles_backup "migrate-to-stow" "$@"
+
+BACKUP_DIR="$HOME/.backup"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_TAR="$BACKUP_DIR/pre-stow-$STAMP.tar.gz"
+
+backup_list=()
+for rel in "${MANAGED_RELS[@]}"; do
+    [[ -e "$HOME/$rel" || -L "$HOME/$rel" ]] && backup_list+=("$rel")
+done
+log_info "Backing up ${#backup_list[@]} existing managed files -> $BACKUP_TAR"
+if [[ $APPLY == 1 ]]; then
+    mkdir -p "$BACKUP_DIR"
+    tar -C "$HOME" -czf "$BACKUP_TAR" "${backup_list[@]}"
+    log_success "Backup written: $BACKUP_TAR"
+else
+    echo "  DRY: tar -C \$HOME -czf $BACKUP_TAR <${#backup_list[@]} files>"
+fi
+
+log_info "Clearing live copies of fully-owned dirs (so stow folds dir-symlinks)..."
+for rel in "${FOLD_DIRS[@]}"; do
+    target="$HOME/$rel"
+    if [[ -L "$target" ]]; then
+        :
+    elif [[ -e "$target" ]] && [[ "$(readlink -f "$target")" == "$DOTFILES_DIR"/* ]]; then
+        log "  skip (already folded into repo via parent symlink): $target"
+    elif [[ -e "$target" ]]; then
+        log "  rm -rf $target"
+        if [[ $APPLY == 1 ]]; then
+            if ! rm -rf "$target" 2>/tmp/migrate-rm-err; then
+                log_error "Could not fully remove $target:"
+                sed 's/^/    /' /tmp/migrate-rm-err >&2
+                log_error "It likely contains files owned by another user (runtime data)."
+                log_error "Add it to EXCLUDE_FROM_FOLD + env/.stow-local-ignore, then re-run."
+                log_error "Your backup is at: $BACKUP_TAR  (restore: tar -C \$HOME -xzf <tar>)"
+                exit 1
+            fi
+        else
+            echo "  DRY: rm -rf $target"
+        fi
+    fi
+done
+
+log_info "Stowing env/ into \$HOME (--adopt absorbs remaining live files into the repo)..."
+if [[ $APPLY == 1 ]]; then
+    stow --dir "$DOTFILES_DIR" --target "$HOME" --adopt --verbose env
+else
+    stow --dir "$DOTFILES_DIR" --target "$HOME" --adopt --no --verbose env || true
+fi
+
+echo
+if [[ $APPLY == 1 ]]; then
+    log_success "Stow complete. Review drift that --adopt pulled into the repo:"
+    echo
+    git -C "$DOTFILES_DIR" status --short || true
+    echo
+    log_info "Keep a change: 'git add' it.   Discard a change: 'git checkout -- <path>'"
+    log_info "Backup for rollback: $BACKUP_TAR"
+    echo
+    log_info "Quick checks:"
+    log_info "  ls -la ~ | grep '\\->'                 # top-level dotfiles are symlinks"
+    log_info "  ls -ld ~/.gnupg                        # still drwx------ (700)"
+    log_info "  ls -l ~/.gnupg/private-keys-v1.d       # still a REAL dir, not a symlink"
+else
+    echo
+    log_info "Dry run complete. Re-run with --apply to perform the cutover."
+fi

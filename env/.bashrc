@@ -184,3 +184,10 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 
+alias npm='sbx shell -f npm npm'
+alias npx='sbx shell -f npm npx'
+alias bun='sbx shell -f bun bun'
+alias bunx='sbx shell -f bun bunx'
+alias cargo='sbx shell -f rust cargo'
+alias rustc='sbx shell -f rust rustc'
+

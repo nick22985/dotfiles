@@ -1,0 +1,124 @@
+# syntax=docker/dockerfile:1
+FROM debian:trixie-slim
+
+ARG USER_UID=1000
+ARG USER_GID=1000
+ARG USER_HOME=/home/dev
+ARG SBX_GUARDDOG=1
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        gnupg \
+        ca-certificates \
+        curl \
+        less \
+        openssh-client \
+        ripgrep \
+        vim-tiny \
+        unzip \
+        xz-utils \
+        python3 \
+        python3-pip \
+        python3-venv
+
+RUN if getent group "$USER_GID" >/dev/null; then \
+        EXISTING_GROUP="$(getent group "$USER_GID" | cut -d: -f1)"; \
+        if [ "$EXISTING_GROUP" != "dev" ]; then groupmod -n dev "$EXISTING_GROUP"; fi; \
+    else \
+        groupadd -g "$USER_GID" dev; \
+    fi \
+    && if getent passwd "$USER_UID" >/dev/null; then \
+        EXISTING_USER="$(getent passwd "$USER_UID" | cut -d: -f1)"; \
+        if [ "$EXISTING_USER" != "dev" ]; then usermod -l dev -d "$USER_HOME" -m "$EXISTING_USER"; \
+        else usermod -d "$USER_HOME" -m dev; fi; \
+        usermod -g dev dev; \
+    else \
+        useradd -m -u "$USER_UID" -g dev -d "$USER_HOME" -s /bin/bash dev; \
+    fi \
+    && mkdir -p "$USER_HOME" /opt/sbx/bin \
+    && chown -R dev:dev "$USER_HOME"
+
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) osv_arch=linux_amd64 ;; \
+        arm64) osv_arch=linux_arm64 ;; \
+        *) echo "unsupported arch $arch"; exit 1 ;; \
+    esac; \
+    if [ ! -f "/tmp/sbx-dl/osv-scanner-$osv_arch" ]; then \
+        curl -fsSL -o "/tmp/sbx-dl/osv-scanner-$osv_arch" \
+            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_$osv_arch"; \
+    fi; \
+    install -m 0755 "/tmp/sbx-dl/osv-scanner-$osv_arch" /usr/local/bin/osv-scanner; \
+    osv-scanner --version
+
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked \
+    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+        | sh -s -- -b /usr/local/bin \
+    && trivy --version
+
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    if [ "$SBX_GUARDDOG" = "1" ]; then \
+        python3 -m venv /opt/guarddog \
+        && /opt/guarddog/bin/pip install guarddog \
+        && ln -s /opt/guarddog/bin/guarddog /usr/local/bin/guarddog \
+        && guarddog --version ; \
+    fi
+
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
+    if [ ! -f /tmp/sbx-dl/mise-install.sh ]; then \
+        curl -fsSL https://mise.run -o /tmp/sbx-dl/mise-install.sh; \
+    fi; \
+    MISE_INSTALL_PATH=/usr/local/bin/mise sh /tmp/sbx-dl/mise-install.sh; \
+    mise --version
+
+# mise's global tool list lives outside $HOME. A sandbox opened *in* a config
+# directory — `cd ~/.config && nvim .` — bind-mounts the host's copy over the
+# image's, and the default location (`$HOME/.config/mise/config.toml`) goes with
+# it: every shim then fails with "No version is set for shim: nvim" while the
+# shims themselves are still on PATH. Nothing under /opt/sbx is ever a workspace.
+ENV MISE_GLOBAL_CONFIG_FILE=/opt/sbx/mise/config.toml
+RUN mkdir -p /opt/sbx/mise && chown dev:dev /opt/sbx/mise
+
+ARG DOCKER_VERSION=27.4.0
+RUN --mount=type=cache,target=/tmp/sbx-dl,sharing=locked set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) docker_arch=x86_64 ;; \
+        arm64) docker_arch=aarch64 ;; \
+        *) echo "unsupported arch $arch"; exit 1 ;; \
+    esac; \
+    tgz="/tmp/sbx-dl/docker-${DOCKER_VERSION}-${docker_arch}.tgz"; \
+    if [ ! -f "$tgz" ]; then \
+        curl -fsSL "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" \
+            -o "$tgz"; \
+    fi; \
+    tar -xz -C /tmp -f "$tgz" docker/docker; \
+    install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
+    rm -rf /tmp/docker; \
+    docker --version
+
+RUN printf 'export PATH=/opt/sbx/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH\nexport MISE_INSTALL_MISSING_TOOLS=1\neval "$(/usr/local/bin/mise activate bash)" 2>/dev/null || true\n' > /etc/profile.d/sbx.sh
+
+COPY sbx-audit /opt/sbx/bin/sbx-audit
+RUN chmod +x /opt/sbx/bin/sbx-audit
+
+COPY gpg /opt/sbx/bin/gpg
+RUN chmod +x /opt/sbx/bin/gpg
+
+RUN printf '\n# sbx: let gpg prompt for passphrases inline on this terminal\nif [ -z "${GPG_TTY:-}" ] && tty -s; then GPG_TTY="$(tty)"; export GPG_TTY; fi\n' >> /etc/bash.bashrc
+
+USER dev
+WORKDIR $USER_HOME
+
+ENV SHELL=/bin/bash \
+    MISE_INSTALL_MISSING_TOOLS=1 \
+    PATH=/opt/sbx/bin:$USER_HOME/.local/bin:$USER_HOME/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+
+CMD ["/bin/bash"]

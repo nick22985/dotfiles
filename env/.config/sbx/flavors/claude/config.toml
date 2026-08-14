@@ -1,0 +1,26 @@
+caches = [
+    ".bun/install/cache",
+    "@sbx-claude-local:.local",
+]
+
+shm-size = "1g"
+
+[agent]
+autonomy = ["--dangerously-skip-permissions"]
+profiles = true
+remote-control = true
+model-switch = "/model"
+# `claude "prompt"` opens the session already working on it.
+prompt-arg = []
+
+persist = [
+    { path = ".claude", shared = true },
+    # A `file` + `seed` entry is bound as a session-private copy, not the one host
+    # inode: claude rewrites this on ordinary activity, and sharing it lets one
+    # sandbox tear or orphan the file another is parsing. Rotation reaches a
+    # sandbox at its next start; the copy is never written back.
+    { path = ".claude.json", file = true, seed = true, seed-default = "{}\n", optional = true, seed-strip = ["oauthAccount", "userID"] },
+    # Credentials stay a direct bind (a `file` but not seeded — only rotation
+    # writes it); isolating it would risk dropping a refreshed token.
+    { path = ".claude/.credentials.json", file = true, store = ".credentials.json" },
+]

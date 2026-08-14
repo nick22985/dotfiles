@@ -20,6 +20,7 @@ NC='\033[0m' # No Color
 # Configuration file for profiles
 CONFIG_DIR="$HOME/.config/audio-switcher"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
+EE_FILE="$CONFIG_DIR/easyeffects.conf"
 
 # Function to print colored output
 print_status() {
@@ -44,6 +45,141 @@ print_profile() {
 
 print_communication() {
     echo -e "${MAGENTA}[COMM]${NC} $1"
+}
+
+print_effects() {
+    echo -e "${CYAN}[FX]${NC} $1"
+}
+
+EE_CMD=""
+
+detect_easyeffects() {
+    if [ -n "$EE_CMD" ]; then
+        return 0
+    fi
+
+    if command -v easyeffects &> /dev/null; then
+        EE_CMD="easyeffects"
+        return 0
+    fi
+
+    if command -v flatpak &> /dev/null && flatpak info com.github.wwmm.easyeffects &> /dev/null; then
+        EE_CMD="flatpak run com.github.wwmm.easyeffects"
+        return 0
+    fi
+
+    return 1
+}
+
+easyeffects_running() {
+    pgrep -f "easyeffects" > /dev/null 2>&1
+}
+
+run_easyeffects() {
+    if ! detect_easyeffects; then
+        print_warning "EasyEffects not installed, skipping effects change"
+        return 1
+    fi
+
+    if ! easyeffects_running; then
+        print_effects "EasyEffects is not running, nothing to change"
+        return 2
+    fi
+
+    # shellcheck disable=SC2086
+    timeout 5s $EE_CMD "$@" > /dev/null 2>&1
+}
+
+set_easyeffects() {
+    local state="$1"
+
+    case "$state" in
+        on)
+            if run_easyeffects -b 2; then
+                print_effects "EasyEffects enabled"
+            fi
+            ;;
+        off)
+            if run_easyeffects -b 1; then
+                print_effects "EasyEffects bypassed (mic unprocessed)"
+            fi
+            ;;
+        status)
+            if ! detect_easyeffects; then
+                print_warning "EasyEffects not installed"
+                return 1
+            fi
+            if ! easyeffects_running; then
+                print_effects "EasyEffects is not running"
+                return 0
+            fi
+            # shellcheck disable=SC2086
+            local bypass
+            bypass=$(timeout 5s "$EE_CMD" -b 3 2>/dev/null | tr -d '[:space:]')
+            case "$bypass" in
+                *1|*true|*True) print_effects "EasyEffects: bypassed (effects OFF)" ;;
+                *0|*false|*False) print_effects "EasyEffects: active (effects ON)" ;;
+                *) print_effects "EasyEffects: unknown bypass state (${bypass:-no output})" ;;
+            esac
+            ;;
+        preset:*)
+            local preset="${state#preset:}"
+            if run_easyeffects -l "$preset"; then
+                print_effects "Loaded EasyEffects preset: $preset"
+            fi
+            ;;
+        none|"")
+            ;;
+        *)
+            print_warning "Unknown EasyEffects action: $state"
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+create_default_ee_config() {
+    if [ -L "$EE_FILE" ]; then
+        print_status "EasyEffects actions are stowed from dotfiles, leaving alone"
+        return 0
+    fi
+
+    cat > "$EE_FILE" << 'EOF'
+# EasyEffects actions per audio profile
+# Format: profile_name=action
+#
+# Actions:
+#   on             Take EasyEffects out of bypass (processed mic)
+#   off            Put EasyEffects into bypass (raw, unprocessed mic)
+#   preset:<name>  Load the named EasyEffects preset instead of toggling bypass
+#   none           Leave EasyEffects alone
+#
+# Profiles with no entry here default to "none".
+# EasyEffects bypass is global, so "off" disables the output chain as well.
+
+gsx-scarlett=on
+btd-scarlett=on
+btd-full=none
+btd-mic=off
+EOF
+    print_success "Created EasyEffects profile actions in $EE_FILE"
+}
+
+apply_easyeffects() {
+    local profile_name="$1"
+
+    if [ ! -f "$EE_FILE" ]; then
+        return 0
+    fi
+
+    local action
+    action=$(grep -v "^[[:space:]]*#" "$EE_FILE" | grep "^[[:space:]]*$profile_name=" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || echo "")
+
+    if [ -z "$action" ]; then
+        return 0
+    fi
+
+    set_easyeffects "$action"
 }
 
 # Check if PipeWire is running
@@ -72,6 +208,10 @@ init_config() {
     
     if [ ! -f "$PROFILES_FILE" ]; then
         create_default_profiles
+    fi
+
+    if [ ! -f "$EE_FILE" ]; then
+        create_default_ee_config
     fi
 }
 
@@ -410,7 +550,12 @@ use_profile() {
     fi
     
     # Apply the profile (card profile already set)
-    set_audio_profile "$main_sink" "$main_source" "$comm_sink" "$comm_source" "none" "$description"
+    if ! set_audio_profile "$main_sink" "$main_source" "$comm_sink" "$comm_source" "none" "$description"; then
+        return 1
+    fi
+
+    # Match the EasyEffects chain to the mic this profile selected
+    apply_easyeffects "$name"
 }
 
 # Interactive device selection
@@ -513,6 +658,8 @@ show_current_devices() {
     else
         print_communication "Communication input: Using main input"
     fi
+
+    set_easyeffects status || true
 }
 
 # List all devices
@@ -640,8 +787,10 @@ show_usage() {
     echo "  -p, --profiles          List available profiles"
     echo "  -u, --use <PROFILE>     Use specified profile"
     echo "  -n, --cycle             Cycle to next profile (good for keybinds)"
+    echo "  --ee [STATE]            EasyEffects: on | off | preset:<name> | status"
     echo "  --init                  Initialize with default profiles"
     echo "  --edit                  Edit profiles file"
+    echo "  --edit-ee               Edit per-profile EasyEffects actions"
     echo "  (no options)            Interactive device selection"
     echo
     echo "Examples:"
@@ -660,9 +809,12 @@ show_usage() {
     echo "  • Separate main and communication audio defaults"
     echo "  • Automatic card profile switching (e.g., BTD 700 stereo+mono)"
     echo "  • Stream migration to new devices"
+    echo "  • Per-profile EasyEffects bypass (raw mic vs. processed mic)"
     echo "  • Desktop notifications"
     echo
-    echo "Config file: $PROFILES_FILE"
+    echo "Config files:"
+    echo "  $PROFILES_FILE"
+    echo "  $EE_FILE"
 }
 
 # Main function
@@ -696,11 +848,22 @@ main() {
         -n|--cycle)
             cycle_profiles
             ;;
+        --ee)
+            if [ -z "${2:-}" ]; then
+                set_easyeffects status
+            else
+                set_easyeffects "$2"
+            fi
+            ;;
         --init)
             create_default_profiles
+            create_default_ee_config
             ;;
         --edit)
             ${EDITOR:-nano} "$PROFILES_FILE"
+            ;;
+        --edit-ee)
+            ${EDITOR:-nano} "$EE_FILE"
             ;;
         "")
             select_devices_interactive

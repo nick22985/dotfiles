@@ -1,0 +1,2 @@
+-- conf/apps/1password.conf — every rule was commented out in the original.
+-- Intentionally empty; kept as a placeholder mirroring the original file.

@@ -5,7 +5,7 @@
 
 [commit]
 	gpgsign = true
-	template = /home/nick/.git_/.gitcommittemplate
+	template = ~/.git_/.gitcommittemplate
 
 [tag]
 	gpgsign = true
@@ -151,9 +151,10 @@
 	excludesfile = ~/.git_/.gitignore
 	untrackedCache = true
 	hooksPath = ~/.git_/hooks
+	pager = delta
 
 [merge]
-	conflictStyle = diff3
+	conflictStyle = zdiff3
 
 [diff]
 	colorMoved = default
@@ -211,3 +212,23 @@
     #       by the local ones
 
     path = ~/.gitconfig.local
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	dark = true
+	line-numbers = true
+	syntax-theme = Catppuccin Mocha
+	file-style = "#cdd6f4" bold
+	file-decoration-style = "#6c7086" ul
+	hunk-header-style = "#89b4fa" bold
+	hunk-header-decoration-style = "#6c7086" box
+	line-numbers-left-style = "#6c7086"
+	line-numbers-right-style = "#6c7086"
+	line-numbers-zero-style = "#6c7086"
+	line-numbers-minus-style = "#f38ba8"
+	line-numbers-plus-style = "#a6e3a1"
+	minus-style = syntax "#45283a"
+	minus-emph-style = syntax "#6e3252"
+	plus-style = syntax "#2a3b2a"
+	plus-emph-style = syntax "#3f5a3f"

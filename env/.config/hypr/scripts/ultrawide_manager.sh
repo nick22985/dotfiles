@@ -2,7 +2,7 @@
 
 # Hyprland Ultra-wide Window Manager
 # For Samsung Odyssey G95NC - Monitor-specific gap management
-MONITOR_DESC="Samsung Electric Company Odyssey G95NC HNTX400116"
+MONITOR_DESC_PREFIX="${ULTRAWIDE_MONITOR_DESC_PREFIX:-Samsung Electric Company Odyssey G95NC}"
 # TODO: get from MONITOR_DEC and set this
 MONITOR_WIDTH=7680
 MONITOR_HEIGHT=2160
@@ -22,8 +22,23 @@ layout_mode="default"
 target_workspace=""
 gap_side=""
 
+resize_window_exact() {
+    local width=$1 height=$2 addr=$3
+    hyprctl dispatch "hl.dsp.window.resize({ x = $width, y = $height, relative = false, window = \"address:$addr\" })" >/dev/null
+}
+
+move_active_exact() {
+    local x=$1 y=$2
+    hyprctl dispatch "hl.dsp.window.move({ x = $x, y = $y, relative = false })" >/dev/null
+}
+
+layout_msg() {
+    hyprctl dispatch "hl.dsp.layout(\"$1\")" >/dev/null
+}
+
 get_target_workspace() {
-    hyprctl monitors -j | jq -r ".[] | select(.description == \"$MONITOR_DESC\") | .activeWorkspace.id"
+    hyprctl monitors -j | jq -r --arg prefix "$MONITOR_DESC_PREFIX" \
+        '.[] | select(.description | startswith($prefix)) | .activeWorkspace.id'
 }
 
 get_window_count() {
@@ -51,9 +66,9 @@ set_workspace_gaps() {
     local bottom=${4:-0}
 
     if [[ -n "$workspace" ]]; then
-        local gap_command="workspace $workspace,gapsout:$top $right $bottom $left"
-        echo "Executing: hyprctl keyword $gap_command"
-        hyprctl keyword "$gap_command"
+        local lua="hl.workspace_rule({ workspace = \"$workspace\", gaps_out = { top = $top, right = $right, bottom = $bottom, left = $left } })"
+        echo "Executing: hyprctl eval $lua"
+        hyprctl eval "$lua"
         echo "Set gaps for workspace $workspace: top=$top right=$right bottom=$bottom left=$left"
     fi
 }
@@ -61,7 +76,7 @@ set_workspace_gaps() {
 reset_workspace_gaps() {
     local workspace=$(get_target_workspace)
     if [[ -n "$workspace" ]]; then
-        hyprctl keyword workspace "$workspace,gapsout:0"
+        hyprctl eval "hl.workspace_rule({ workspace = \"$workspace\", gaps_out = 0 })"
         echo "Reset gaps for workspace $workspace"
     fi
 }
@@ -75,7 +90,9 @@ handle_single_window() {
 }
 
 get_mouse_position_on_target_monitor() {
-    local monitor_info=$(hyprctl monitors -j | jq -r ".[] | select(.description == \"$MONITOR_DESC\")")
+    local monitor_info
+    monitor_info=$(hyprctl monitors -j | jq -r --arg prefix "$MONITOR_DESC_PREFIX" \
+        '.[] | select(.description | startswith($prefix))')
     local monitor_x=$(echo "$monitor_info" | jq -r '.x')
     local mouse_x=$(hyprctl cursorpos | grep -oP '\d+' | head -1)
 
@@ -114,16 +131,16 @@ handle_initial_dual_windows() {
         echo "Detected: Left window is in gap, setting appropriate gaps"
         set_workspace_gaps 0 $SIDE_PADDING $DEFAULT_PADDING $DEFAULT_PADDING
 
-        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$right_window"
+        resize_window_exact $SIDE_PADDING $MONITOR_HEIGHT "$left_window"
+        resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$right_window"
 
         gap_side="left"
     elif [[ $right_width -lt $((SIDE_PADDING + 100)) ]]; then
         echo "Detected: Right window is in gap, setting appropriate gaps"
         set_workspace_gaps $SIDE_PADDING 0 $DEFAULT_PADDING $DEFAULT_PADDING
 
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$left_window"
-        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$right_window"
+        resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$left_window"
+        resize_window_exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT "$right_window"
 
         gap_side="right"
     else
@@ -132,13 +149,13 @@ handle_initial_dual_windows() {
 
         if [[ $mouse_x -lt $SCREEN_CENTER ]]; then
             set_workspace_gaps 0 $SIDE_PADDING $DEFAULT_PADDING $DEFAULT_PADDING
-            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$right_window"
+            resize_window_exact $SIDE_PADDING $MONITOR_HEIGHT "$left_window"
+            resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$right_window"
             gap_side="left"
         else
             set_workspace_gaps $SIDE_PADDING 0 $DEFAULT_PADDING $DEFAULT_PADDING
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$left_window"
-            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$right_window"
+            resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$left_window"
+            resize_window_exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT "$right_window"
             gap_side="right"
         fi
     fi
@@ -166,8 +183,8 @@ handle_dual_windows() {
             echo "Main window: $main_window, New window: $new_window"
             echo "Resizing new window to exactly ${SIDE_PADDING}px and main window to ${CENTER_WIDTH}px"
 
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$main_window"
-            hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$new_window"
+            resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$main_window"
+            resize_window_exact $SIDE_PADDING $MONITOR_HEIGHT "$new_window"
 
             gap_side="left"
         else
@@ -180,14 +197,14 @@ handle_dual_windows() {
             echo "Main window: $main_window, New window: $new_window"
             echo "Resizing main window to ${CENTER_WIDTH}px and new window to ${SIDE_PADDING}px"
 
-            hyprctl dispatch layoutmsg swapwithmaster
+            layout_msg swapwithmaster
 
             sleep 0.1
 
-            hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$main_window"
-            hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT,address:"$new_window"
+            resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$main_window"
+            resize_window_exact $((SIDE_PADDING - $DEFAULT_PADDING)) $MONITOR_HEIGHT "$new_window"
 
-            hyprctl dispatch moveactive exact $((CENTER_WIDTH + SIDE_PADDING)) 0
+            move_active_exact $((CENTER_WIDTH + SIDE_PADDING)) 0
 
             gap_side="right"
         fi
@@ -210,9 +227,9 @@ handle_initial_triple_windows() {
     local center_window=$(echo "$windows_json" | jq -r '.[1].address')
     local right_window=$(echo "$windows_json" | jq -r '.[2].address')
 
-    hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
-    hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$center_window"
-    hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:"$right_window"
+    resize_window_exact $SIDE_PADDING $MONITOR_HEIGHT "$left_window"
+    resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$center_window"
+    resize_window_exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT "$right_window"
 
     layout_mode="triple"
 }
@@ -249,9 +266,9 @@ handle_triple_windows() {
 
         echo "Resizing: left=${SIDE_PADDING}px, center=${CENTER_WIDTH}px, right=$((SIDE_PADDING - 30))px"
 
-        hyprctl dispatch resizewindowpixel exact $SIDE_PADDING $MONITOR_HEIGHT,address:"$left_window"
-        hyprctl dispatch resizewindowpixel exact $CENTER_WIDTH $MONITOR_HEIGHT,address:"$center_window"
-        hyprctl dispatch resizewindowpixel exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT,address:"$right_window"
+        resize_window_exact $SIDE_PADDING $MONITOR_HEIGHT "$left_window"
+        resize_window_exact $CENTER_WIDTH $MONITOR_HEIGHT "$center_window"
+        resize_window_exact $((SIDE_PADDING - 30)) $MONITOR_HEIGHT "$right_window"
 
         layout_mode="triple"
     fi
@@ -347,7 +364,7 @@ handle_workspace_change() {
 handle_monitor_change() {
     local event_data=$1
 
-    if echo "$event_data" | grep -q "$MONITOR_DESC"; then
+    if echo "$event_data" | grep -q "$MONITOR_DESC_PREFIX"; then
         echo "Focused target monitor"
         handle_workspace_change
     fi
@@ -454,7 +471,7 @@ handle_event() {
 }
 
 echo "Starting Hyprland Ultra-wide Window Manager"
-echo "Target monitor: $MONITOR_DESC"
+echo "Target monitor prefix: $MONITOR_DESC_PREFIX"
 echo "Monitor resolution: ${MONITOR_WIDTH}x${MONITOR_HEIGHT}"
 echo "Padding: ${PADDING_PERCENTAGE}% (${SIDE_PADDING}px each side)"
 echo "Will apply ${SIDE_PADDING}px side gaps for single windows on target monitor only"
@@ -499,11 +516,11 @@ handle_special_windows() {
 
     if [[ -n "$win" ]]; then
         echo "Resizing floating 1Password window to 800x500..."
-        hyprctl dispatch resizewindowpixel exact 800 500,address:"$win"
+        resize_window_exact 800 500 "$win"
 
         # Repeat after a short delay to enforce size if it shrinks back
         sleep 0.5
-        hyprctl dispatch resizewindowpixel exact 800 500,address:"$win"
+        resize_window_exact 800 500 "$win"
     fi
 }
 

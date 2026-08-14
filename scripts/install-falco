@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v paru >/dev/null 2>&1 && ! command -v yay >/dev/null 2>&1; then
+    echo "falco is in the AUR — install paru or yay first." >&2
+    exit 1
+fi
+
+aur=${AUR_HELPER:-paru}
+command -v "$aur" >/dev/null 2>&1 || aur=yay
+
+if ! command -v falco >/dev/null 2>&1; then
+    echo "==> installing falco from AUR via $aur"
+    "$aur" -S --needed falco-bin
+fi
+
+echo "==> enabling falco-modern-bpf.service"
+sudo systemctl enable --now falco-modern-bpf.service
+
+echo
+echo "falco installed. quick reference:"
+echo "  status:   systemctl status falco-modern-bpf"
+echo "  alerts:   journalctl -u falco-modern-bpf -f"
+echo "  rules:    /etc/falco/falco_rules.yaml  (custom: /etc/falco/falco_rules.local.yaml)"
+echo "  config:   /etc/falco/falco.yaml"

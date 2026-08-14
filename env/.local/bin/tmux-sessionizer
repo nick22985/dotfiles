@@ -48,7 +48,7 @@ else
         local mindepth=${2:-1}
         local maxdepth=${3:-1}
         path="${path/\$HOME/$HOME}"
-        local results=$(find "$path" -mindepth "$mindepth" -maxdepth "$maxdepth" -type d 2>/dev/null)
+        local results=$(find -L "$path" -mindepth "$mindepth" -maxdepth "$maxdepth" -type d 2>/dev/null)
         if [ ! -z "$results" ]; then
             find_command+=("$results")
         fi

@@ -27,6 +27,18 @@ if ! command_exists cargo; then
     exit 1
 fi
 
+SYNC_SCRIPT="$DOTFILES_DIR/scripts/sync-sbx-flavors"
+if [[ -x "$SYNC_SCRIPT" ]]; then
+    log "→ Syncing flavor definitions from $SBX_SRC/examples/flavors..."
+    sync_args=()
+    [[ $DRY_RUN == "1" ]] && sync_args+=(--dry-run)
+    if ! SBX_SRC="$SBX_SRC" "$SYNC_SCRIPT" "${sync_args[@]}"; then
+        log_warn "flavor sync failed; continuing with build"
+    fi
+else
+    log_warn "$SYNC_SCRIPT not found or not executable; skipping flavor sync"
+fi
+
 log "→ Building sbx from $SBX_SRC..."
 if [[ $DRY_RUN == "0" ]]; then
     if ! (cd "$SBX_SRC" && cargo build --release --quiet); then

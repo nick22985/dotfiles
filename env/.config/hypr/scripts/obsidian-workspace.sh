@@ -5,5 +5,5 @@ if ! pgrep -x obsidian >/dev/null; then
     sleep 1
 fi
 
-hyprctl dispatch togglespecialworkspace obsidian
+hyprctl dispatch 'hl.dsp.workspace.toggle_special("obsidian")'
 

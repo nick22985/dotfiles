@@ -2,7 +2,7 @@
 
 session_name="$1"
 
-config_dir="/home/nick/.config/.nickInstall/install/configs/private/.tmux-session-close"
+config_dir="$HOME/.config/.nickInstall/install/configs/private/.tmux-session-close"
 
 script_path="${config_dir}/${session_name}"
 

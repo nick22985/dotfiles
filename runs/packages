@@ -38,6 +38,7 @@ if command_exists pacman; then
         "fzf"
         "fd"
         "bat"
+        "git-delta"         # Syntax-highlighting git pager (used by git + neogit)
         "exa"
         "zoxide"
         "wezterm"
@@ -61,6 +62,7 @@ if command_exists pacman; then
         "tar"               # Archive tool
         "gzip"              # Compression
         "rsync"             # File sync
+        "stow"              # Symlink farm manager (deploys env/ -> $HOME)
         "openssh"           # SSH client/server
         "man-db"            # Manual pages
         "man-pages"         # Manual pages
@@ -180,8 +182,10 @@ elif command_exists apt; then
         "fzf"
         "fd-find"
         "bat"
+        "git-delta"         # Syntax-highlighting git pager (used by git + neogit)
         "zoxide"
         "yq"                # YAML processor
+        "stow"              # Symlink farm manager (deploys env/ -> $HOME)
 
         "cmake"             # Build system (needed for nvim packages)
         "luarocks"          # Lua package manager (needed for nvim plugins)
@@ -249,6 +253,27 @@ elif command_exists apt; then
 else
     log_error "Unknown package manager. Please install packages manually:"
     log "  - git, curl, fish, zsh, tmux, neovim, alacritty, starship, ripgrep, fzf, fd, bat, exa, zoxide"
+fi
+
+bat_bin=""
+if command_exists bat; then bat_bin="bat"; elif command_exists batcat; then bat_bin="batcat"; fi
+if [[ -n "$bat_bin" ]]; then
+    theme_dir="$("$bat_bin" --config-dir)/themes"
+    theme_file="$theme_dir/Catppuccin Mocha.tmTheme"
+    log "→ Installing Catppuccin Mocha bat theme + building $bat_bin cache..."
+    if [[ $DRY_RUN == "0" ]]; then
+        mkdir -p "$theme_dir"
+        if [[ ! -f "$theme_file" ]]; then
+            curl -fsSL -o "$theme_file" \
+                "https://raw.githubusercontent.com/catppuccin/bat/main/themes/Catppuccin%20Mocha.tmTheme" \
+                && log "✓ downloaded Catppuccin Mocha theme" || log_warn "theme download failed"
+        fi
+        "$bat_bin" cache --build && log "✓ bat theme cache built" || log_warn "bat cache build failed"
+    else
+        log "Would download Catppuccin Mocha theme to '$theme_file' and run $bat_bin cache --build"
+    fi
+else
+    log "→ bat not installed, skipping theme install"
 fi
 
 # Setup Rust/Cargo environment

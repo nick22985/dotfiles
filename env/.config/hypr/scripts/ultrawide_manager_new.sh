@@ -17,7 +17,7 @@
 set -uo pipefail
 
 # === CONFIGURATION ===
-MONITOR_DESC="Samsung Electric Company Odyssey G95NC HNTX400116"
+MONITOR_DESC_PREFIX="${ULTRAWIDE_MONITOR_DESC_PREFIX:-Samsung Electric Company Odyssey G95NC}"
 MONITOR_WIDTH=7680
 MONITOR_HEIGHT=2160
 
@@ -56,7 +56,7 @@ log() {
 }
 
 debug() {
-    if [[ "${DEBUG:-1}" == "1" ]]; then
+    if [[ "${DEBUG:-0}" == "1" ]]; then
         local msg="[$(date '+%H:%M:%S')] [DEBUG] $*"
         echo "$msg"
         echo "$msg" >> "$LOG_FILE"
@@ -104,7 +104,8 @@ log_windows() {
 
 # === HYPRLAND HELPERS ===
 get_monitor_info() {
-    hyprctl monitors -j | jq -r ".[] | select(.description == \"$MONITOR_DESC\")"
+    hyprctl monitors -j | jq -r --arg prefix "$MONITOR_DESC_PREFIX" \
+        '.[] | select(.description | startswith($prefix))'
 }
 
 get_monitor_x_offset() {
@@ -212,9 +213,9 @@ set_gaps() {
     bottom=${4:-$OUTER_GAP}
     
     if [[ -n "$workspace" ]]; then
-        # Format: gapsout:top right bottom left
-        hyprctl keyword "workspace $workspace,gapsout:$top $right $bottom $left" >/dev/null 2>&1
-        debug "Set gaps: L=$left R=$right T=$top B=$bottom"
+        local result
+        result=$(hyprctl eval "hl.workspace_rule({ workspace = \"$workspace\", gaps_out = { top = $top, right = $right, bottom = $bottom, left = $left } })" 2>&1)
+        debug "Set gaps: L=$left R=$right T=$top B=$bottom (eval: $result)"
     fi
 }
 
@@ -222,8 +223,9 @@ reset_gaps() {
     local workspace
     workspace=$(get_target_workspace)
     if [[ -n "$workspace" ]]; then
-        hyprctl keyword "workspace $workspace,gapsout:$OUTER_GAP" >/dev/null 2>&1
-        debug "Reset gaps to default"
+        local result
+        result=$(hyprctl eval "hl.workspace_rule({ workspace = \"$workspace\", gaps_out = $OUTER_GAP })" 2>&1)
+        debug "Reset gaps to default (eval: $result)"
     fi
 }
 
@@ -325,7 +327,7 @@ position_window_in_zone() {
     
     debug "Resizing $window_addr for $zone: w=$width h=$height"
     
-    hyprctl dispatch resizewindowpixel "exact $width $height,address:$window_addr" >/dev/null 2>&1
+    hyprctl dispatch "hl.dsp.window.resize({ x = $width, y = $height, relative = false, window = \"address:$window_addr\" })" >/dev/null 2>&1
 }
 
 # Verify window sizes are correct and fix if needed
@@ -961,7 +963,7 @@ process_event() {
             # (workspace/workspacev2 handles actual workspace switches on target monitor)
             evaluate_layout_debounced 100
             ;;
-        activewindow|activewindowv2)
+        activewindowv2)
             handle_focus_change
             ;;
         urgent)
@@ -1039,7 +1041,8 @@ case "${1:-}" in
         ;;
     windows|w)
         # Quick window dump without needing the daemon running
-        workspace=$(hyprctl monitors -j | jq -r ".[] | select(.description == \"$MONITOR_DESC\") | .activeWorkspace.id")
+        workspace=$(hyprctl monitors -j | jq -r --arg prefix "$MONITOR_DESC_PREFIX" \
+            '.[] | select(.description | startswith($prefix)) | .activeWorkspace.id')
         if [[ -n "$workspace" ]]; then
             echo "=== Windows on workspace $workspace ==="
             all=$(hyprctl clients -j)
@@ -1133,7 +1136,7 @@ main() {
     echo "=== Ultrawide Manager v2 Started $(date) ===" > "$LOG_FILE"
     
     log "Starting Hyprland Ultra-wide Window Manager v2 (PID: $$)"
-    log "Target monitor: $MONITOR_DESC"
+    log "Target monitor prefix: $MONITOR_DESC_PREFIX"
     log "Resolution: ${MONITOR_WIDTH}x${MONITOR_HEIGHT}"
     log "Zones: LEFT=${LEFT_ZONE_PCT}% CENTER=${CENTER_ZONE_PCT}% RIGHT=${RIGHT_ZONE_PCT}%"
     log "Zone widths: L=${LEFT_ZONE_WIDTH}px C=${CENTER_ZONE_WIDTH}px R=${RIGHT_ZONE_WIDTH}px"

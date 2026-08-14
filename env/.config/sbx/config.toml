@@ -1,0 +1,15 @@
+mounts = [ "~/projects/personal/sbx" ]
+allow-bare-repo = true
+clipboard = true
+container-home = "/home/nick"
+
+[autoclaude]
+discord-mention = "221602145462386688"
+notify = [ "idle", "exit", "input" ]
+keepalive = false
+keepalive-hours = 5
+keepalive-message = "hi"
+self-update = true
+
+[autoclaude.hub]
+all-panes = true

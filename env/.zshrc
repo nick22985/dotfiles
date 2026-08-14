@@ -1,5 +1,5 @@
-if [[ ${fpath[(Ie)/home/nick/.zsh/completions]} -eq 0 ]]; then
-  fpath=(/home/nick/.zsh/completions $fpath)
+if [[ ${fpath[(Ie)$HOME/.zsh/completions]} -eq 0 ]]; then
+  fpath=($HOME/.zsh/completions $fpath)
 fi
 autoload -Uz compinit
 compinit
@@ -141,7 +141,7 @@ export PATH
 #fi
 
 # pnpm
-export PNPM_HOME="/home/nick/.local/share/pnpm"
+export PNPM_HOME="$HOME/.local/share/pnpm"
 case ":$PATH:" in
 *":$PNPM_HOME:"*) ;;
 *) export PATH="$PNPM_HOME:$PATH" ;;
@@ -153,7 +153,7 @@ zle -N _zsh_cli_fg
 bindkey '^Z' _zsh_cli_fg
 
 # bun completions
-[ -s "/home/nick/.bun/_bun" ] && source "/home/nick/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"
@@ -205,7 +205,7 @@ fpath+=${ZDOTDIR:-~}/.zsh_functions
     source ~/.env
     set +o allexport
 }
-[ -f "/home/nick/.deno/env" ] && . "/home/nick/.deno/env"
+[ -f "$HOME/.deno/env" ] && . "$HOME/.deno/env"
 
 autoload -Uz compinit
 compinit
@@ -245,3 +245,12 @@ fi
 
 alias ls='ls --block-size=MB'
 
+# alias npm='sbx shell -f npm npm'
+# alias npx='sbx shell -f npm npx'
+# alias bun='sbx shell -f bun bun'
+# alias bunx='sbx shell -f bun bunx'
+# alias cargo='sbx shell -f rust cargo'
+# alias rustc='sbx shell -f rust rustc'
+alias nvim='sbx nvim'
+#
+export PATH="$PATH:$(go env GOPATH)/bin"

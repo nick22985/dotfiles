@@ -1,0 +1,12 @@
+caches = [
+    ".npm",
+    "@sbx-codex-global:.npm-global",
+]
+
+[agent]
+persist = [".codex"]
+autonomy = ["--dangerously-bypass-approvals-and-sandbox"]
+autonomy-detect = ["--yolo", "--full-auto"]
+forward-env = ["CODEX_API_KEY", "OPENAI_API_KEY"]
+profiles = true
+subagent-format = "codex"

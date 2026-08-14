@@ -40,3 +40,9 @@
 [submodule "env/.oh-my-zsh/custom/plugins/zsh-autocomplete"]
 	path = env/.oh-my-zsh/custom/plugins/zsh-autocomplete
 	url = git@github.com:marlonrichert/zsh-autocomplete.git
+[submodule "env/.config/tmux/plugins/tmux"]
+	path = env/.config/tmux/plugins/tmux
+	url = git@github.com:catppuccin/tmux.git
+[submodule "env/.config/tmux/plugins/tmux-sensible"]
+	path = env/.config/tmux/plugins/tmux-sensible
+	url = git@github.com:tmux-plugins/tmux-sensible.git

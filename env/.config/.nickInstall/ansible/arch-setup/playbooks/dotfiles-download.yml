@@ -27,15 +27,15 @@
       path: '{{ item }}'
       state: absent
      loop:
-      - '/home/nick/.bashrc'
-      - '/home/nick/.config/hypr/hyprland.conf'
+      - '{{ ansible_env.HOME }}/.bashrc'
+      - '{{ ansible_env.HOME }}/.config/hypr/hyprland.conf'
 
    - name: Clone dotfiles repository (bare)
      ansible.builtin.git:
       repo: git@github.com:nick22985/dotfiles.git
       dest: '{{ ansible_env.HOME }}/.dotfiles'
       bare: yes
-      key_file: '/home/{{ ansible_user }}/.ssh/id_rsa'
+      key_file: '{{ ansible_env.HOME }}/.ssh/id_rsa'
       accept_hostkey: yes
      when: not dotfiles_dir.stat.exists
 

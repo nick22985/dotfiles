@@ -1,0 +1,6 @@
+caches = [
+    ".cargo/registry",
+    ".cargo/git",
+    "@sbx-mise-rust:.local/share/mise",
+    "@sbx-mise-state-rust:.local/state/mise",
+]

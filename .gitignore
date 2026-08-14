@@ -2,3 +2,16 @@
 .backup/
 **/logs/*
 env/.config/sbx/env
+env/.config/sbx/build-stamps/
+env/.config/sbx/cloudflared/
+env/.config/sbx/proxy-dynamic/
+env/.local/bin/sbx
+env/.config/sbx/claude-profiles/
+env/.config/sbx/proxy-certs
+env/.config/sbx/volume-owner/
+
+env/.config/audio-switcher/profiles.conf
+env/.config/audio-switcher/current_profile
+
+.claude/
+.sbx/

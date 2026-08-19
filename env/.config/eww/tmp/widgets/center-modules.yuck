@@ -20,6 +20,7 @@
        :spacing 10
     (workspaces :workspace_info workspaces_info_2)
     (mpd_widget)))
+;; Template for center modules widget
 (defwidget center_modules_3 []
   (box :class "modules-center"
        :space-evenly false

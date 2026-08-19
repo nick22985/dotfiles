@@ -1,10 +1,6 @@
 #!/bin/bash
-# Open the colorpicker popup on the currently focused monitor.
-#
-# eww binds windows by GDK monitor index, which corresponds to Hyprland
-# monitors sorted by their `.id` field. We must map the active monitor to
-# that same sorted position so the popup window name matches the bar we
-# generated in launch.sh.
+
+MONITORS_FILE=~/.cache/eww/monitors.list
 
 active_monitor_name=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.monitor')
 
@@ -12,9 +8,24 @@ if [[ -z "$active_monitor_name" || "$active_monitor_name" == "null" ]]; then
     exit 0
 fi
 
-index=$(hyprctl -j monitors 2>/dev/null \
-    | jq -r --arg name "$active_monitor_name" \
-        'sort_by(.id) | map(.name) | index($name) // empty')
+index=""
+if [[ -r "$MONITORS_FILE" ]]; then
+    i=0
+    while IFS= read -r monitor; do
+        [[ -z "$monitor" ]] && continue
+        if [[ "$monitor" == "$active_monitor_name" ]]; then
+            index=$i
+            break
+        fi
+        ((i++))
+    done < "$MONITORS_FILE"
+fi
+
+if [[ -z "$index" ]]; then
+    index=$(hyprctl -j monitors 2>/dev/null \
+        | jq -r --arg name "$active_monitor_name" \
+            'sort_by(.id) | map(.name) | index($name) // empty')
+fi
 
 if [[ -z "$index" ]]; then
     exit 0

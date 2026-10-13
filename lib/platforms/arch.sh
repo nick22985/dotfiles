@@ -97,6 +97,10 @@ platform_install_aur_helper() {
         log_success "Paru already installed"
         return 0
     fi
+    if [[ "${aur_helper_bootstrap_failed:-0}" == "1" ]]; then
+        log_error "Skipping AUR packages because the paru bootstrap already failed in this run"
+        return 1
+    fi
     platform_read_aur_helper_manifest || return 1
     if command_exists paru; then
         log_warn "Installed paru is broken (likely built against an older libalpm); rebuilding from source"
@@ -147,8 +151,22 @@ platform_install_aur_helper() {
         log_error "Paru bootstrap checkout does not match its pinned commit"
         return 1
     fi
+    # rustup without a toolchain still satisfies cargo for makepkg, then fails in prepare().
+    # Rust is managed by mise now, so drop the toolchain-less package left by older runs.
+    if pacman -Qq rustup >/dev/null 2>&1 && ! rustup show active-toolchain >/dev/null 2>&1; then
+        log_info "Removing the toolchain-less rustup package so makepkg uses pacman's rust for the build"
+        if ! sudo pacman -R --noconfirm rustup; then
+            log_error "Failed to remove rustup; run 'rustup default stable' or remove it manually"
+            return 1
+        fi
+        if [[ -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+            printf 'sudo pacman -S --needed --noconfirm rustup\n' >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+            chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+        fi
+    fi
     # --rmdeps drops the pacman rust makedepend afterwards; mise owns the user toolchain.
     if ! (cd "$checkout_dir/repository" && makepkg -si --rmdeps --needed --noconfirm); then
+        aur_helper_bootstrap_failed=1
         log_error "Failed to build and install $aur_helper_package"
         return 1
     fi

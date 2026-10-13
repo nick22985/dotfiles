@@ -1,67 +1,30 @@
 #!/usr/bin/env bash
 
-
+set -u -o pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
-
 source "$DOTFILES_DIR/lib/utils.sh"
-
 parse_args "$@"
+set_context "Snap"
 
-log "Installing Snap applications..."
+if ! command_exists snap && [[ "$DRY_RUN" != "1" ]]; then
+    log_error "snap is unavailable after package installation"
+    exit 1
+fi
+apply_stage_services snap || exit 1
 
-if ! command_exists snap; then
-    log_warn "Snap not available. Install it first with the packages script."
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would ensure /snap points to /var/lib/snapd/snap"
+elif [[ ! -e /snap && ! -L /snap ]]; then
+    if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+        log_error "Creating /snap requires the top-level runner and its recovery receipt"
+        exit 1
+    fi
+    sudo ln -s /var/lib/snapd/snap /snap || exit 1
+    printf 'sudo rm -f -- /snap\n' >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+elif [[ "$(readlink -f /snap 2>/dev/null)" != /var/lib/snapd/snap ]]; then
+    log_error "/snap exists but does not point to /var/lib/snapd/snap"
     exit 1
 fi
 
-if command_exists pacman; then
-    log_info "Setting up Snap for Arch Linux..."
-
-    if [[ $DRY_RUN == "0" ]]; then
-        if [[ ! -e /snap ]]; then
-            log_info "Creating /snap symlink..."
-            sudo ln -sf /var/lib/snapd/snap /snap || log_warn "Failed to create /snap symlink"
-        fi
-
-        log_info "Enabling snapd services..."
-        sudo systemctl enable --now snapd.socket || log_warn "Failed to enable snapd.socket"
-
-        if systemctl is-active --quiet apparmor 2>/dev/null; then
-            log_info "AppArmor is active, configuring for snap..."
-            sudo systemctl restart apparmor.service || log_warn "Failed to restart apparmor"
-            sudo systemctl restart snapd.service || log_warn "Failed to restart snapd"
-            sudo systemctl enable --now snapd.apparmor.service || log_warn "Failed to enable snapd.apparmor"
-        else
-            log_info "AppArmor not active, starting snapd without AppArmor..."
-            sudo systemctl restart snapd.service || log_warn "Failed to restart snapd"
-        fi
-
-        log_info "Waiting for snapd to be ready..."
-        sleep 3
-
-        if snap version >/dev/null 2>&1; then
-            log_success "Snap is ready"
-        else
-            log_warn "Snap may not be fully ready, continuing anyway..."
-        fi
-    else
-        log "Would setup snap symlink and services"
-    fi
-fi
-
-log_info "Installing Snap applications..."
-snap_packages=(
-    # Add snap packages here as needed
-    # Example: "discord"
-    # Example: "code --classic"
-)
-
-# Install Snap packages using utility function
-if [ ${#snap_packages[@]} -gt 0 ]; then
-    install_packages_snap "${snap_packages[@]}"
-else
-    log_info "No Snap packages configured for installation"
-fi
-
-log_success "Snap setup complete"
+log_success "Snap is configured"

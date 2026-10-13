@@ -1,0 +1,5 @@
+[Environment]
+ELECTRON_OZONE_PLATFORM_HINT=wayland
+
+[Session Bus Policy]
+org.mpris.MediaPlayer2.*=talk

@@ -1,0 +1,4 @@
+# tool version active|installed
+node 24.20.0 active
+node 22.22.3 installed
+bun 1.4.0 active

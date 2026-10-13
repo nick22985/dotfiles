@@ -8,70 +8,20 @@ source "$DOTFILES_DIR/lib/utils.sh"
 
 parse_args "$@"
 
-log "Setting up git, pulling latest changes, and updating submodules..."
+log "Checking Git configuration and credentials..."
 
 # Set context for error tracking
 set_context "Git Setup"
 
 if ! command_exists git; then
-    log_info "Git not found, installing git first..."
-    if command_exists pacman; then
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm git || {
-                log_error "Failed to install git"
-                exit 1
-            }
-        else
-            log "Would install git via pacman"
-        fi
-    elif command_exists apt; then
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo apt update -qq && sudo apt install -y git || {
-                log_error "Failed to install git"
-                exit 1
-            }
-        else
-            log "Would install git via apt"
-        fi
-    else
-        log "❌ Unknown package manager. Please install git manually."
-        exit 1
-    fi
-    log "✓ Git installed successfully"
+    log_error "Git is unavailable; install the core package profile first"
+    exit 1
 fi
-
-log "→ Pulling latest changes from remote..."
-if [[ $DRY_RUN == "0" ]]; then
-    (
-        cd "$DOTFILES_DIR"
-        if git rev-parse --git-dir > /dev/null 2>&1; then
-            git fetch origin 2>/dev/null || log "⚠ Failed to fetch from remote"
-
-            current_branch=$(git branch --show-current 2>/dev/null || echo "main")
-
-            if git rev-parse --verify "origin/$current_branch" > /dev/null 2>&1; then
-                git pull origin "$current_branch" 2>/dev/null && log "✓ Pulled latest changes" || log "⚠ Failed to pull changes"
-            else
-                log "→ No remote tracking branch found for $current_branch"
-            fi
-        else
-            log "⚠ Not in a git repository, skipping pull"
-        fi
-    ) || log "⚠ Git pull failed"
-else
-    log "Would pull latest changes from remote"
-fi
-
-log "→ Initializing and updating submodules..."
-update_submodules "$DOTFILES_DIR"
 
 log_info "Checking SSH keys..."
 check_ssh_keys
 
 log_info "Checking GPG keys..."
 check_gpg_keys
-
-log_info "Setting up SSH keys from GitHub..."
-setup_github_ssh_keys
 
 log_success "Git setup complete"

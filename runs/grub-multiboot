@@ -1,183 +1,98 @@
 #!/usr/bin/env bash
 
-
+set -u -o pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
-
 source "$DOTFILES_DIR/lib/utils.sh"
-
 parse_args "$@"
+set_context "GRUB multiboot"
 
-log "Detecting multi-boot setup and configuring GRUB..."
-
-if ! command_exists grub-mkconfig && ! command_exists update-grub; then
-    log_warn "GRUB not found. This script is for GRUB-based systems only."
-    exit 0
+if ! command_exists grub-mkconfig; then
+    log_error "grub-mkconfig is unavailable after the system package profile"
+    exit 1
+fi
+if ! command_exists os-prober; then
+    log_error "os-prober is unavailable after the system package profile"
+    exit 1
 fi
 
-detect_boot_mode() {
-    if [[ -d /sys/firmware/efi ]]; then
-        echo "UEFI"
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would back up /etc/default/grub and /boot/grub/grub.cfg to the run receipt"
+    log_info "Would enable os-prober, use a 10-second timeout, and regenerate GRUB atomically"
+    exit 0
+fi
+if [[ -z "${DOTFILES_RECEIPT_DIR:-}" || -z "${DOTFILES_RUN_DIR:-}" ]]; then
+    log_error "GRUB changes require the top-level runner and its recovery receipt"
+    exit 1
+fi
+
+backup_system_file() {
+    local target="$1" backup="$DOTFILES_RECEIPT_DIR/backups/system$1"
+    if sudo test -e "$target"; then
+        mkdir -p "$(dirname "$backup")"
+        sudo cp -a -- "$target" "$backup" || return 1
+        printf 'sudo cp -a -- %q %q\n' "$backup" "$target" \
+            >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
     else
-        echo "BIOS"
+        printf 'sudo rm -f -- %q\n' "$target" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+    fi
+    chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+}
+
+set_grub_value() {
+    local file="$1" key="$2" value="$3"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
     fi
 }
 
-detect_boot_disks() {
-    log_info "Scanning for bootable disks and partitions..."
-
-    local disks=$(lsblk -dpno NAME,SIZE,TYPE | grep disk | awk '{print $1}')
-    local boot_mode=$(detect_boot_mode)
-
-    log_info "Boot mode: $boot_mode"
-    log_info "Available disks:"
-
-    for disk in $disks; do
-        local size=$(lsblk -dno SIZE "$disk")
-        local model=$(lsblk -dno MODEL "$disk" 2>/dev/null || echo "Unknown")
-        log "  - $disk ($size) - $model"
-
-        local partitions=$(lsblk -pno NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$disk" | tail -n +2)
-        if [[ -n "$partitions" ]]; then
-            echo "$partitions" | while read -r part size fstype label mount; do
-                if [[ -n "$part" && "$part" != "$disk" ]]; then
-                    local info="    └─ $part ($size)"
-                    [[ -n "$fstype" ]] && info="$info [$fstype]"
-                    [[ -n "$label" ]] && info="$info \"$label\""
-                    [[ -n "$mount" ]] && info="$info -> $mount"
-                    log "$info"
-                fi
-            done
-        fi
-    done
+grub_defaults=/etc/default/grub
+sudo test -f "$grub_defaults" || {
+    log_error "$grub_defaults does not exist"
+    exit 1
+}
+backup_system_file "$grub_defaults" || {
+    log_error "Failed to back up $grub_defaults"
+    exit 1
 }
 
+defaults_tmp="$(mktemp "$DOTFILES_RUN_DIR/grub-default.XXXXXX")" || exit 1
+sudo cat -- "$grub_defaults" > "$defaults_tmp" || exit 1
+set_grub_value "$defaults_tmp" GRUB_DISABLE_OS_PROBER false
+set_grub_value "$defaults_tmp" GRUB_TIMEOUT 10
+set_grub_value "$defaults_tmp" GRUB_SAVEDEFAULT true
+set_grub_value "$defaults_tmp" GRUB_DEFAULT saved
+if ! sudo install -o root -g root -m "$(sudo stat -c %a "$grub_defaults")" \
+    "$defaults_tmp" "$grub_defaults"; then
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    exit 1
+fi
 
-
-install_grub_themes() {
-    log_info "Installing GRUB themes from vinceliuice/grub2-themes..."
-
-    local temp_dir="/tmp/grub2-themes"
-    local theme_name="vimix"
-
-    if [[ $DRY_RUN == "0" ]]; then
-        if ! command_exists git; then
-            log_info "Installing git for theme download..."
-            if command_exists pacman; then
-                sudo pacman -S --needed --noconfirm git || log_warn "Failed to install git"
-            elif command_exists apt; then
-                sudo apt update && sudo apt install -y git || log_warn "Failed to install git"
-            fi
-        fi
-
-        if [[ -d "$temp_dir" && -d "$temp_dir/.git" ]]; then
-            log_info "Updating existing grub2-themes repository..."
-            cd "$temp_dir"
-            if git pull origin master; then
-                log_success "Themes repository updated successfully"
-            else
-                log_warn "Failed to update repository, removing and cloning fresh..."
-                cd - >/dev/null
-                rm -rf "$temp_dir"
-                if git clone https://github.com/vinceliuice/grub2-themes.git "$temp_dir"; then
-                    log_success "Themes repository cloned successfully"
-                else
-                    log_warn "Failed to clone grub2-themes repository"
-                    return 1
-                fi
-            fi
-        else
-            log_info "Downloading grub2-themes repository..."
-            if [[ -d "$temp_dir" ]]; then
-                rm -rf "$temp_dir"
-            fi
-            if git clone https://github.com/vinceliuice/grub2-themes.git "$temp_dir"; then
-                log_success "Themes repository downloaded successfully"
-            else
-                log_warn "Failed to download grub2-themes repository"
-                return 1
-            fi
-        fi
-
-            cd "$temp_dir"
-
-            chmod +x install.sh
-
-            log_info "Installing $theme_name theme with 4K resolution..."
-            if sudo ./install.sh -b -t "$theme_name" -s ultrawide2k; then
-                log_success "$theme_name theme installed successfully with 4K resolution"
-            else
-                log_warn "Failed to install $theme_name theme"
-            fi
-
-        cd - >/dev/null 2>/dev/null || true
-    else
-        log "Would download grub2-themes from vinceliuice/grub2-themes"
-        log "Would install $theme_name theme with 4K resolution"
-    fi
+grub_output=/boot/grub/grub.cfg
+if ! grub_output_tmp="$(sudo mktemp /boot/grub/.grub.cfg.dotfiles.XXXXXX)"; then
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "Could not create a temporary GRUB configuration"
+    exit 1
+fi
+if ! sudo grub-mkconfig -o "$grub_output_tmp"; then
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "GRUB configuration generation failed"
+    exit 1
+fi
+backup_system_file "$grub_output" || {
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "Failed to back up $grub_output"
+    exit 1
 }
+if ! sudo install -o root -g root -m 600 "$grub_output_tmp" "$grub_output"; then
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    exit 1
+fi
+sudo rm -f -- "$grub_output_tmp"
 
-configure_grub_multiboot() {
-    log_info "Configuring GRUB with os-prober for automatic OS detection..."
-
-    if [[ $DRY_RUN == "0" ]]; then
-        if ! command_exists os-prober; then
-            log_info "Installing os-prober for automatic OS detection..."
-            if command_exists pacman; then
-                sudo pacman -S --needed --noconfirm os-prober || log_warn "Failed to install os-prober"
-            elif command_exists apt; then
-                sudo apt update && sudo apt install -y os-prober || log_warn "Failed to install os-prober"
-            fi
-        fi
-
-        local grub_config="/etc/default/grub"
-        if [[ -f "$grub_config" ]]; then
-            log_info "Configuring GRUB settings..."
-
-            sudo cp "$grub_config" "$grub_config.backup.$(date +%Y%m%d_%H%M%S)"
-
-            if grep -q "^GRUB_DISABLE_OS_PROBER=" "$grub_config"; then
-                sudo sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "$grub_config"
-            else
-                echo "GRUB_DISABLE_OS_PROBER=false" | sudo tee -a "$grub_config" >/dev/null
-            fi
-
-            if grep -q "^GRUB_TIMEOUT=" "$grub_config"; then
-                sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=10/' "$grub_config"
-            else
-                echo "GRUB_TIMEOUT=10" | sudo tee -a "$grub_config" >/dev/null
-            fi
-
-            if ! grep -q "^GRUB_SAVEDEFAULT=" "$grub_config"; then
-                echo "GRUB_SAVEDEFAULT=true" | sudo tee -a "$grub_config" >/dev/null
-            fi
-
-            if ! grep -q "^GRUB_DEFAULT=" "$grub_config"; then
-                echo "GRUB_DEFAULT=saved" | sudo tee -a "$grub_config" >/dev/null
-            fi
-
-            log_success "GRUB configuration updated"
-        fi
-
-        log_info "Updating GRUB configuration (os-prober will detect all OSes)..."
-        if command_exists update-grub; then
-            sudo update-grub && log_success "GRUB updated successfully" || log_warn "GRUB update failed"
-        elif command_exists grub-mkconfig; then
-            sudo grub-mkconfig -o /boot/grub/grub.cfg && log_success "GRUB updated successfully" || log_warn "GRUB update failed"
-        fi
-    else
-        log "Would install os-prober for automatic OS detection"
-        log "Would enable os-prober, set timeout to 10s, and enable saving last choice"
-        log "Would update GRUB configuration (os-prober will detect all OSes)"
-    fi
-}
-
-detect_boot_disks
-echo ""
-
-install_grub_themes
-echo ""
-
-configure_grub_multiboot
-
-log_success "GRUB setup complete"
+log_success "GRUB multiboot configuration is installed; no remote theme code was executed"

@@ -25,18 +25,20 @@ setup_zsh() {
         log_info "Current shell: $current_shell"
         log_info "Changing default shell to zsh..."
 
-        if ! grep -q "^$zsh_path$" /etc/shells 2>/dev/null; then
-            log_info "Adding zsh to /etc/shells..."
-            if [[ $DRY_RUN == "0" ]]; then
-                echo "$zsh_path" | sudo tee -a /etc/shells
-            fi
-        else
-            log_success "Zsh already in /etc/shells"
+        if ! grep -Fxq "$zsh_path" /etc/shells 2>/dev/null; then
+            log_error "$zsh_path is not registered in /etc/shells by its package"
+            return 1
         fi
 
         log_info "Setting zsh as default shell..."
         if [[ $DRY_RUN == "0" ]]; then
-            chsh -s "$zsh_path"
+            if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+                log_error "Changing the login shell requires a run receipt"
+                return 1
+            fi
+            printf 'chsh -s %q\n' "$current_shell" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+            chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+            chsh -s "$zsh_path" || return 1
         fi
         log_success "Default shell changed to zsh (restart terminal to take effect)"
     else
@@ -54,25 +56,16 @@ setup_fish() {
 
     fish_path=$(which fish)
 
-    if ! grep -q "^$fish_path$" /etc/shells 2>/dev/null; then
-        log_info "Adding fish to /etc/shells..."
-        if [[ $DRY_RUN == "0" ]]; then
-            echo "$fish_path" | sudo tee -a /etc/shells
-        fi
+    if ! grep -Fxq "$fish_path" /etc/shells 2>/dev/null; then
+        log_warn "$fish_path is not registered in /etc/shells"
     else
         log_success "Fish already in /etc/shells"
     fi
 
-    if ! fish -c "functions -q fisher" 2>/dev/null; then
-        log_info "Installing Fisher plugin manager..."
-        if [[ $DRY_RUN == "0" ]]; then
-            fish -c "curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher" 2>/dev/null || {
-                log_warn "Failed to install Fisher automatically. You can install it manually later with:"
-                log "  fish -c 'curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher'"
-            }
-        fi
-    else
+    if fish -c "functions -q fisher" 2>/dev/null; then
         log_success "Fisher plugin manager already installed"
+    else
+        log_info "Fisher is not managed by this installer"
     fi
 }
 

@@ -6,6 +6,13 @@ ARG SBX_MAVEN_VERSION=latest
 ARG USER_HOME=/home/dev
 
 USER dev
+# ${USER_HOME}/.cache has to exist and belong to dev before the layer below
+# mounts a cache at .cache/mise: BuildKit creates a missing parent as root, and
+# mise writes elsewhere under .cache while it installs — sigstore-rust puts its
+# TUF metadata in .cache/sigstore-rust while verifying a release's attestations.
+# Owned by root, that write is EACCES and mise reports it as an attestation
+# failure, which reads like a bad artifact rather than a directory permission.
+RUN mkdir -p ${USER_HOME}/.cache
 RUN --mount=type=cache,target=${USER_HOME}/.cache/mise,uid=1000,gid=1000,sharing=locked \
     /usr/local/bin/mise use --global "java@${SBX_JAVA_VERSION}" "maven@${SBX_MAVEN_VERSION}" \
     && /usr/local/bin/mise which java \

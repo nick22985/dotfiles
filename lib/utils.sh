@@ -3,8 +3,24 @@
 # Shared utilities for dotfiles scripts
 # Source this file in other scripts: source "$DOTFILES_DIR/lib/utils.sh"
 
+caller_script="$(realpath -m -- "${BASH_SOURCE[1]:-}")"
+if [[ "$caller_script" == "${DOTFILES_DIR:?DOTFILES_DIR must be set}"/runs/* ]]; then
+    if [[ "${DOTFILES_RUNNER_ACTIVE:-0}" != "1" \
+        || "${DOTFILES_RUNNER_PID:-}" != "$PPID" \
+        || -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+        printf 'Internal stage scripts must be executed through ./run apply.\n' >&2
+        exit 2
+    fi
+fi
+
 # Global dry run flag (can be overridden by individual scripts)
 DRY_RUN="${DRY_RUN:-0}"
+
+source "$DOTFILES_DIR/lib/platforms.sh"
+active_platform="${DOTFILES_PLATFORM:-$(platform_detect)}"
+if [[ "$active_platform" != "unsupported" ]]; then
+    platform_activate "$active_platform"
+fi
 
 # Global quiet flag - when enabled, only show warnings and errors
 QUIET="${QUIET:-0}"
@@ -12,9 +28,9 @@ QUIET="${QUIET:-0}"
 # Error and Warning Tracking System (File-based for persistence across scripts)
 # =============================================================================
 # Use a consistent directory name that all scripts can share
-DOTFILES_TEMP_DIR="${TMPDIR:-/tmp}/dotfiles-tracking"
-DOTFILES_ERRORS_FILE="$DOTFILES_TEMP_DIR/errors.log"
-DOTFILES_WARNINGS_FILE="$DOTFILES_TEMP_DIR/warnings.log"
+DOTFILES_TEMP_DIR="${DOTFILES_TEMP_DIR:-${TMPDIR:-/tmp}/dotfiles-tracking}"
+DOTFILES_ERRORS_FILE="${DOTFILES_ERRORS_FILE:-$DOTFILES_TEMP_DIR/errors.log}"
+DOTFILES_WARNINGS_FILE="${DOTFILES_WARNINGS_FILE:-$DOTFILES_TEMP_DIR/warnings.log}"
 declare -a DOTFILES_CONTEXT_STACK=()
 
 # Initialize error tracking (create temp directory and files)
@@ -193,15 +209,10 @@ command_exists() {
 
 # Check if package is installed (Arch)
 is_installed_pacman() {
-    pacman -Qi "$1" &> /dev/null
+    pacman -Qi -- "$1" &> /dev/null
 }
 
 # Check if package is installed (Debian/Ubuntu)
-is_installed_apt() {
-    dpkg -l "$1" &> /dev/null
-}
-
-# Check SSH key setup
 check_ssh_keys() {
     local ssh_dir="$HOME/.ssh"
     local has_keys=false
@@ -257,251 +268,6 @@ check_gpg_keys() {
     return 0  # Always succeed - GPG keys are optional
 }
 # Initialize/update git submodules
-update_submodules() {
-    local repo_dir="$1"
-
-    if [[ ! -f "$repo_dir/.gitmodules" ]]; then
-        log "→ No submodules found"
-        return 0
-    fi
-
-    log "→ Initializing and updating git submodules..."
-    if [[ $DRY_RUN == "0" ]]; then
-        (
-            cd "$repo_dir"
-
-            # First, sync submodule URLs in case they changed
-            git submodule sync --recursive 2>/dev/null || log "⚠ Failed to sync submodule URLs"
-
-            # Initialize and update submodules
-            if git submodule update --init --recursive 2>/dev/null; then
-                log "✓ All submodules updated successfully"
-            else
-                log "⚠ Some submodules failed to update, trying individual updates..."
-
-                # Try to update each submodule individually
-                git submodule foreach --recursive '
-                    echo "Updating submodule: $name"
-                    if ! git submodule update --init; then
-                        echo "⚠ Failed to update submodule: $name"
-                        echo "→ You may need to check the repository URL or your SSH keys"
-                    fi
-                ' || true
-
-                log "→ Submodule update completed with some warnings"
-            fi
-        ) || {
-            log "⚠ Submodule update failed"
-            log "→ This might be due to:"
-            log "  - Network connectivity issues"
-            log "  - SSH key not set up for private repositories"
-            log "  - Repository URLs have changed"
-            log "→ You can manually run: git submodule update --init --recursive"
-            return 1
-        }
-    else
-        log "Would sync and update all git submodules"
-    fi
-}
-
-# Setup SSH keys from GitHub (like the original Windows script)
-setup_github_ssh_keys() {
-    local github_username="${GITHUB_USERNAME:-nick22985}"  # Default to your username
-    local key_url="https://github.com/${github_username}.keys"
-    local authorized_keys_file="$HOME/.ssh/authorized_keys"
-
-    log "→ Downloading SSH keys from GitHub ($github_username)..."
-
-    # Create .ssh directory if it doesn't exist
-    if [[ $DRY_RUN == "0" ]]; then
-        mkdir -p "$HOME/.ssh"
-        chmod 700 "$HOME/.ssh"
-    else
-        log "Would create $HOME/.ssh directory"
-    fi
-
-    # Download keys from GitHub
-    if [[ $DRY_RUN == "0" ]]; then
-        if command_exists curl; then
-            local keys_content
-            keys_content=$(curl -s "$key_url" 2>/dev/null) || {
-                log "⚠ Failed to download keys from $key_url"
-                return 1
-            }
-
-            if [[ -z "$keys_content" ]]; then
-                log "⚠ No keys found for user $github_username"
-                return 1
-            fi
-
-            # Process each key
-            local keys_added=0
-            while IFS= read -r key; do
-                key=$(echo "$key" | xargs)  # Trim whitespace
-                if [[ -n "$key" ]]; then
-                    # Check if key already exists
-                    if [[ -f "$authorized_keys_file" ]] && grep -Fxq "$key" "$authorized_keys_file" 2>/dev/null; then
-                        log "✓ Key already exists in authorized_keys"
-                    else
-                        echo "$key" >> "$authorized_keys_file"
-                        log "✓ Added key to authorized_keys"
-                        keys_added=$((keys_added + 1))
-                    fi
-                fi
-            done <<< "$keys_content"
-
-            if [[ $keys_added -gt 0 ]]; then
-                chmod 600 "$authorized_keys_file"
-                log "✓ Added $keys_added SSH key(s) from GitHub"
-            else
-                log "✓ All GitHub SSH keys already present"
-            fi
-
-        else
-            log "⚠ curl not available, cannot download GitHub SSH keys"
-            return 1
-        fi
-    else
-        log "Would download SSH keys from $key_url"
-        log "Would add keys to $authorized_keys_file"
-    fi
-}
-
-# Check if Nerd Fonts are already installed
-check_nerd_fonts_installed() {
-    # Check if the Nerd Fonts directory exists and has fonts
-    local fonts_dir="$HOME/.local/share/fonts/NerdFonts"
-    [[ -d "$fonts_dir" ]] && [[ -n "$(find "$fonts_dir" -name "*.ttf" -o -name "*.otf" 2>/dev/null | head -1)" ]]
-}
-
-# Install Nerd Fonts from official repository
-install_nerd_fonts() {
-    local fonts_dir="$HOME/.local/share/fonts/NerdFonts"
-    local nerd_fonts_repo="https://github.com/ryanoasis/nerd-fonts.git"
-    local repo_dir="$HOME/.cache/nerd-fonts-repo"
-
-    log "→ Installing ALL Nerd Fonts from official repository..."
-
-    # Check if Nerd Fonts are already installed
-    if check_nerd_fonts_installed; then
-        log "✓ Nerd Fonts already installed (found in $fonts_dir)"
-        return 0
-    fi
-
-    if [[ $DRY_RUN == "0" ]]; then
-        # Create fonts directory
-        mkdir -p "$fonts_dir"
-        mkdir -p "$(dirname "$repo_dir")"
-
-        # Check if we already have the repository
-        if [[ -d "$repo_dir/.git" ]]; then
-            log "→ Updating existing Nerd Fonts repository..."
-            (
-                cd "$repo_dir"
-                # Check if we need to pull updates
-                git fetch origin main 2>/dev/null || git fetch origin master 2>/dev/null || {
-                    log "⚠ Failed to fetch updates, using existing repository"
-                }
-
-                # Get current and remote commit hashes
-                local current_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-                local remote_commit=$(git rev-parse @{u} 2>/dev/null || echo "unknown")
-
-                if [[ "$current_commit" != "$remote_commit" ]] && [[ "$remote_commit" != "unknown" ]]; then
-                    log "→ Repository has updates, pulling latest changes..."
-                    git reset --hard @{u} 2>/dev/null || log "⚠ Failed to update repository"
-                else
-                    log "✓ Repository is up to date"
-                fi
-            ) || {
-                log "⚠ Failed to update repository, re-cloning..."
-                rm -rf "$repo_dir"
-            }
-        fi
-
-        # Clone repository if we don't have it or update failed
-        if [[ ! -d "$repo_dir/.git" ]]; then
-            log "→ Cloning Nerd Fonts repository..."
-            if ! git clone --depth 1 "$nerd_fonts_repo" "$repo_dir" 2>/dev/null; then
-                log "⚠ Failed to clone Nerd Fonts repository"
-                return 1
-            fi
-        fi
-
-        # Install ALL fonts
-        (
-            cd "$repo_dir"
-            log "→ Installing ALL Nerd Fonts (this will take a while)..."
-            ./install.sh 2>/dev/null || log "⚠ Some fonts may have failed to install"
-        ) || {
-            log "⚠ Font installation failed"
-            return 1
-        }
-
-        # Refresh font cache
-        log "→ Refreshing font cache..."
-        fc-cache -fv &> /dev/null || log "⚠ Failed to refresh font cache"
-
-    else
-        if [[ -d "$repo_dir/.git" ]]; then
-            log "Would update existing repository at $repo_dir"
-        else
-            log "Would clone $nerd_fonts_repo to $repo_dir"
-        fi
-        log "Would install ALL Nerd Fonts"
-        log "Would refresh font cache"
-    fi
-
-    log "✓ Nerd Fonts installation complete"
-}
-
-# Check if NVM is installed and working
-check_nvm() {
-    local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
-
-    if [[ -d "$nvm_dir" ]] && [[ -s "$nvm_dir/nvm.sh" ]]; then
-        # Source NVM
-        source "$nvm_dir/nvm.sh" 2>/dev/null
-
-        if command_exists nvm; then
-            local nvm_version=$(nvm --version 2>/dev/null || echo "unknown")
-            log "✓ NVM $nvm_version is installed and working"
-
-            # Show current Node version if available
-            if command_exists node; then
-                local node_version=$(node --version 2>/dev/null || echo "none")
-                log "→ Current Node.js version: $node_version"
-            fi
-            return 0
-        fi
-    fi
-
-    log "⚠ NVM not found or not working"
-    log "→ Run './run nvm' to install NVM"
-    return 1
-}
-
-# Check if Bun is installed and working
-check_bun() {
-    if command_exists bun; then
-        local bun_version=$(bun --version 2>/dev/null || echo "unknown")
-        log "✓ Bun $bun_version is installed and working"
-        return 0
-    fi
-
-    log "⚠ Bun not found"
-    log "→ Run './run nvm' to install Bun"
-    return 1
-}
-
-# Check JavaScript runtimes
-check_js_runtimes() {
-    log "→ Checking JavaScript runtimes..."
-    check_nvm
-    check_bun
-}
-
-# Reload Hyprland configuration
 reload_hyprland() {
     log "→ Reloading Hyprland configuration..."
 
@@ -686,6 +452,7 @@ reload_tmux() {
 install_packages_pacman() {
     local packages=("$@")
     local packages_to_install=()
+    local status=0
 
     push_context "pacman packages"
 
@@ -703,7 +470,7 @@ install_packages_pacman() {
         if [[ $DRY_RUN == "0" ]]; then
             # Try to install packages and capture output
             local install_output
-            if install_output=$(sudo pacman -S --needed --noconfirm "${packages_to_install[@]}" 2>&1); then
+            if install_output=$(sudo pacman -S --needed --noconfirm -- "${packages_to_install[@]}" 2>&1); then
                 log_success "All packages installed successfully"
             else
                 # Parse the output to find specific failed packages
@@ -721,6 +488,7 @@ install_packages_pacman() {
                     local formatted_error=$(echo "$install_output" | head -5 | tr '\n' '; ' | sed 's/; $//')
                     log_error "Package installation failed: $formatted_error"
                 fi
+                status=1
                 # Don't exit - continue execution and let summary show the error
             fi
         fi
@@ -729,79 +497,27 @@ install_packages_pacman() {
     fi
 
     pop_context
-    # Always return 0 to continue execution
-    return 0
+    return "$status"
 }
 
 # Install packages using apt (Ubuntu/Debian)
-install_packages_apt() {
-    local packages=("$@")
-    local packages_to_install=()
-
-    push_context "apt packages"
-
-    # Check which packages need to be installed
-    for package in "${packages[@]}"; do
-        if ! is_installed_apt "$package"; then
-            packages_to_install+=("$package")
-        else
-            log_success "$package already installed"
-        fi
-    done
-
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log_info "Updating package list..."
-        if [[ $DRY_RUN == "0" ]]; then
-            if ! sudo apt update -qq; then
-                log_warn "Failed to update package list"
-            fi
-        fi
-
-        log_info "Installing packages: ${packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            # Try to install packages and capture output
-            local install_output
-            if install_output=$(sudo apt install -y "${packages_to_install[@]}" 2>&1); then
-                log_success "All packages installed successfully"
-            else
-                # Parse the output to find specific failed packages
-                local failed_packages=()
-                for package in "${packages_to_install[@]}"; do
-                    if echo "$install_output" | grep -q "Unable to locate package $package"; then
-                        failed_packages+=("$package")
-                    fi
-                done
-
-                if [ ${#failed_packages[@]} -gt 0 ]; then
-                    log_error "Failed to install packages: ${failed_packages[*]} (not found in repositories)"
-                else
-                    log_error "Package installation failed: $(echo "$install_output" | head -3 | tr '\n' ' ')"
-                fi
-                # Don't exit - continue execution and let summary show the error
-            fi
-        fi
-    else
-        log_success "All packages already installed"
-    fi
-
-    pop_context
-    # Always return 0 to continue execution
-    return 0
-}
-
-# Install AUR packages using paru
 install_packages_aur() {
     local packages=("$@")
     local packages_to_install=()
+    local status=0
 
     push_context "AUR packages"
 
     # Check if paru is available
     if ! command_exists paru; then
+        if [[ $DRY_RUN == "1" ]]; then
+            log_info "Would install AUR packages after the paru prerequisite is met: ${packages[*]}"
+            pop_context
+            return 0
+        fi
         log_error "paru not found, cannot install AUR packages"
         pop_context
-        # Return 0 to continue execution - this is not a fatal error
-        return 0
+        return 1
     fi
 
     # Check which packages need to be installed
@@ -818,7 +534,7 @@ install_packages_aur() {
         if [[ $DRY_RUN == "0" ]]; then
             # Try to install packages and capture output
             local install_output
-            if install_output=$(paru -S --needed --noconfirm "${packages_to_install[@]}" 2>&1); then
+            if install_output=$(paru -S --needed --noconfirm -- "${packages_to_install[@]}" 2>&1); then
                 log_success "All AUR packages installed successfully"
             else
                 # Parse the output to find specific failed packages
@@ -834,6 +550,7 @@ install_packages_aur() {
                 else
                     log_error "AUR package installation failed: $(echo "$install_output" | head -3 | tr '\n' ' ')"
                 fi
+                status=1
                 # Don't exit - continue execution and let summary show the error
             fi
         fi
@@ -842,46 +559,33 @@ install_packages_aur() {
     fi
 
     pop_context
-    # Always return 0 to continue execution
-    return 0
+    return "$status"
+}
+
+install_stage_packages() {
+    local stage="$1"
+    local manifest="${DOTFILES_STAGE_PACKAGE_DIR:?Platform backend is not active}/$stage.list"
+
+    platform_install_package_manifest "$manifest"
+}
+
+apply_stage_services() {
+    platform_apply_service_manifest "$1"
+}
+
+apply_stage_groups() {
+    platform_apply_group_manifest "$1"
+}
+
+apply_stage_system_files() {
+    platform_apply_system_file_manifest "$1"
 }
 
 # Install packages using yay (alternative AUR helper)
-install_packages_yay() {
-    local packages=("$@")
-    local packages_to_install=()
-
-    # Check if yay is available
-    if ! command_exists yay; then
-        log "⚠ yay not found, cannot install AUR packages"
-        return 1
-    fi
-
-    # Check which packages need to be installed
-    for package in "${packages[@]}"; do
-        if ! is_installed_pacman "$package"; then
-            packages_to_install+=("$package")
-        else
-            log "✓ $package (AUR) already installed"
-        fi
-    done
-
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
-        log "→ Installing AUR packages with yay: ${packages_to_install[*]}"
-        if [[ $DRY_RUN == "0" ]]; then
-            yay -S --needed --noconfirm "${packages_to_install[@]}" || log "⚠ Some AUR packages may have failed to install"
-        fi
-        return 0
-    else
-        log "✓ All AUR packages already installed"
-        return 0
-    fi
-}
-
-# Install Flatpak packages
 install_packages_flatpak() {
     local packages=("$@")
     local packages_to_install=()
+    local status=0
 
     push_context "Flatpak packages"
 
@@ -894,7 +598,7 @@ install_packages_flatpak() {
 
     # Check which packages need to be installed
     for package in "${packages[@]}"; do
-        if ! flatpak list --app | grep -q "$package"; then
+        if ! flatpak list --user --app --columns=application | grep -Fxq -- "$package"; then
             packages_to_install+=("$package")
         else
             log_success "$package (Flatpak) already installed"
@@ -910,6 +614,7 @@ install_packages_flatpak() {
                     log_success "Installed $package for user"
                 else
                     log_error "Failed to install $package (user-level)"
+                    status=1
                 fi
             done
         fi
@@ -918,7 +623,7 @@ install_packages_flatpak() {
     fi
 
     pop_context
-    return 0
+    return "$status"
 }
 
 # Install Snap packages
@@ -955,206 +660,6 @@ install_packages_snap() {
     fi
 }
 
-# Universal package installer - detects system and uses appropriate package manager
-install_packages() {
-    local packages=("$@")
-
-    if command_exists pacman; then
-        install_packages_pacman "${packages[@]}"
-    elif command_exists apt; then
-        install_packages_apt "${packages[@]}"
-    else
-        log "⚠ Unknown package manager. Please install packages manually: ${packages[*]}"
-        return 1
-    fi
-}
-
-# Install paru AUR helper
-install_paru() {
-    push_context "paru installation"
-
-    if command_exists paru; then
-        log_success "Paru already installed"
-        pop_context
-        return 0
-    fi
-
-    log_info "Installing paru (AUR helper)..."
-    if [[ $DRY_RUN == "0" ]]; then
-        # Clone and build paru
-        temp_dir=$(mktemp -d)
-        (
-            cd "$temp_dir"
-            git clone https://aur.archlinux.org/paru.git
-            cd paru
-            makepkg -si --noconfirm
-        ) || {
-            log_error "Failed to install paru"
-            pop_context
-            # Return 0 to continue execution - this is not fatal
-            return 0
-        }
-        rm -rf "$temp_dir"
-        log_success "Paru installed successfully"
-    else
-        log "Would clone and build paru from AUR"
-    fi
-
-    pop_context
-    return 0
-}
-
-# Install yay AUR helper
-install_yay() {
-    if command_exists yay; then
-        log "✓ Yay already installed"
-        return 0
-    fi
-
-    log "→ Installing yay (AUR helper)..."
-    if [[ $DRY_RUN == "0" ]]; then
-        # Clone and build yay
-        temp_dir=$(mktemp -d)
-        (
-            cd "$temp_dir"
-            git clone https://aur.archlinux.org/yay.git
-            cd yay
-            makepkg -si --noconfirm
-        ) || log "⚠ Failed to install yay"
-        rm -rf "$temp_dir"
-    else
-        log "Would clone and build yay from AUR"
-    fi
-    log "✓ Yay installation complete"
-}
-
-# Setup package manager services (Docker, Bluetooth, etc.)
-setup_package_services() {
-    push_context "system services"
-
-    if [[ $DRY_RUN == "0" ]]; then
-        # Enable snapd if installed
-        if is_installed_pacman "snapd" || command_exists snap; then
-            log_info "Setting up Snap service..."
-            if sudo systemctl enable --now snapd.socket 2>/dev/null; then
-                log_success "Snap service enabled"
-            else
-                log_warn "Failed to enable snapd"
-            fi
-            sudo systemctl enable --now snapd.apparmor 2>/dev/null || true
-            # Create snap symlink if it doesn't exist
-            if [[ ! -e /snap ]]; then
-                sudo ln -sf /var/lib/snapd/snap /snap 2>/dev/null || true
-            fi
-        fi
-
-        # Enable docker if installed
-        if is_installed_pacman "docker" || is_installed_apt "docker" || command_exists docker; then
-            log_info "Setting up Docker service..."
-
-            # Reload systemd daemon in case unit files changed
-            sudo systemctl daemon-reload 2>/dev/null || true
-
-            # Check if docker is already enabled and running
-            if systemctl is-enabled docker.service >/dev/null 2>&1; then
-                log_success "Docker service already enabled"
-            else
-                if sudo systemctl enable docker 2>/dev/null; then
-                    log_success "Docker service enabled"
-                else
-                    log_warn "Failed to enable docker service"
-                fi
-            fi
-
-            # Check if docker is running
-            if systemctl is-active docker.service >/dev/null 2>&1; then
-                log_success "Docker service is running"
-            else
-                if sudo systemctl start docker 2>/dev/null; then
-                    log_success "Docker service started"
-                else
-                    log_warn "Failed to start docker service"
-                fi
-            fi
-
-            # Add user to docker group
-            if ! groups "$USER" | grep -q docker; then
-                if sudo usermod -aG docker "$USER"; then
-                    log_success "Added $USER to docker group"
-                    log_info "Note: Log out and back in for docker group membership to take effect"
-                else
-                    log_warn "Failed to add user to docker group"
-                fi
-            else
-                log_success "$USER already in docker group"
-            fi
-        fi
-
-        # Enable bluetooth if installed
-        if is_installed_pacman "bluez" || is_installed_apt "bluez"; then
-            log_info "Setting up Bluetooth service..."
-
-            # Reload systemd daemon in case unit files changed
-            sudo systemctl daemon-reload 2>/dev/null || true
-
-            # Check if bluetooth is already enabled and running
-            if systemctl is-enabled bluetooth.service >/dev/null 2>&1; then
-                log_success "Bluetooth service already enabled"
-            else
-                if sudo systemctl enable bluetooth.service 2>/dev/null; then
-                    log_success "Bluetooth service enabled"
-                else
-                    log_warn "Failed to enable bluetooth service"
-                fi
-            fi
-
-            # Check if bluetooth is running
-            if systemctl is-active bluetooth.service >/dev/null 2>&1; then
-                log_success "Bluetooth service is running"
-            else
-                if sudo systemctl start bluetooth.service 2>/dev/null; then
-                    log_success "Bluetooth service started"
-                else
-                    log_warn "Failed to start bluetooth service"
-                fi
-            fi
-        fi
-    else
-        log "Would enable snapd, docker, and bluetooth services"
-        log "Would add user to docker group"
-    fi
-
-    pop_context
-}
-
-# Add user to system groups
-add_user_to_groups() {
-    local groups_to_add=("$@")
-    local groups_added=()
-
-    log "→ Adding user to system groups..."
-
-    if [[ $DRY_RUN == "0" ]]; then
-        for group in "${groups_to_add[@]}"; do
-            if getent group "$group" >/dev/null 2>&1 && ! groups "$USER" | grep -q "$group"; then
-                if sudo usermod -aG "$group" "$USER"; then
-                    log "✓ Added $USER to $group group"
-                    groups_added+=("$group")
-                fi
-            fi
-        done
-
-        # Reload user groups if any were added
-        if [ ${#groups_added[@]} -gt 0 ]; then
-            log "→ Groups added: ${groups_added[*]}"
-            log "→ Note: Some services may require a full logout/login to work properly"
-        fi
-    else
-        log "Would add user to groups: ${groups_to_add[*]}"
-    fi
-}
-
-# Display summary of all errors and warnings
 show_summary() {
     local script_name="${1:-Script}"
 
@@ -1246,8 +751,9 @@ get_warning_count() {
 # =======================
 
 # Global variables to track backup state across scripts
-DOTFILES_BACKUP_CREATED="${TMPDIR:-/tmp}/dotfiles-backup-created"
-DOTFILES_BACKUP_CREATOR="${TMPDIR:-/tmp}/dotfiles-backup-creator"
+DOTFILES_BACKUP_CREATED="${DOTFILES_BACKUP_CREATED:-${TMPDIR:-/tmp}/dotfiles-backup-created}"
+DOTFILES_BACKUP_CREATOR="${DOTFILES_BACKUP_CREATOR:-${TMPDIR:-/tmp}/dotfiles-backup-creator}"
+DOTFILES_BACKUP_ID_FILE="${DOTFILES_BACKUP_ID_FILE:-${TMPDIR:-/tmp}/dotfiles-backup-id}"
 
 # Check if Timeshift is available
 check_timeshift_available() {
@@ -1275,8 +781,11 @@ create_dotfiles_backup() {
 
     # Check if Timeshift is available and configured
     if ! check_timeshift_available; then
-        log_warn "Timeshift not available or not configured - skipping backup"
-        log "→ Install timeshift and configure it for automatic system backups"
+        if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
+            log_error "A high-risk stage requires a configured Timeshift backup"
+            return 1
+        fi
+        log_warn "Timeshift not available or not configured; continuing without a system backup"
         return 0
     fi
 
@@ -1302,7 +811,12 @@ create_dotfiles_backup() {
                 echo ""
             fi
 
-            if [[ $REPLY =~ ^[Nn]$ ]]; then
+            if [[ "${REPLY:-}" =~ ^[Nn]$ ]]; then
+                if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
+                    log_error "A high-risk stage cannot continue without a backup"
+                    pop_context
+                    return 1
+                fi
                 log_info "Skipping backup as requested"
                 pop_context
                 return 0
@@ -1320,14 +834,19 @@ create_dotfiles_backup() {
             # Mark that backup was created in this session and track who created it
             touch "$DOTFILES_BACKUP_CREATED"
             echo "$script_name" > "$DOTFILES_BACKUP_CREATOR"
+            printf '%s\n' "$backup_comment" > "$DOTFILES_BACKUP_ID_FILE"
         else
             log_error "Failed to create Timeshift backup"
             log_error "Timeshift error: $timeshift_output"
+            if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
+                pop_context
+                return 1
+            fi
             echo ""
             read -p "Continue without backup? [y/N]: " -n 1 -r
             echo ""
 
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            if [[ ! "${REPLY:-}" =~ ^[Yy]$ ]]; then
                 log_error "Aborting due to backup failure"
                 exit 1
             fi
@@ -1361,8 +880,8 @@ cleanup_backup_tracking_if_owner() {
 }
 
 # Export functions for use in other scripts
-export -f log log_error log_warn log_success log_info parse_args command_exists is_installed_pacman is_installed_apt ensure_sudo
+export -f log log_error log_warn log_success log_info parse_args command_exists is_installed_pacman ensure_sudo
 export -f init_error_tracking cleanup_error_tracking set_context push_context pop_context get_context show_summary clear_tracking get_error_count get_warning_count
 export -f check_timeshift_available create_dotfiles_backup cleanup_backup_tracking cleanup_backup_tracking_if_owner
-export -f check_ssh_keys check_gpg_keys update_submodules setup_github_ssh_keys check_nerd_fonts_installed install_nerd_fonts check_nvm check_bun check_js_runtimes reload_hyprland reload_tmux
-export -f install_packages_pacman install_packages_apt install_packages_aur install_packages_yay install_packages_flatpak install_packages_snap install_packages install_paru install_yay setup_package_services add_user_to_groups
+export -f check_ssh_keys check_gpg_keys reload_hyprland reload_tmux
+export -f install_packages_pacman install_packages_aur install_packages_flatpak install_packages_snap install_stage_packages apply_stage_services apply_stage_groups apply_stage_system_files

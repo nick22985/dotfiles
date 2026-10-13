@@ -1,0 +1,7 @@
+# Development-only configuration.
+.config/.nickInstall
+.config/docker-compose
+.config/entr
+.config/mitmproxy
+.config/sbx
+.config/treesitterCustom

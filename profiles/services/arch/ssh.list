@@ -1,0 +1,3 @@
+# scope action requirement unit
+system enable required sshd.service
+system restart required sshd.service

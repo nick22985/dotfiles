@@ -1,117 +1,373 @@
 #!/usr/bin/env bash
 
+private_dir="$HOME/.config/.nickInstall/install/configs/private"
+history_file="${XDG_DATA_HOME:-$HOME/.local/share}/tmux-sessionizer/history"
+claude_state_file="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-sessionizer/claude"
+
 switch_to() {
     if [[ -z $TMUX ]]; then
-        tmux attach-session -t "$1"
+        tmux attach-session -t "=$1"
     else
-        tmux switch-client -t "$1"
+        tmux switch-client -t "=$1"
     fi
 }
 
 has_session() {
-    tmux list-sessions | grep -q "^$1:"
+    tmux has-session -t "=$1" 2>/dev/null
+}
+
+resolve_session_name() {
+    local session_name session_path session_host
+    while IFS=$'\t' read -r session_name session_path session_host; do
+        if [[ -n $ssh_host ]]; then
+            if [[ $session_host == "$ssh_host" ]]; then
+                printf '%s\n' "$session_name"
+                return
+            fi
+        elif [[ -z $session_host && $session_path == "$selected" ]]; then
+            printf '%s\n' "$session_name"
+            return
+        fi
+    done < <(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}" 2>/dev/null)
+
+    local candidate=$project_name
+    local suffix=2
+    while has_session "$candidate"; do
+        candidate="$project_name-$suffix"
+        ((suffix++))
+    done
+    printf '%s\n' "$candidate"
 }
 
 hydrate() {
     local sessionizer_dir=".config/.nickInstall/install/configs/private/.tmux-sessionizer"
-    local project_name=$1
+    local project_name=$3
 
     # Check project dir
     if [ -f "$2"/.tmux-sessionizer ]; then
-        tmux send-keys -t "$1" "source $2/.tmux-sessionizer $1 $2" c-M
+        tmux send-keys -t "=$1:" "source $2/.tmux-sessionizer $1 $2" c-M
     # check folder
     elif [ -d "$HOME/$sessionizer_dir" ] && [ -f "$HOME/$sessionizer_dir/${project_name}" ]; then
-        tmux send-keys -t "$1" "source $HOME/$sessionizer_dir/${project_name} $1 $2" C-m
+        tmux send-keys -t "=$1:" "source $HOME/$sessionizer_dir/${project_name} $1 $2" C-m
     # use default home dir
     elif [ -f "$HOME"/.tmux-sessionizer ]; then
-        tmux send-keys -t "$1" "source $HOME/.tmux-sessionizer $1 $2" c-M
+        tmux send-keys -t "=$1:" "source $HOME/.tmux-sessionizer $1 $2" c-M
     fi
 }
 
-if [[ $# -eq 1 ]]; then
-    selected=$1
-else
-    find_command=()
-    declare -a default_paths=(
+# Every candidate line is "kind<TAB>target<TAB>display"; fzf only shows display.
+
+# Prints "session<TAB>pane_id<TAB>claude_pid" for panes with claude running,
+# either directly or through sbx (`sbx claude`), found by walking up from each
+# process whose command or first argument is claude to the pane that owns it.
+claude_panes() {
+    ps -e -o pid=,ppid=,args= 2>/dev/null |
+        awk -v panes="$(tmux list-panes -a -F "#{session_name}"$'\t'"#{pane_pid}"$'\t'"#{pane_id}" 2>/dev/null)" '
+            BEGIN {
+                n = split(panes, lines, "\n")
+                for (i = 1; i <= n; i++) {
+                    split(lines[i], f, "\t")
+                    pane_session[f[2]] = f[1]
+                    pane_id[f[2]] = f[3]
+                }
+            }
+            {
+                parent[$1] = $2
+                cmd = $3; arg = $4
+                sub(/.*\//, "", cmd); sub(/.*\//, "", arg)
+                if (cmd == "claude" || arg == "claude") claude[$1] = 1
+            }
+            END {
+                for (pid in claude) {
+                    p = pid
+                    while (!(p in pane_session) && (p in parent) && p != parent[p]) p = parent[p]
+                    if ((p in pane_session) && !seen[p]++) print pane_session[p] "\t" pane_id[p] "\t" pid
+                }
+            }'
+}
+
+# Whether the claude screen on stdin is busy, using the same markers as sbx's
+# dashboard (sbx-detect): its "esc to interrupt" footer, or a spinner line like
+# "✻ Thinking… (12s)".
+claude_screen_busy() {
+    local screen
+    screen=$(grep -v '^[[:space:]]*$' | tail -n 30)
+    tail -n 12 <<<"$screen" | tr -s '[:space:]' ' ' | grep -qiE 'esc to interrupt|to run in background' ||
+        grep -qE '^[[:space:]]*([✻✽✶✳✢✣✤∗·◐◓◑◒◎*].*… \(|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷][[:space:]].*[[:alpha:]].*[[:alpha:]])' <<<"$screen"
+}
+
+# Prints "session<TAB>working<TAB>finished": how many of the session's claudes are
+# working, and how many were seen working in the last 10 minutes but are now
+# idle. The sessionizer only looks while it is open, so "seen working" is tracked
+# in a small state file keyed by pane and claude pid.
+claude_sessions() {
+    local now session pane pid key
+    local -A last_busy=() working=() finished=() sessions=()
+    now=$(date +%s)
+    if [[ -f $claude_state_file ]]; then
+        while IFS=$'\t' read -r key pid; do
+            last_busy[$key]=$pid
+        done <"$claude_state_file"
+    fi
+    while IFS=$'\t' read -r session pane pid; do
+        key="$pane:$pid"
+        sessions[$session]=1
+        if tmux capture-pane -p -t "$pane" 2>/dev/null | LC_ALL=C.UTF-8 claude_screen_busy; then
+            ((working[$session]++))
+            last_busy[$key]=$now
+        elif ((now - ${last_busy[$key]:-0} < 600)); then
+            ((finished[$session]++))
+        fi
+    done < <(claude_panes)
+    mkdir -p "${claude_state_file%/*}"
+    for key in "${!last_busy[@]}"; do
+        ((now - last_busy[$key] < 600)) && printf '%s\t%s\n' "$key" "${last_busy[$key]}"
+    done >"$claude_state_file"
+    for session in "${!sessions[@]}"; do
+        printf '%s\t%s\t%s\n' "$session" "${working[$session]:-0}" "${finished[$session]:-0}"
+    done
+}
+
+# Running sessions, most recently used first, skipping the current one.
+# Claude status is scanned once and kept in the optional file $1, so reloads on
+# every keystroke don't rescan every pane.
+list_sessions() {
+    local claude_cache=$1 claude_info
+    local current activity name windows path host working finished claude
+    local -A claude_working=() claude_finished=()
+    [[ -n $TMUX ]] && current=$(tmux display-message -p '#{session_name}')
+    if [[ -n $claude_cache && -f $claude_cache ]]; then
+        claude_info=$(<"$claude_cache")
+    else
+        claude_info=$(claude_sessions)
+        [[ -n $claude_cache ]] && printf '%s\n' "$claude_info" >"$claude_cache"
+    fi
+    while IFS=$'\t' read -r name working finished; do
+        [[ -n $name ]] || continue
+        claude_working[$name]=$working
+        claude_finished[$name]=$finished
+    done <<<"$claude_info"
+    tmux list-sessions -F "#{session_activity}"$'\t'"#{session_name}"$'\t'"#{session_windows}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}" 2>/dev/null |
+        sort -rn |
+        while IFS=$'\t' read -r activity name windows path host; do
+            [[ $name == "$current" ]] && continue
+            if [[ -n $host ]]; then
+                path="ssh/$host"
+            elif [[ $path == "$HOME" || $path == "$HOME"/* ]]; then
+                path="~${path#"$HOME"}"
+            fi
+            # Working claudes, or ones that finished in the last 10 minutes.
+            claude=""
+            working=${claude_working[$name]:-0}
+            finished=${claude_finished[$name]:-0}
+            if ((working == 1)); then
+                claude=$' \e[38;5;208m✻ claude working\e[0m'
+            elif ((working > 1)); then
+                claude=$' \e[38;5;208m✻ '"$working"$' claude working\e[0m'
+            elif ((finished > 0)); then
+                claude=$' \e[33m✓ claude done\e[0m'
+            fi
+            printf 'session\t%s\t\e[32m●\e[0m %s%s \e[2m(%s windows) %s\e[0m\n' "$name" "$name" "$claude" "$windows" "$path"
+        done
+}
+
+# Hosts that already have a session are listed by list_sessions instead.
+list_ssh_hosts() {
+    local open_hosts
+    open_hosts=$(tmux list-sessions -F "#{TMUX_SSH_HOST}" 2>/dev/null)
+    grep -Rh "^Host " ~/.ssh/config ~/.ssh/config.d 2>/dev/null |
+        awk '{ for (i = 2; i <= NF; i++) if ($i != "*") print $i }' |
+        sort -u |
+        awk -v open="$open_hosts" '
+            BEGIN { n = split(open, hosts, "\n"); for (i = 1; i <= n; i++) skip[hosts[i]] = 1 }
+            !($1 in skip) { printf "ssh\t%s\t\033[34mssh/%s\033[0m\n", $1, $1 }'
+}
+
+find_dirs() {
+    local path=${1/\$HOME/$HOME}
+    find -L "$path" -mindepth "${2:-1}" -maxdepth "${3:-1}" -type d 2>/dev/null
+}
+
+# Streams straight into fzf so the picker opens before find finishes.
+# Dirs that already have a session are listed by list_sessions instead. Sessions
+# remember the picked path too, since session_path is resolved through symlinks.
+list_dirs() {
+    local open_paths
+    open_paths=$(tmux list-sessions -F "#{TMUX_SSH_HOST}"$'\t'"#{session_path}"$'\t'"#{TMUX_SESSIONIZER_PATH}" 2>/dev/null |
+        awk -F'\t' '$1 == "" { print $2; if ($3 != "") print $3 }')
+    local default_paths=(
         "$HOME/projects"
         "$HOME"
         "$HOME/.config"
-        "$HOME/.config/.nickInstall/install/configs/private"
+        "$private_dir"
         "$HOME/projects/work"
         "$HOME/projects/personal"
-				"/home/"
+        "/home/"
     )
-
-    # Function to add paths to the find_command array
-    add_to_find_command() {
-        local path=$1
-        local mindepth=${2:-1}
-        local maxdepth=${3:-1}
-        path="${path/\$HOME/$HOME}"
-        local results=$(find -L "$path" -mindepth "$mindepth" -maxdepth "$maxdepth" -type d 2>/dev/null)
-        if [ ! -z "$results" ]; then
-            find_command+=("$results")
+    local path_info path mindepth maxdepth
+    {
+        for path_info in "${default_paths[@]}"; do
+            read -r path mindepth maxdepth <<<"$path_info"
+            find_dirs "$path" "$mindepth" "$maxdepth"
+        done
+        if [[ -f $private_dir/.find_paths.txt ]]; then
+            while read -r path mindepth maxdepth; do
+                find_dirs "$path" "$mindepth" "$maxdepth"
+            done <"$private_dir/.find_paths.txt"
         fi
-    }
-    for path_info in "${default_paths[@]}"; do
-        IFS=' ' read -r path mindepth maxdepth <<<"$path_info"
-        add_to_find_command "$path" "$mindepth" "$maxdepth"
+    } | awk -v home="$HOME" -v open="$open_paths" '
+        BEGIN { n = split(open, paths, "\n"); for (i = 1; i <= n; i++) seen[paths[i]] = 1 }
+        !seen[$0]++ {
+            display = $0
+            if (display == home || index(display, home "/") == 1)
+                display = "~" substr(display, length(home) + 1)
+            printf "dir\t%s\t%s\n", $0, display
+            fflush()
+        }'
+}
+
+# Bias towards places picked often/recently; disable with: set -g @sessionizer_frecency off
+frecency_enabled() {
+    [[ $(tmux show-option -gqv @sessionizer_frecency 2>/dev/null) != off ]]
+}
+
+# History lines are "key<TAB>count<TAB>last_epoch", key being a dir path or ssh/<host>.
+# Entries not visited for 90 days are dropped.
+record_visit() {
+    [[ -n $1 ]] && frecency_enabled || return
+    mkdir -p "${history_file%/*}"
+    local tmp="$history_file.$$"
+    { [[ -f $history_file ]] && cat "$history_file"; } |
+        awk -F'\t' -v OFS='\t' -v key="$1" -v now="$(date +%s)" '
+            $1 == key { $2++; $3 = now; found = 1 }
+            $1 == key || now - $3 < 90 * 86400 { print }
+            END { if (!found) print key, 1, now }' >"$tmp" && mv "$tmp" "$history_file"
+}
+
+# Candidates matching the query, best first: entries containing every query term
+# as-is beat scattered fuzzy matches; within each of those open sessions come
+# first, then fzf's score order with frequently/recently visited entries pulled
+# up. Sessions and ssh
+# hosts are listed fresh (so killed sessions drop out); dirs come from the cache,
+# waiting for the dir scan to finish so a query typed early doesn't miss dirs.
+rank() {
+    local cache=$1 query=$2 history=/dev/null tries=0
+    frecency_enabled && [[ -f $history_file ]] && history=$history_file
+    while [[ ! -e $cache.done ]] && ((tries++ < 200)); do
+        sleep 0.05
     done
+    { list_sessions "$cache.claude"; list_ssh_hosts; grep '^dir' "$cache"; } |
+        if [[ -n $query ]]; then
+            fzf --filter="$query" --ansi --delimiter=$'\t' --nth=3 --tiebreak end,length,index
+        else
+            cat
+        fi |
+        awk -F'\t' -v hist="$history" -v query="$query" -v now="$(date +%s)" '
+            BEGIN {
+                # fzf is smart-case: case-insensitive unless the query has uppercase
+                ignore_case = query == tolower(query)
+                if (ignore_case) query = tolower(query)
+                n = 0
+                split(query, words, " ")
+                for (i in words) {
+                    term = words[i]
+                    if (term ~ /^!/) continue
+                    sub(/^[\x27^]/, "", term)
+                    sub(/\$$/, "", term)
+                    if (term != "") terms[++n] = term
+                }
+            }
+            FILENAME == hist {
+                age = now - $3
+                weight = age < 3600 ? 4 : age < 86400 ? 2 : age < 604800 ? 1 : 0.25
+                score[$1] = $2 * weight
+                next
+            }
+            {
+                pos++
+                text = $3
+                gsub(/\033\[[0-9;]*m/, "", text)
+                if (ignore_case) text = tolower(text)
+                fuzzy = 0
+                for (i = 1; i <= n; i++) if (!index(text, terms[i])) fuzzy = 1
+                if ($1 == "session") { printf "%d\t%d\t%s\n", fuzzy * 2, pos, $0; next }
+                key = $1 == "ssh" ? "ssh/" $2 : $2
+                if (query == "" && score[key] > 0) key_rank = -score[key]
+                else key_rank = pos / (1 + score[key])
+                printf "%d\t%.6f\t%s\n", fuzzy * 2 + 1, key_rank, $0
+            }' "$history" - |
+        sort -s -t$'\t' -k1,1n -k2,2g |
+        cut -f3-
+}
 
-		echo "Adding paths from $HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
-    # Add paths from external file to find_command
-    if [ -f "$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt" ]; then
-			echo "Found $HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
-        while IFS=' ' read -r path mindepth maxdepth; do
-						echo "Adding path: $path"
-            add_to_find_command "$path" "$mindepth" "$maxdepth"
-        done <"$HOME/.config/.nickInstall/install/configs/private/.find_paths.txt"
-    fi
-
-		ssh_hosts=($(
-			grep -R "^Host " ~/.ssh/config ~/.ssh/config.d 2>/dev/null \
-			| awk '{for (i=2; i<=NF; i++) print $i}' \
-			| grep -v '^\*$' \
-			| sort -u \
-			| sed 's|^|ssh/|'
-		))
-
-
-    selected=$(printf "%s\n" "${find_command[@]}" "${ssh_hosts[@]}" | fzf --tiebreak end,length,index)
-fi
-
-if [[ -z $selected ]]; then
+if [[ $1 == --rank ]]; then
+    rank "$2" "$3"
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
-ssh_host=()
-if [[ $selected == ssh/* ]]; then
-    selected_name="ssh-$selected_name"
-    ssh_host=${selected#ssh/}
-fi
-tmux_running=$(pgrep tmux)
-
-if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-    if [[ $selected == ssh/* ]]; then
-        tmux new-session -s "$selected_name" "tmux-ssh-connect $ssh_host"
-        tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
+if [[ $# -eq 1 ]]; then
+    if [[ $1 == ssh/* ]]; then
+        kind=ssh
+        target=${1#ssh/}
     else
-        tmux new-session -s "$selected_name" -c "$selected"
+        kind=dir
+        target=$1
     fi
-    hydrate "$selected_name" "$selected"
+else
+    # fzf can't weight entries itself, so it keeps our order (--no-sort) and every
+    # keystroke reloads the list re-ranked from the cache. tee -p keeps filling the
+    # cache after fzf stops reading its stdin on the first reload, and $cache.done
+    # marks the scan as finished.
+    cache=$(mktemp)
+    trap 'rm -f "$cache" "$cache.done" "$cache.claude"' EXIT
+    rank_cmd="$(printf '%q' "$(readlink -f "$0")") --rank $(printf '%q' "$cache") {q}"
+    choice=$({ list_sessions "$cache.claude"; list_ssh_hosts; list_dirs; } |
+        { tee -p "$cache"; touch "$cache.done"; } |
+        fzf --ansi --no-sort --delimiter=$'\t' --with-nth=3 --color=gutter:-1 \
+            --header 'ctrl-x: kill session' \
+            --bind "change:reload($rank_cmd)" \
+            --bind "ctrl-x:execute-silent([ {1} = session ] && tmux kill-session -t ={2})+reload($rank_cmd)" \
+            --bind "load:reload($rank_cmd)+unbind(load)")
+    if [[ -z $choice ]]; then
+        exit 0
+    fi
+    IFS=$'\t' read -r kind target _ <<<"$choice"
+fi
+
+if [[ $kind == session ]]; then
+    record_visit "$(tmux list-sessions -F "#{session_name}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{session_path}"$'\t'"#{TMUX_SESSIONIZER_PATH}" 2>/dev/null |
+        awk -F'\t' -v name="$target" '$1 == name { print ($2 != "" ? "ssh/" $2 : $4 != "" ? $4 : $3) }')"
+    switch_to "$target"
     exit 0
 fi
 
+ssh_host=""
+if [[ $kind == ssh ]]; then
+    ssh_host=$target
+    selected="ssh/$target"
+else
+    selected=$(cd -- "$target" && pwd -P) || exit 1
+fi
+if [[ -n $ssh_host ]]; then
+    record_visit "ssh/$ssh_host"
+else
+    record_visit "$target"
+fi
+project_name=$(basename "$selected" | tr '.:' '__')
+if [[ -n $ssh_host ]]; then
+    project_name="ssh-$project_name"
+fi
+selected_name=$(resolve_session_name)
+
+# Always create detached so the environment and hydrate are in place before
+# attaching (this also starts the server when tmux isn't running yet).
 if ! has_session "$selected_name"; then
-    if [[ $selected == ssh/* ]]; then
-        tmux new-session -ds "$selected_name" "tmux-ssh-connect $ssh_host"
-        tmux set-environment -t "$selected_name" TMUX_SSH_HOST "$ssh_host"
+    if [[ -n $ssh_host ]]; then
+        tmux new-session -ds "$selected_name" -e "TMUX_SSH_HOST=$ssh_host" "tmux-ssh-connect $ssh_host"
     else
-        tmux new-session -ds "$selected_name" -c "$selected"
+        tmux new-session -ds "$selected_name" -c "$selected" -e "TMUX_SESSIONIZER_PATH=$target"
     fi
-    hydrate "$selected_name" "$selected"
+    hydrate "$selected_name" "$selected" "$project_name"
 fi
 
 switch_to "$selected_name"
-

@@ -1,0 +1,13 @@
+# Paths are relative to env/.
+.bashrc
+.git_
+.gitconfig
+.gitignore
+.gnupg
+.oh-my-zsh
+.zshrc
+.config/fish
+.config/nvim
+.config/starship.toml
+.config/tmux
+.local/bin

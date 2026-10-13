@@ -1,0 +1,10 @@
+# Hyprland session configuration.
+.config/eww
+.config/hypr
+.config/networkmanager-dmenu
+.config/rofi
+.config/swappy
+.config/swaync
+.config/waybar
+.config/wofi
+.config/xdg-desktop-portal

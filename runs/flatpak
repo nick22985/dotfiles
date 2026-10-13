@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-
-
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
 source "$DOTFILES_DIR/lib/utils.sh"
 
 parse_args "$@"
@@ -11,113 +11,24 @@ log "Installing Flatpak applications..."
 set_context "Flatpak Applications"
 
 if ! command_exists flatpak; then
-    log_error "Flatpak not available. Install it first:"
-    if command_exists pacman; then
-        log "  sudo pacman -S flatpak"
-    elif command_exists apt; then
-        log "  sudo apt install flatpak"
-    elif command_exists dnf; then
-        log "  sudo dnf install flatpak"
-    elif command_exists zypper; then
-        log "  sudo zypper install flatpak"
-    else
-        log "  Check your distribution's package manager"
-    fi
+    log_error "Flatpak is unavailable after the Arch package stage"
     exit 1
 fi
 
 log "→ Installing Flatpak applications..."
-flatpak_packages=(
-    "com.discordapp.Discord"
-    "com.slack.Slack"
-    "org.signal.Signal"
-    "org.telegram.desktop"
-
-    "com.spotify.Client"
-    # "org.videolan.VLC"
-    "org.audacityteam.Audacity"
-    "com.obsproject.Studio"
-
-    "com.google.Chrome"
-    "org.mozilla.firefox"
-
-    "com.getpostman.Postman"
-    "com.visualstudio.code"
-		"com.vscodium.codium"
-
-    "org.libreoffice.LibreOffice"
-
-    "org.gimp.GIMP"
-    "org.blender.Blender"
-    "org.kde.kdenlive"
-
-    "net.lutris.Lutris"
-		"com.vysp3r.ProtonPlus"
-
-    "com.github.wwmm.easyeffects"
-    "com.github.tchx84.Flatseal"
-		# "com.brave.Browser"
-		"net.labymod.LabyMod"
-		"app.zen_browser.zen"
-		"io.beekeeperstudio.Studio"
-		"org.dbgate.DbGate"
-		"md.obsidian.Obsidian"
+flatpak_manifest="$DOTFILES_DIR/profiles/apps/desktop.flatpak"
+mapfile -t flatpak_packages < <(
+    sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' \
+        -e 's/[[:space:]]*$//' -e '/^$/d' "$flatpak_manifest"
 )
 
-# Configure Flatpak permissions and repository
+# Configure the user-level Flathub repository.
 if [[ $DRY_RUN == "0" ]]; then
-    log "→ Configuring Flatpak permissions..."
-    if ! getent group flatpak >/dev/null 2>&1; then
-        sudo groupadd flatpak 2>/dev/null && log "✓ Created flatpak group" || log "⚠ Failed to create flatpak group"
-    fi
-
-    if ! groups "$USER" | grep -q flatpak; then
-        sudo usermod -aG flatpak "$USER" && log "✓ Added $USER to flatpak group" || log "⚠ Failed to add user to flatpak group"
-        log "→ Note: Group membership will take effect after logout/login"
-    else
-        log "✓ $USER already in flatpak group"
-    fi
-
     log "→ Adding Flathub repository (user-level)..."
     flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo --user || log "⚠ Failed to add Flathub repository"
 fi
 
 # Install Flatpak packages using utility function
-install_packages_flatpak "${flatpak_packages[@]}"
-
-log "→ Configuring XDG_DATA_DIRS for Flatpak applications..."
-
-flatpak_profile="/etc/profile.d/flatpak.sh"
-if [[ $DRY_RUN == "0" ]]; then
-    if [[ ! -f "$flatpak_profile" ]]; then
-        sudo tee "$flatpak_profile" > /dev/null << 'EOF'
-# Add Flatpak directories to XDG_DATA_DIRS
-if [ -d /var/lib/flatpak/exports/share ]; then
-    export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-fi
-
-if [ -d "$HOME/.local/share/flatpak/exports/share" ]; then
-    export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-fi
-EOF
-        sudo chmod +x "$flatpak_profile"
-        log "✓ Created $flatpak_profile for XDG_DATA_DIRS configuration"
-    else
-        log "✓ $flatpak_profile already exists"
-    fi
-
-    if [ -d /var/lib/flatpak/exports/share ]; then
-        export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-    fi
-    if [ -d "$HOME/.local/share/flatpak/exports/share" ]; then
-        export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-    fi
-
-    log "✓ XDG_DATA_DIRS configured for current session"
-    log "→ Flatpak applications will appear in desktop menus after next login"
-else
-    log "Would create $flatpak_profile"
-    log "Would configure XDG_DATA_DIRS for Flatpak applications"
-fi
+install_packages_flatpak "${flatpak_packages[@]}" || exit 1
 
 log_success "Flatpak setup complete"

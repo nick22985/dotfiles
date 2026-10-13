@@ -1,13 +1,20 @@
 caches = [
-    ".bun/install/cache",
+    "@sbx-bun-install:.bun/install/cache",
+    "@sbx-bun-install-state:.bun/install/.sbx-cache",
     "@sbx-claude-local:.local",
 ]
 
 shm-size = "1g"
 
+# A fleet worker's sandbox weighted below an interactive one: a weight only
+# decides who wins the cores when they are actually contended, so four
+# background workers cost the session you are typing into nothing on a quiet
+# node and give the cores back on a busy one.
+task-cpu-shares = 512
+
 [agent]
 autonomy = ["--dangerously-skip-permissions"]
-profiles = true
+logins = true
 remote-control = true
 model-switch = "/model"
 # `claude "prompt"` opens the session already working on it.

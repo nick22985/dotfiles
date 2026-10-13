@@ -35,6 +35,8 @@ LOG_FILE="${ULTRAWIDE_LOG:-$HOME/.cache/ultrawide_manager_v3.log}"
 
 BURST_DRAIN_SECS=${ULTRAWIDE_BURST_DRAIN:-0.08}
 
+COLUMN_X_TOL=${ULTRAWIDE_COLUMN_X_TOL:-4}
+
 DRAG_BIND="${ULTRAWIDE_DRAG_BIND-SUPER, mouse:272}"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 
@@ -90,6 +92,52 @@ read_windows() {
         | [ .address, .at[0], .at[1], .size[0], .size[1],
             (if (.fullscreen // 0) == 0 or (.fullscreen // 0) == false then 0 else 1 end) ]
         | @tsv'
+}
+
+read_columns() {
+    local ws_id=$1
+    local a wx wy ww wh fs dx
+    local c_x="" c_w=0 c_top=0 c_bot=0 c_n=0 c_fs=0 c_owner="" c_owner_h=-1 c_mem=""
+
+    while IFS=$'\t' read -r a wx wy ww wh fs; do
+        [[ -z "$a" ]] && continue
+
+        if [[ -n "$c_x" ]]; then
+            dx=$(( wx - c_x ))
+            ((dx < 0)) && dx=$(( -dx ))
+        fi
+
+        if [[ -z "$c_x" ]] || ((dx > COLUMN_X_TOL)); then
+            [[ -n "$c_owner" ]] && printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$c_x" "$c_w" "$(( c_bot - c_top ))" "$c_n" "$c_fs" "$c_owner" "$c_mem"
+            c_x=$wx; c_w=$ww; c_top=$wy; c_bot=$(( wy + wh ))
+            c_n=0; c_fs=0; c_owner=""; c_owner_h=-1; c_mem=""
+        fi
+
+        ((ww > c_w)) && c_w=$ww
+        ((wy < c_top)) && c_top=$wy
+        ((wy + wh > c_bot)) && c_bot=$(( wy + wh ))
+        ((fs != 0)) && c_fs=1
+        if ((wh > c_owner_h)); then c_owner=$a; c_owner_h=$wh; fi
+        c_n=$(( c_n + 1 ))
+        c_mem="${c_mem:+$c_mem,}$a"
+    done < <(read_windows "$ws_id")
+
+    [[ -n "$c_owner" ]] && printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$c_x" "$c_w" "$(( c_bot - c_top ))" "$c_n" "$c_fs" "$c_owner" "$c_mem"
+    return 0
+}
+
+cols_share() {
+    local want=$1 have=$2 a b
+    [[ -z "$want" || -z "$have" ]] && return 1
+    local IFS=,
+    for a in $want; do
+        for b in $have; do
+            [[ "$a" == "$b" ]] && return 0
+        done
+    done
+    return 1
 }
 
 layout_signature() {
@@ -194,14 +242,14 @@ apply() {
         return 0
     fi
 
-    local -a addrs=() heights=() widths=() xs=()
-    local a wx wy ww wh fs
+    local -a addrs=() heights=() widths=() xs=() members=()
+    local a wx ww wh cnt fs mem
     local any_fullscreen=0
-    while IFS=$'\t' read -r a wx wy ww wh fs; do
+    while IFS=$'\t' read -r wx ww wh cnt fs a mem; do
         [[ -z "$a" ]] && continue
         ((fs != 0)) && any_fullscreen=1
-        addrs+=("$a"); heights+=("$wh"); widths+=("$ww"); xs+=("$wx")
-    done < <(read_windows "$ws_id")
+        addrs+=("$a"); heights+=("$wh"); widths+=("$ww"); xs+=("$wx"); members+=("$mem")
+    done < <(read_columns "$ws_id")
 
     if ((any_fullscreen)); then
         return 0
@@ -211,10 +259,10 @@ apply() {
 
     if ((n == 2)) && [[ -n "$PREV_LEFT" && -n "$PREV_CENTER" && -n "$PREV_RIGHT" ]]; then
         local have_pl=0 have_pc=0 have_pr=0
-        for a in "${addrs[@]}"; do
-            [[ "$a" == "$PREV_LEFT" ]] && have_pl=1
-            [[ "$a" == "$PREV_CENTER" ]] && have_pc=1
-            [[ "$a" == "$PREV_RIGHT" ]] && have_pr=1
+        for mem in "${members[@]}"; do
+            cols_share "$mem" "$PREV_LEFT"   && have_pl=1
+            cols_share "$mem" "$PREV_CENTER" && have_pc=1
+            cols_share "$mem" "$PREV_RIGHT"  && have_pr=1
         done
         if ((have_pl && have_pc && !have_pr)); then
             set_side left
@@ -232,18 +280,18 @@ apply() {
         0)
             : ;;
         1)
-            cur_center="${addrs[0]}"
+            cur_center="${members[0]}"
             gap_l=$empty_gap; gap_r=$empty_gap ;;
         2)
             if [[ "$SIDE" == "left" ]]; then
-                cur_left="${addrs[0]}"; cur_center="${addrs[1]}"
+                cur_left="${members[0]}"; cur_center="${members[1]}"
                 gap_r=$empty_gap
             else
-                cur_center="${addrs[0]}"; cur_right="${addrs[1]}"
+                cur_center="${members[0]}"; cur_right="${members[1]}"
                 gap_l=$empty_gap
             fi ;;
         3)
-            cur_left="${addrs[0]}"; cur_center="${addrs[1]}"; cur_right="${addrs[2]}" ;;
+            cur_left="${members[0]}"; cur_center="${members[1]}"; cur_right="${members[2]}" ;;
         *)
             : ;;
     esac
@@ -273,14 +321,14 @@ apply() {
 
         settle_layout "$ws_id" "$sig_before" || true
 
-        local -a re_addrs=() re_heights=() re_widths=()
-        while IFS=$'\t' read -r a wx wy ww wh fs; do
+        local -a re_members=() re_heights=() re_widths=()
+        while IFS=$'\t' read -r wx ww wh cnt fs a mem; do
             [[ -z "$a" ]] && continue
-            re_addrs+=("$a"); re_heights+=("$wh"); re_widths+=("$ww")
-        done < <(read_windows "$ws_id")
-        if [[ "${re_addrs[*]:-}" != "${addrs[*]:-}" ]]; then
-            log "apply: window set changed while the gap rule was landing" \
-                "(${#addrs[@]} -> ${#re_addrs[@]}); leaving it to the next pass"
+            re_members+=("$mem"); re_heights+=("$wh"); re_widths+=("$ww")
+        done < <(read_columns "$ws_id")
+        if [[ "${re_members[*]:-}" != "${members[*]:-}" ]]; then
+            log "apply: column set changed while the gap rule was landing" \
+                "(${#members[@]} -> ${#re_members[@]}); leaving it to the next pass"
             return 0
         fi
         heights=("${re_heights[@]:-}"); widths=("${re_widths[@]:-}")
@@ -301,13 +349,13 @@ apply() {
 
     if [[ -n "$cur_left" ]]; then
         if ((enforce_all)) || [[ "$cur_left" != "$PREV_LEFT" || "$cur_center" != "$PREV_CENTER" ]]; then
-            add_boundary_resize resizes "$cur_left" $(( (b25 - GAPS_IN - BORDER) - content_left )) \
+            add_boundary_resize resizes "${addrs[0]}" $(( (b25 - GAPS_IN - BORDER) - content_left )) \
                 "${widths[0]}" "$RESIZE_SIGN_LEFT" "${heights[0]}" "$expected_h" "left|center"
         fi
     fi
     if [[ -n "$cur_right" ]]; then
         if ((enforce_all)) || [[ "$cur_right" != "$PREV_RIGHT" || "$cur_center" != "$PREV_CENTER" ]]; then
-            add_boundary_resize resizes "$cur_right" $(( content_right - (b75 + GAPS_IN + BORDER) )) \
+            add_boundary_resize resizes "${addrs[$((n - 1))]}" $(( content_right - (b75 + GAPS_IN + BORDER) )) \
                 "${widths[$((n - 1))]}" "$RESIZE_SIGN_RIGHT" "${heights[$((n - 1))]}" "$expected_h" "center|right"
         fi
     fi
@@ -345,8 +393,8 @@ add_boundary_resize() {
     local diff=$(( height - expected_h ))
     ((diff < 0)) && diff=$(( -diff ))
     if ((diff > 4)); then
-        log "boundary $label: owner $addr is ${height}px tall, expected ${expected_h}px" \
-            "(window is inside a split); skipping"
+        log "boundary $label: owner column $addr spans ${height}px, expected ${expected_h}px" \
+            "(column does not reach the full content height); skipping"
         return 0
     fi
 
@@ -370,20 +418,20 @@ cmd_swap() {
     apply force
 }
 
-slot_of() {
-    local ws_id=$1 addr=$2 a rest i=0
-    while IFS=$'\t' read -r a rest; do
+column_of() {
+    local ws_id=$1 addr=$2 wx ww wh cnt fs a mem i=0
+    while IFS=$'\t' read -r wx ww wh cnt fs a mem; do
         [[ -z "$a" ]] && continue
-        [[ "$a" == "$addr" ]] && { printf '%s\n' "$i"; return 0; }
-        ((i++))
-    done < <(read_windows "$ws_id")
+        cols_share "$mem" "$addr" && { printf '%s\n' "$i"; return 0; }
+        i=$(( i + 1 ))
+    done < <(read_columns "$ws_id")
     printf '%s\n' "-1"
 }
 
 move_one_step() {
     local ws_id=$1 addr=$2 dir=$3
     local want before after sig fmt
-    before=$(slot_of "$ws_id" "$addr")
+    before=$(column_of "$ws_id" "$addr")
     ((before < 0)) && return 1
     if [[ "$dir" == "r" ]]; then want=$(( before + 1 )); else want=$(( before - 1 )); fi
 
@@ -395,7 +443,7 @@ move_one_step() {
         sig=$(layout_signature "$ws_id")
         send_batch "dispatch $(printf "$fmt" "$dir")" || continue
         settle_layout "$ws_id" "$sig" || true
-        after=$(slot_of "$ws_id" "$addr")
+        after=$(column_of "$ws_id" "$addr")
 
         if ((after == want)); then
             if [[ "$MOVE_DISPATCH_FMT" != "$fmt" ]]; then
@@ -408,10 +456,10 @@ move_one_step() {
             log "move: '$fmt' removed $addr from workspace $ws_id; aborting"
             return 1
         fi
-        ((after != before)) && log "move: '$fmt' put $addr at slot $after, wanted $want"
+        ((after != before)) && log "move: '$fmt' put $addr in column $after, wanted $want"
     done
 
-    log "move: no dispatcher moved $addr from slot $before ($dir);" \
+    log "move: no dispatcher moved $addr out of column $before ($dir);" \
         "tried ${#cands[@]} forms -- pin one with \$ULTRAWIDE_MOVE_DISPATCH"
     return 1
 }
@@ -429,18 +477,18 @@ cmd_move_zone() {
     focused=$(focused_address)
     [[ -z "$focused" ]] && return 0
 
-    local -a addrs=()
-    local a rest
-    while IFS=$'\t' read -r a rest; do
-        [[ -n "$a" ]] && addrs+=("$a")
-    done < <(read_windows "$ws_id")
+    local -a members=()
+    local wx ww wh cnt fs a mem
+    while IFS=$'\t' read -r wx ww wh cnt fs a mem; do
+        [[ -n "$a" ]] && members+=("$mem")
+    done < <(read_columns "$ws_id")
 
-    local n=${#addrs[@]}
+    local n=${#members[@]}
     ((n < 2 || n > 3)) && return 0
 
     local from=-1 i
-    for i in "${!addrs[@]}"; do
-        [[ "${addrs[$i]}" == "$focused" ]] && from=$i
+    for i in "${!members[@]}"; do
+        cols_share "${members[$i]}" "$focused" && from=$i
     done
     ((from < 0)) && return 0
 
@@ -465,7 +513,7 @@ cmd_move_zone() {
 
     local dir="r" steps=$(( to - from ))
     if ((steps < 0)); then dir="l"; steps=$(( -steps )); fi
-    log "move: $focused to $target (slot $from -> $to), $steps x '$dir'"
+    log "move: $focused to $target (column $from -> $to), $steps x '$dir'"
 
     for ((i = 0; i < steps; i++)); do
         move_one_step "$ws_id" "$focused" "$dir" || break
@@ -512,13 +560,21 @@ cmd_status() {
     echo "side       $SIDE"
     echo
     printf '%-20s %9s %9s %9s %9s %s\n' ADDRESS X Y W H FULLSCREEN
-    local a wx wy ww wh fs
+    local a wx wy ww wh fs cnt mem i
     while IFS=$'\t' read -r a wx wy ww wh fs; do
         [[ -z "$a" ]] && continue
         printf '%-20s %9s %9s %9s %9s %s\n' "$a" "$wx" "$wy" "$ww" "$wh" "$fs"
     done < <(read_windows "$ws_id")
     echo
-    echo "expected tiled height: $(( uh - 2 * (GAPS_OUT + BORDER) ))  (a window shorter than this owns no boundary)"
+    printf '%-7s %9s %9s %9s %8s %-20s %s\n' COLUMN X W SPAN_H WINDOWS OWNER MEMBERS
+    i=0
+    while IFS=$'\t' read -r wx ww wh cnt fs a mem; do
+        [[ -z "$a" ]] && continue
+        printf '%-7s %9s %9s %9s %8s %-20s %s\n' "$i" "$wx" "$ww" "$wh" "$cnt" "$a" "$mem"
+        i=$(( i + 1 ))
+    done < <(read_columns "$ws_id")
+    echo
+    echo "expected tiled height: $(( uh - 2 * (GAPS_OUT + BORDER) ))  (a column spanning less than this owns no boundary)"
 }
 
 PROBE_FAIL=0

@@ -4,4 +4,4 @@ caches = [
 
 [agent]
 persist = [".config/opencode", ".local/share/opencode"]
-profiles = true
+logins = true

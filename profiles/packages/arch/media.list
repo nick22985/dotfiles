@@ -1,0 +1,13 @@
+# source package
+repo calf
+repo easyeffects
+repo gst-plugin-pipewire
+repo lsp-plugins
+repo mpc
+repo mpd
+repo obs-studio
+repo pipewire-alsa
+repo tesseract
+repo tesseract-data-eng
+aur easyeffects-bundy01-presets
+aur music-presence-bin

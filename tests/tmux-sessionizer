@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+test_dir="$(mktemp -d "${TMPDIR:-/tmp}/tmux-sessionizer-test.XXXXXX")"
+SESSIONIZER_TEST_TMUX="$(command -v tmux)"
+export SESSIONIZER_TEST_TMUX
+export SESSIONIZER_TEST_SOCKET="$test_dir/tmux.sock"
+export SESSIONIZER_TEST_TARGET="$test_dir/target"
+
+cleanup() {
+    "$SESSIONIZER_TEST_TMUX" -S "$SESSIONIZER_TEST_SOCKET" kill-server 2>/dev/null || true
+    rm -rf -- "$test_dir"
+}
+trap cleanup EXIT
+
+mkdir -p "$test_dir/bin" "$test_dir/home" "$test_dir/etc/sbx" "$test_dir/path/sbx"
+cat > "$test_dir/bin/tmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    attach-session|switch-client)
+        exec "$SESSIONIZER_TEST_TMUX" -S "$SESSIONIZER_TEST_SOCKET" display-message -p -t "$3:" '#{session_id}' > "$SESSIONIZER_TEST_TARGET"
+        ;;
+    *)
+        exec "$SESSIONIZER_TEST_TMUX" -S "$SESSIONIZER_TEST_SOCKET" -f /dev/null "$@"
+        ;;
+esac
+EOF
+chmod +x "$test_dir/bin/tmux"
+
+select_path() {
+    env HOME="$test_dir/home" PATH="$test_dir/bin:$PATH" TMUX=test \
+        bash "$repo_dir/env/.local/bin/tmux-sessionizer" "$1"
+    cat "$SESSIONIZER_TEST_TARGET"
+}
+
+test_tmux() {
+    "$SESSIONIZER_TEST_TMUX" -S "$SESSIONIZER_TEST_SOCKET" "$@"
+}
+
+first="$(select_path "$test_dir/etc/sbx")"
+second="$(select_path "$test_dir/path/sbx")"
+[[ -n "$first" && -n "$second" ]]
+if [[ "$first" == "$second" ]]; then
+    printf 'FAIL: different directories selected the same session %s\n' "$first" >&2
+    exit 1
+fi
+
+[[ "$(select_path "$test_dir/etc/sbx")" == "$first" ]]
+[[ "$(select_path "$test_dir/path/sbx")" == "$second" ]]
+[[ "$(test_tmux display-message -p -t "$first:" '#{session_path}')" == "$test_dir/etc/sbx" ]]
+[[ "$(test_tmux display-message -p -t "$second:" '#{session_path}')" == "$test_dir/path/sbx" ]]
+[[ "$(test_tmux display-message -p -t "$first:" '#{session_name}')" == sbx ]]
+[[ "$(test_tmux display-message -p -t "$second:" '#{session_name}')" == sbx-2 ]]
+printf 'PASS: duplicate basenames create distinct sessions and reopen correctly\n'
+
+ln -s "$test_dir/path/sbx" "$test_dir/alias"
+[[ "$(select_path "$test_dir/alias/")" == "$second" ]]
+[[ "$(select_path "$test_dir/path/../path/sbx/")" == "$second" ]]
+test_tmux kill-session -t "$first"
+[[ "$(select_path "$test_dir/path/sbx")" == "$second" ]]
+printf 'PASS: path aliases and removing the original session preserve session identity\n'
+
+mkdir -p "$test_dir/a.b" "$test_dir/a_b" "$test_dir/[project]" "$test_dir/legacy"
+dot_session="$(select_path "$test_dir/a.b")"
+underscore_session="$(select_path "$test_dir/a_b")"
+[[ "$dot_session" != "$underscore_session" ]]
+special_session="$(select_path "$test_dir/[project]")"
+[[ "$(select_path "$test_dir/[project]")" == "$special_session" ]]
+test_tmux new-session -ds legacy -c "$test_dir/legacy"
+legacy_session="$(test_tmux display-message -p -t '=legacy:' '#{session_id}')"
+[[ "$(select_path "$test_dir/legacy")" == "$legacy_session" ]]
+printf 'PASS: normalized names, literal matching, and existing sessions\n'
+
+mkdir -p "$test_dir/ssh-directory"
+test_tmux new-session -ds ssh-example -c "$test_dir/ssh-directory"
+test_tmux set-environment -t '=ssh-example' TMUX_SSH_HOST example
+ssh_session="$(test_tmux display-message -p -t '=ssh-example:' '#{session_id}')"
+[[ "$(select_path ssh/example)" == "$ssh_session" ]]
+[[ "$(select_path "$test_dir/ssh-directory")" != "$ssh_session" ]]
+printf 'PASS: SSH sessions stay separate from local directory sessions\n'

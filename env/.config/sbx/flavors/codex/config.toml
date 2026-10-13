@@ -1,12 +1,23 @@
 caches = [
     ".npm",
+    "@sbx-bun-install:.bun/install/cache",
+    "@sbx-bun-install-state:.bun/install/.sbx-cache",
     "@sbx-codex-global:.npm-global",
 ]
 
+shm-size = "1g"
+open-host = true
+
 [agent]
 persist = [".codex"]
+unattended-args = [
+    "--disable",
+    "in_app_updates",
+    "--dangerously-bypass-hook-trust",
+]
 autonomy = ["--dangerously-bypass-approvals-and-sandbox"]
 autonomy-detect = ["--yolo", "--full-auto"]
 forward-env = ["CODEX_API_KEY", "OPENAI_API_KEY"]
-profiles = true
+logins = true
+prompt-arg = []
 subagent-format = "codex"

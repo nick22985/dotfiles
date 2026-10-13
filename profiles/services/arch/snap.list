@@ -1,0 +1,3 @@
+# scope action requirement unit
+system enable-now required snapd.socket
+system enable-now optional snapd.apparmor.service

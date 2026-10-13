@@ -1,0 +1,2 @@
+# mode source target
+0600 system/etc/ssh/sshd_config.d/50-dotfiles.conf /etc/ssh/sshd_config.d/50-dotfiles.conf

@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+test_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-run-test.XXXXXX")"
+trap 'rm -rf -- "$test_dir"' EXIT
+mkdir -p "$test_dir/bin" "$test_dir/state"
+export XDG_STATE_HOME="$test_dir/xdg-state"
+
+printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/pacman"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/flatpak"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/systemctl"
+printf '#!/usr/bin/env bash\nexit 17\n' > "$test_dir/bin/stow"
+chmod +x "$test_dir/bin/pacman" "$test_dir/bin/flatpak" \
+    "$test_dir/bin/systemctl" "$test_dir/bin/stow"
+export PATH="$test_dir/bin:$PATH"
+
+fail() {
+    printf 'FAIL: %s\n' "$1" >&2
+    exit 1
+}
+
+"$repo_dir/run" --help >/dev/null || fail "top-level help failed"
+
+audit_help="$($repo_dir/run audit --help)"
+grep -q '^Usage: ./run audit \[options\]$' <<< "$audit_help" \
+    || fail "audit help does not name ./run audit"
+if grep -q 'scripts/audit-install' <<< "$audit_help"; then
+    fail "audit help exposes the old script path"
+fi
+[[ ! -e "$repo_dir/scripts/audit-install" ]] \
+    || fail "old scripts/audit-install entry point still exists"
+
+set +e
+"$repo_dir/run" audit --not-an-audit-option >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "invalid audit option returned $status instead of 2"
+
+set +e
+"$repo_dir/run" audit --profile desktop --desktop hyprland --skip packages \
+    >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "audit accepted a skipped required dependency"
+
+audit_home="$test_dir/audit-home"
+mkdir -p "$audit_home/.config" "$audit_home/.local/bin" "$test_dir/empty-env"
+
+set +e
+HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "audit drift check returned $status instead of 1"
+
+set +e
+HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --check >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "full audit drift check returned $status instead of 1"
+
+while IFS= read -r path; do
+    [[ -n "$path" && "$path" != \#* ]] || continue
+    source="$repo_dir/env/$path"
+    target="$audit_home/$path"
+    if [[ "$path" == ".local/bin" ]]; then
+        rmdir "$target"
+    fi
+    mkdir -p "$(dirname "$target")"
+    ln -s "$source" "$target"
+done < "$repo_dir/profiles/dotfiles/core.list"
+
+HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check >/dev/null \
+    || fail "clean audit drift check returned nonzero"
+
+unlink "$audit_home/.bashrc"
+printf 'drift\n' > "$audit_home/.bashrc"
+set +e
+HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "managed content drift returned $status instead of 1"
+unlink "$audit_home/.bashrc"
+ln -s "$repo_dir/env/.bashrc" "$audit_home/.bashrc"
+
+"$repo_dir/run" doctor >/dev/null
+
+set +e
+bash "$repo_dir/runs/packages" --dry >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "direct stage invocation returned $status instead of 2"
+
+deploy_home="$test_dir/deploy-home"
+mkdir -p "$deploy_home/.config/fish"
+printf 'local-only\n' > "$deploy_home/.config/fish/local-only.conf"
+printf 'before\n' > "$deploy_home/.config/fish/config.fish"
+HOME="$deploy_home" "$repo_dir/run" apply --profile core --script dotfiles >/dev/null \
+    || fail "dotfile bundle apply failed"
+[[ -f "$deploy_home/.config/fish/local-only.conf" ]] \
+    || fail "dotfile bundle replaced an unmanaged sibling"
+[[ -L "$deploy_home/.config/fish/config.fish" ]] \
+    || fail "dotfile bundle did not link a managed file"
+deploy_receipt="$(readlink -f "$XDG_STATE_HOME/dotfiles/latest")"
+[[ -x "$deploy_receipt/restore-user.sh" ]] \
+    || fail "dotfile conflict did not create a user restore script"
+"$deploy_receipt/restore-user.sh"
+[[ "$(< "$deploy_home/.config/fish/config.fish")" == before ]] \
+    || fail "user restore script did not recover the original file"
+
+set +e
+"$repo_dir/run" --dry --profile core >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "option-only invocation returned $status instead of 2"
+
+plan_one="$($repo_dir/run plan --profile desktop --desktop both)"
+plan_two="$($repo_dir/run plan --profile desktop --desktop both)"
+[[ "$plan_one" == "$plan_two" ]] || fail "plan output changed between identical runs"
+grep -q '^  hypr ' <<< "$plan_one" || fail "both desktop plan omitted Hyprland"
+grep -q '^  kde-plasma ' <<< "$plan_one" || fail "both desktop plan omitted Plasma"
+
+default_plan="$($repo_dir/run plan)"
+grep -q '^Profiles: core desktop$' <<< "$default_plan" \
+    || fail "default plan did not select the desktop profile"
+grep -q '^Desktop: both$' <<< "$default_plan" \
+    || fail "default plan did not select both desktops"
+grep -q '^  hypr ' <<< "$default_plan" || fail "default plan omitted Hyprland"
+grep -q '^  kde-plasma ' <<< "$default_plan" || fail "default plan omitted Plasma"
+
+core_plan="$($repo_dir/run plan --profile core)"
+if grep -Eq '^  (hypr|kde-plasma) ' <<< "$core_plan"; then
+    fail "explicit core profile did not override the configured default"
+fi
+
+(
+    export DOTFILES_DIR="$repo_dir"
+    export DOTFILES_RUN_DIR="$test_dir/state"
+    export DRY_RUN=1
+    source "$repo_dir/lib/utils.sh"
+    platform_validate_bootstrap_manifests
+    platform_install_aur_helper
+) >/dev/null || fail "pinned paru bootstrap dry run failed"
+
+printf 'aur paru-bin\naur example-package\n' > "$test_dir/aur-routing.list"
+(
+    export DOTFILES_DIR="$repo_dir"
+    source "$repo_dir/lib/utils.sh"
+    platform_install_aur_helper() { printf 'helper\n'; }
+    install_packages_aur() { printf 'aur %s\n' "$*"; }
+    platform_install_package_manifest "$test_dir/aur-routing.list"
+) > "$test_dir/aur-routing.output" || fail "AUR helper routing failed"
+[[ "$(< "$test_dir/aur-routing.output")" == $'helper\naur example-package' ]] \
+    || fail "paru-bin was routed through paru after bootstrap"
+
+walker_plan="$($repo_dir/run plan --profile desktop --desktop hyprland --script walker)"
+grep -q '^  hypr ' <<< "$walker_plan" || fail "Walker plan omitted its Hyprland dependency"
+grep -q '^  walker ' <<< "$walker_plan" || fail "Walker plan omitted Walker"
+
+ssh_plan="$($repo_dir/run plan --profile ssh-server --script ssh)"
+grep -Eq '^  ssh[[:space:]]+root[[:space:]]+high' <<< "$ssh_plan" \
+    || fail "SSH stage is not marked high risk"
+
+set +e
+"$repo_dir/run" plan --profile core --script missing-stage >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "unknown stage returned $status instead of 2"
+
+set +e
+"$repo_dir/run" plan --profile desktop --desktop both --skip hypr >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "broken stage dependency returned $status instead of 2"
+
+set +e
+TMPDIR="$test_dir/state" DOTFILES_ENV_DIR="$test_dir/empty-env" \
+    "$repo_dir/run" apply --profile core --script dotfiles --dry >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "failed stage returned $status instead of 1"
+
+receipt_dir="$(readlink -f "$XDG_STATE_HOME/dotfiles/latest")"
+[[ -f "$receipt_dir/plan.txt" ]] || fail "run receipt omitted plan.txt"
+[[ -f "$receipt_dir/commit" ]] || fail "run receipt omitted commit"
+[[ -f "$receipt_dir/stages.tsv" ]] || fail "run receipt omitted stages.tsv"
+[[ "$(< "$receipt_dir/exit-status")" == 1 ]] || fail "failed receipt has wrong exit status"
+
+set +e
+dependency_output="$(TMPDIR="$test_dir/state" DOTFILES_ENV_DIR="$test_dir/empty-env" "$repo_dir/run" apply \
+    --profile core --script oh-my-zsh --dry 2>&1)"
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "failed dependency run returned $status instead of 1"
+grep -q 'Skipping stage oh-my-zsh because dependency dotfiles failed' <<< "$dependency_output" \
+    || fail "dependent stage ran after dotfiles failed"
+
+mkdir -p "$XDG_STATE_HOME/dotfiles"
+exec 8> "$XDG_STATE_HOME/dotfiles/apply.lock"
+flock -n 8
+set +e
+lock_output="$($repo_dir/run apply --profile core --script packages --dry 2>&1)"
+status=$?
+set -e
+flock -u 8
+exec 8>&-
+[[ "$status" == 1 ]] || fail "concurrent apply returned $status instead of 1"
+grep -q 'Another dotfiles apply is already running' <<< "$lock_output" \
+    || fail "concurrent apply did not report lock contention"
+
+if ((EUID == 0)); then
+    set +e
+    "$repo_dir/run" apply --profile core --dry >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "$status" == 2 ]] || fail "root apply returned $status instead of 2"
+fi
+
+if rg -q 'eval[[:space:]]+echo' "$repo_dir/runs/sync-repos"; then
+    fail "sync-repos still evaluates target paths"
+fi
+if rg -q 'setup_github_ssh_keys' "$repo_dir/runs/git"; then
+    fail "core Git stage still installs remote SSH keys"
+fi
+if rg -q 'git[[:space:]]+pull' "$repo_dir/runs/git"; then
+    fail "core Git stage still updates the worktree"
+fi
+if rg -q 'sudo[[:space:]]+\./install\.sh' "$repo_dir/runs/grub-multiboot"; then
+    fail "GRUB stage still executes a downloaded root installer"
+fi
+[[ ! -e "$repo_dir/system/etc/pam.d/sddm" ]] \
+    || fail "repository still replaces the SDDM PAM file"
+[[ ! -e "$repo_dir/runs/system-files" ]] \
+    || fail "generic privileged file traversal still exists"
+if rg -q 'curl .*\|.*(sh|bash)|wget .*\|.*(sh|bash)|sh -c .*curl' "$repo_dir/runs"; then
+    fail "a stage still pipes an unpinned remote installer into a shell"
+fi
+
+if find "$test_dir/state" -mindepth 1 -maxdepth 1 -name 'dotfiles-run.*' -print -quit | grep -q .; then
+    fail "runner left per-run state behind"
+fi
+
+printf 'run tests passed\n'

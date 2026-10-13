@@ -52,8 +52,26 @@ fi
 log "→ Installing to $DEST..."
 if [[ $DRY_RUN == "0" ]]; then
     mkdir -p "$(dirname "$DEST")"
-    cp "$SBX_SRC/target/release/sbx" "$DEST"
-    chmod +x "$DEST"
+    if [[ -f "$DEST" ]] && cmp -s "$SBX_SRC/target/release/sbx" "$DEST"; then
+        log_success "$DEST is current"
+    else
+        if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+            log_error "Installing sbx requires a run receipt"
+            exit 1
+        fi
+        if [[ -e "$DEST" || -L "$DEST" ]]; then
+            backup="$DOTFILES_RECEIPT_DIR/backups/user/.local/bin/sbx"
+            mkdir -p "$(dirname "$backup")"
+            mv -- "$DEST" "$backup" || exit 1
+            printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q\n' \
+                "$DEST" "$(dirname "$DEST")" "$backup" "$DEST" \
+                >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+        else
+            printf 'rm -f -- %q\n' "$DEST" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+        fi
+        chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+        install -m 755 "$SBX_SRC/target/release/sbx" "$DEST" || exit 1
+    fi
 else
     log "Would copy $SBX_SRC/target/release/sbx → $DEST"
 fi

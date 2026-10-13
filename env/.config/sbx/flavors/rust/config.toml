@@ -1,6 +1,37 @@
 caches = [
     ".cargo/registry",
     ".cargo/git",
+    # The compiler cache, shared by every rust container on this node. A named
+    # volume rather than a bind of the host's own ~/.cache/sccache: nothing but
+    # sbx writes it, and a cache that has gone wrong is then one
+    # `docker volume rm sbx-sccache-rust` away rather than a directory in a
+    # home. The bound on its size is SCCACHE_CACHE_SIZE in the Dockerfile.
+    "@sbx-sccache-rust:.cache/sccache",
+    # The project flavor's cache layer also reaches codex/claude workers. A
+    # named volume wins over their entry at the same container path. Shipped
+    # flavor files ride in the sbx binary and the daemon resyncs them at start,
+    # so this reaches every node without a private project-config edit.
+    "@sbx-bun-install:.bun/install/cache",
+    "@sbx-bun-install-state:.bun/install/.sbx-cache",
     "@sbx-mise-rust:.local/share/mise",
     "@sbx-mise-state-rust:.local/state/mise",
+    # Gradle's home, for a rust project that also builds a Gradle tree
+    # (minecraft-bot-client's devkit). Without it every verify starts cold:
+    # the wrapper re-downloads Gradle, and paperweight decompiles each Paper
+    # target again (about 8 minutes) from downloads that turn a network blip
+    # into a red batch.
+    "@sbx-gradle-rust:.gradle",
 ]
+
+# This flavor's containers get the node's credentials for the fleet's shared
+# compile cache — the endpoint and the key pair in `[sccache]` in the node's
+# private overlay, handed over as SCCACHE_ENDPOINT, AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY (crates/sbx-core/src/config.rs, GlobalConfig::sccache_store).
+#
+# A flavor asks rather than every container being handed them, because those two
+# AWS names are read by every AWS client there is: a claude or codex sandbox
+# given them would be quietly carrying an object-store credential it has no use
+# for. Only an image whose Dockerfile points sccache at the store has a use for
+# them, and only that image says so. A node with no `[sccache]` block hands over
+# nothing and this flavor compiles against @sbx-sccache-rust alone.
+sccache = true

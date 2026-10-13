@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     --mount=type=cache,target=/tmp/sbx-dl,sharing=locked \
     if [ ! -f /tmp/sbx-dl/nodesource-setup.sh ]; then \
-        curl -fsSL https://deb.nodesource.com/setup_lts.x -o /tmp/sbx-dl/nodesource-setup.sh; \
+        sbx-fetch https://deb.nodesource.com/setup_lts.x -o /tmp/sbx-dl/nodesource-setup.sh; \
     fi \
     && bash /tmp/sbx-dl/nodesource-setup.sh \
     && apt-get install -y --no-install-recommends nodejs \

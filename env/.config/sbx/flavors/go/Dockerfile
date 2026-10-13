@@ -13,6 +13,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         pkg-config \
         tmux
 
+# ${USER_HOME}/.cache has to exist and belong to dev before the layer below
+# mounts a cache at .cache/mise: BuildKit creates a missing parent as root, and
+# mise writes elsewhere under .cache while it installs — sigstore-rust puts its
+# TUF metadata in .cache/sigstore-rust while verifying a release's attestations.
+# Owned by root, that write is EACCES and mise reports it as an attestation
+# failure, which reads like a bad artifact rather than a directory permission.
+RUN install -d -o dev -g dev ${USER_HOME}/.cache
+
 USER dev
 RUN --mount=type=cache,target=${USER_HOME}/.cache/mise,uid=1000,gid=1000,sharing=locked \
     /usr/local/bin/mise use --global "go@${SBX_GO_VERSION}" \

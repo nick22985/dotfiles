@@ -11,6 +11,7 @@ hl.bind(mainMod .. " + T", hl.dsp.exec_cmd(terminal))
 -- hl.bind(mainMod .. " + M", hl.dsp.exit())
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float())
+hl.bind(mainMod .. " + SHIFT + C", hl.dsp.exec_cmd("python3 ~/.config/hypr/scripts/center-window.py"))
 hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo()) -- dwindle
 

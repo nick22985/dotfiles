@@ -15,4 +15,9 @@ env/.config/audio-switcher/current_profile
 
 .claude/
 .sbx/
-env/.config/sbx/config.toml
+.config/sbx/config.private.toml
+env/.config/sbx/image-dirs/
+env/.config/sbx/config.fleet.toml
+.audit/
+env/.config/sbx/
+

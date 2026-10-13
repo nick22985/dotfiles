@@ -1,5 +1,9 @@
 caches = [
-    ".bun/install/cache",
+    # sbx-bun checks this at most daily and clears it with Bun's supported
+    # whole-cache command above 4 GiB. The sibling volume holds its shared lock
+    # and stamp while the cache itself is emptied.
+    "@sbx-bun-install:.bun/install/cache",
+    "@sbx-bun-install-state:.bun/install/.sbx-cache",
     "@sbx-mise-bun:.local/share/mise",
     "@sbx-mise-state-bun:.local/state/mise",
 ]

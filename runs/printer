@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
 source "$DOTFILES_DIR/lib/utils.sh"
-
 parse_args "$@"
+set_context "Printing"
 
-aur_packages=(
-	"cups"
-	"epson-inkjet-printer-escpr2"
-)
-install_packages_aur "${aur_packages[@]}"
-sudo systemctl enable --now cups.service
-systemctl status cups.service
-
+status=0
+install_stage_packages printer || status=1
+apply_stage_services printer || status=1
+((status == 0)) && log_success "Printing is configured"
+exit "$status"

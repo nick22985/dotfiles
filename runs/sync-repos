@@ -1,264 +1,121 @@
 #!/usr/bin/env bash
 
-# Clone GitHub repositories from private repos list (idempotent - skips existing)
-
-# Set DOTFILES_DIR if not already set
+set -u -o pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
-
-# Source shared utilities
 source "$DOTFILES_DIR/lib/utils.sh"
-
-# Parse arguments
 parse_args "$@"
+set_context "Repository sync"
 
-# Configuration
-PRIVATE_DIR="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private"
-REPOS_FILE="$PRIVATE_DIR/repos.txt"
-DEFAULT_CLONE_DIR="$HOME/repos"
+repos_file="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/repos.txt"
+clone_root="$(realpath -m -- "${REPOS_CLONE_DIR:-$HOME/repos}")"
+projects_root="$(realpath -m -- "${REPOS_PROJECTS_DIR:-$HOME/projects}")"
+home_root="$(realpath -m -- "$HOME")"
 
-# Allow override of clone directory
-CLONE_DIR="${REPOS_CLONE_DIR:-$DEFAULT_CLONE_DIR}"
-
-log "Syncing GitHub repositories..."
-
-# Check if private directory exists
-if [[ ! -d "$PRIVATE_DIR" ]]; then
-    log_warn "Private directory not found: $PRIVATE_DIR"
-    log_info "Make sure the private submodule is initialized"
-    return 0
+if [[ "$clone_root" != "$home_root"/* || "$projects_root" != "$home_root"/* ]]; then
+    log_error "Repository roots must stay below $home_root"
+    exit 1
+fi
+if [[ ! -f "$repos_file" ]]; then
+    log_error "Repository manifest is unavailable: $repos_file"
+    exit 1
 fi
 
-# Check if repos file exists
-if [[ ! -f "$REPOS_FILE" ]]; then
-    log_warn "Repos file not found: $REPOS_FILE"
-    log_info "Creating example repos.txt file..."
-
-    if [[ $DRY_RUN == "0" ]]; then
-        cat > "$REPOS_FILE" << 'EOF'
-# GitHub repositories to sync
-# Format: owner/repo [target_directory]
-# Lines starting with # are ignored
-#
-# Note: Repositories are cloned using SSH by default (git@github.com:owner/repo.git)
-# Make sure your SSH key is configured for GitHub, or use --https flag
-# Submodules are automatically initialized and updated for all repositories
-#
-# Target directory options:
-# 1. No directory specified: uses ~/repos/repo-name
-# 2. Relative path: relative to ~/repos/ (e.g., "work/project" -> ~/repos/work/project)
-# 3. Absolute path: exact path (e.g., "/opt/tools/repo")
-# 4. Home relative: starts with ~/ (e.g., "~/projects/work/repo")
-# 5. Environment variable: starts with $ (e.g., "$WORKSPACE/repo")
-#
-# Examples:
-# nick22985/my-private-repo                           # -> ~/repos/my-private-repo
-# nick22985/another-repo custom-name                  # -> ~/repos/custom-name
-# organization/project work/project                   # -> ~/repos/work/project
-# company/work-tool ~/projects/work/tool              # -> ~/projects/work/tool
-# personal/side-project ~/projects/personal/project   # -> ~/projects/personal/project
-# system/admin-tool /opt/admin-tools/tool             # -> /opt/admin-tools/tool
-# dev/workspace-tool $WORKSPACE/tools/repo            # -> $WORKSPACE/tools/repo
-
-# Add your repositories below:
-# nick22985/private-repo1                             # -> ~/repos/private-repo1
-# nick22985/work-project ~/projects/work/project      # -> ~/projects/work/project
-# nick22985/personal-project ~/projects/personal/project # -> ~/projects/personal/project
-# company/internal-tool ~/projects/work/internal-tool # -> ~/projects/work/internal-tool
-# system/admin-scripts /opt/scripts/admin             # -> /opt/scripts/admin
-# dev/workspace-tool $WORKSPACE/tools/repo            # -> $WORKSPACE/tools/repo (if WORKSPACE is set)
-
-EOF
-        log_success "Created example repos.txt at $REPOS_FILE"
-        log_info "Edit this file to add your repositories"
-    else
-        log "Would create example repos.txt file"
+status=0
+processed=0
+cloned=0
+skipped=0
+while read -r repo_spec target option extra; do
+    [[ -n "${repo_spec:-}" && "$repo_spec" != \#* ]] || continue
+    processed=$((processed + 1))
+    if [[ -n "${extra:-}" ]]; then
+        log_error "Invalid repository entry: $repo_spec ${target:-} ${option:-} ${extra:-}"
+        status=1
+        continue
     fi
-    return 0
-fi
-
-# Create clone directory if it doesn't exist
-if [[ ! -d "$CLONE_DIR" ]]; then
-    log_info "Creating clone directory: $CLONE_DIR"
-    if [[ $DRY_RUN == "0" ]]; then
-        mkdir -p "$CLONE_DIR"
-    fi
-fi
-
-log_info "Reading repositories from: $REPOS_FILE"
-log_info "Clone directory: $CLONE_DIR"
-
-# Process repos file
-repo_count=0
-success_count=0
-skip_count=0
-
-while IFS= read -r line || [[ -n "$line" ]]; do
-    # Skip empty lines and comments
-    if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+    case "$repo_spec" in
+        git@github.com:*) repo_spec="${repo_spec#git@github.com:}" ;;
+        https://github.com/*) repo_spec="${repo_spec#https://github.com/}" ;;
+    esac
+    repo_spec="${repo_spec%.git}"
+    if [[ ! "$repo_spec" =~ ^[[:alnum:]_.-]+/[[:alnum:]_.-]+$ ]]; then
+        log_error "Only owner/repository or canonical github.com URLs are allowed"
+        status=1
         continue
     fi
 
-    # Parse line: "owner/repo [target_dir] [--bare]"
-    read -r -a words <<< "$line"
-    repo_spec="${words[0]}"
-
-    if [[ -z "$repo_spec" ]]; then
-        continue
-    fi
-
-    target_dir=""
-    bare_clone=false
-    other_options=()
-
-    if [[ ${#words[@]} -gt 1 ]] && [[ "${words[1]}" != --* ]]; then
-        target_dir="${words[1]}"
-        other_options=("${words[@]:2}")
-    else
-        other_options=("${words[@]:1}")
-    fi
-
-    for option in "${other_options[@]}"; do
+    bare=0
+    if [[ "${target:-}" == "--bare" ]]; then
+        bare=1
+        target=""
+    elif [[ -n "${option:-}" ]]; then
         if [[ "$option" == "--bare" ]]; then
-            bare_clone=true
-        fi
-    done
-
-    repo_count=$((repo_count + 1))
-
-    # Check if repo_spec is a full Git URL or owner/repo format
-    if [[ "$repo_spec" =~ ^(git@|https?://) ]]; then
-        # Full Git URL provided
-        git_url="$repo_spec"
-        # Extract repo name from URL for directory naming
-        if [[ "$repo_spec" =~ /([^/]+)\.git$ ]]; then
-            clean_repo_name="${BASH_REMATCH[1]}"
-        elif [[ "$repo_spec" =~ /([^/]+)/?$ ]]; then
-            clean_repo_name="${BASH_REMATCH[1]}"
+            bare=1
         else
-            log_warn "Could not extract repo name from URL: $repo_spec"
+            log_error "Unknown repository option: $option"
+            status=1
             continue
         fi
-        log "  → Using provided Git URL: $git_url"
-    elif [[ "$repo_spec" =~ ^[^/]+/[^/]+$ ]]; then
-        # owner/repo format - construct SSH URL
-        owner=$(echo "$repo_spec" | cut -d'/' -f1)
-        repo_name=$(echo "$repo_spec" | cut -d'/' -f2)
-        clean_repo_name="${repo_name%.git}"
-        git_url="git@github.com:$repo_spec.git"
-        log "  → Constructed SSH URL: $git_url"
+    fi
+
+    repo_name="${repo_spec#*/}"
+    repo_name="${repo_name%.git}"
+    if [[ -z "${target:-}" ]]; then
+        destination="$(realpath -m -- "$clone_root/$repo_name")"
+    elif [[ "$target" == "~/"* ]]; then
+        destination="$(realpath -m -- "${target/#\~/$HOME}")"
+    elif [[ "$target" == /* || "$target" == *'$'* || "$target" == *'`'* ]]; then
+        log_error "Repository targets cannot be absolute or shell-expanded: $target"
+        status=1
+        continue
     else
-        log_warn "Invalid repo format: $repo_spec (expected: owner/repo or full Git URL)"
+        destination="$(realpath -m -- "$clone_root/$target")"
+    fi
+    if [[ "$destination" != "$clone_root"/* && "$destination" != "$projects_root"/* ]]; then
+        log_error "Repository target is outside managed roots: $destination"
+        status=1
         continue
     fi
-    log_info "Processing: $repo_spec"
 
-    # Determine target directory
-    if [[ -n "$target_dir" ]]; then
-        # Check if target_dir is an absolute path or starts with ~/
-        if [[ "$target_dir" =~ ^/ ]]; then
-            # Absolute path
-            full_path="$target_dir"
-            log "  → Using absolute path: $full_path"
-        elif [[ "$target_dir" =~ ^~/ ]]; then
-            # Home directory path
-            full_path="${target_dir/#\~/$HOME}"
-            log "  → Using home relative path: $full_path"
-        elif [[ "$target_dir" =~ ^\$ ]]; then
-            # Environment variable path
-            full_path=$(eval echo "$target_dir")
-            log "  → Using environment variable path: $full_path"
-        else
-            # Relative to clone directory
-            full_path="$CLONE_DIR/$target_dir"
-            log "  → Using relative path: $full_path"
+    if git -C "$destination" rev-parse --git-dir >/dev/null 2>&1; then
+        skipped=$((skipped + 1))
+        continue
+    fi
+    if [[ -e "$destination" || -L "$destination" ]]; then
+        log_error "Repository target exists but is not a Git repository: $destination"
+        status=1
+        continue
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        bare_text=""
+        ((bare == 0)) || bare_text=" as bare"
+        log_info "Would clone $repo_spec to $destination$bare_text"
+        cloned=$((cloned + 1))
+        continue
+    fi
+
+    parent="$(dirname "$destination")"
+    mkdir -p "$parent" || { status=1; continue; }
+    clone_tmp="$(mktemp -d "$parent/.dotfiles-clone.XXXXXX")" || {
+        log_error "Could not create a clone directory below $parent"
+        status=1
+        continue
+    }
+    clone_args=(git clone)
+    ((bare == 0)) || clone_args+=(--bare)
+    if "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
+        && mv -T -- "$clone_tmp" "$destination"; then
+        cloned=$((cloned + 1))
+        if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
+            git -C "$destination" submodule update --init --recursive || status=1
         fi
     else
-        full_path="$CLONE_DIR/$clean_repo_name"
-        log "  → Using default path: $full_path"
+        log_error "Failed to clone $repo_spec"
+        [[ "$clone_tmp" == "$parent"/.dotfiles-clone.* ]] && rm -rf -- "$clone_tmp"
+        status=1
     fi
+done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$repos_file")
 
-    if git -C "$full_path" rev-parse --git-dir &>/dev/null; then
-        # Repository exists, skip it
-        log "  ✓ Repository already exists, skipping"
-        skip_count=$((skip_count + 1))
-    else
-        # Repository doesn't exist, clone it
-        log "  → Cloning repository..."
-
-        if [[ $DRY_RUN == "0" ]]; then
-            # Create parent directory if needed
-            parent_dir=$(dirname "$full_path")
-            mkdir -p "$parent_dir"
-
-            # Use the provided or constructed Git URL
-            log "  → Cloning repository: $git_url"
-            
-            clone_cmd=("git" "clone")
-            if [[ "$bare_clone" == "true" ]]; then
-                clone_cmd+=("--bare")
-            fi
-
-            if "${clone_cmd[@]}" "$git_url" "$full_path" 2>/dev/null; then
-                if [[ "$git_url" =~ ^git@ ]]; then
-                    log "  ✓ Cloned $repo_spec (SSH)"
-                else
-                    log "  ✓ Cloned $repo_spec (HTTPS)"
-                fi
-
-                # Initialize and update submodules if they exist
-                (
-                    cd "$full_path"
-                    if [[ -f .gitmodules ]]; then
-                        log "  → Initializing submodules..."
-                        if git submodule update --init --recursive 2>/dev/null; then
-                            log "  ✓ Submodules initialized and updated"
-                        else
-                            log "  ⚠ Failed to initialize submodules"
-                        fi
-                    fi
-                )
-
-                success_count=$((success_count + 1))
-            else
-                if [[ "$git_url" =~ ^git@ ]]; then
-                    log "  ⚠ Failed to clone $repo_spec via SSH"
-                    log "  → Make sure your SSH key is configured for GitHub"
-                else
-                    log "  ⚠ Failed to clone $repo_spec via HTTPS"
-                    log "  → Check your credentials and network connection"
-                fi
-                # Clean up failed clone attempt
-                [[ -d "$full_path" ]] && rm -rf "$full_path"
-            fi
-        else
-            clone_type=" (via SSH)"
-            if [[ ! "$git_url" =~ ^git@ ]]; then
-                clone_type=" (via HTTPS)"
-            fi
-            bare_text=""
-            if [[ "$bare_clone" == "true" ]]; then
-                bare_text=" as bare repository"
-            fi
-            log "  Would clone $repo_spec to $full_path$clone_type$bare_text"
-            log "  Would initialize submodules if present"
-            success_count=$((success_count + 1))
-        fi
-    fi
-
-done < "$REPOS_FILE"
-
-# Summary
-if [[ $DRY_RUN == "0" ]]; then
-    log_success "Repository sync complete"
-    log "  → Processed: $repo_count repositories"
-    log "  → Cloned: $success_count"
-    if [[ $skip_count -gt 0 ]]; then
-        log "  → Skipped (already exist): $skip_count"
-    fi
-    if [[ $((repo_count - success_count - skip_count)) -gt 0 ]]; then
-        log "  → Failed: $((repo_count - success_count - skip_count))"
-    fi
-else
-    log "Would process $repo_count repositories (clone new, skip existing)"
-fi
+log_info "Repositories: $processed declared, $cloned cloned, $skipped already present"
+((status == 0)) && log_success "Repository sync is complete"
+exit "$status"

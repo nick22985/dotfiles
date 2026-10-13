@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN install -Dm644 /usr/share/lua/5.1/dkjson.lua /usr/local/share/lua/5.1/dkjson.lua
 
 RUN mkdir -p "${USER_HOME}/.config/bat/themes" "${USER_HOME}/.cache/bat" \
-    && curl -fsSL -o "${USER_HOME}/.config/bat/themes/Catppuccin Mocha.tmTheme" \
+    && sbx-fetch -o "${USER_HOME}/.config/bat/themes/Catppuccin Mocha.tmTheme" \
         "https://raw.githubusercontent.com/catppuccin/bat/main/themes/Catppuccin%20Mocha.tmTheme" \
     && BAT_CONFIG_DIR="${USER_HOME}/.config/bat" BAT_CACHE_PATH="${USER_HOME}/.cache/bat" batcat cache --build \
     && BAT_CACHE_PATH="${USER_HOME}/.cache/bat" batcat --list-themes | grep -q "Catppuccin Mocha" \

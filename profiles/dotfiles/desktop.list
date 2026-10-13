@@ -1,0 +1,14 @@
+# Configuration shared by graphical desktops.
+.wezterm.lua
+.config/Kvantum
+.config/activitywatch
+.config/alacritty
+.config/audio-switcher
+.config/autostart
+.config/ghostty
+.config/gtk-3.0
+.config/gtk-4.0
+.config/kitty
+.config/qt5ct
+.config/qt6ct
+.local/share/flatpak/overrides

@@ -1,286 +1,40 @@
 #!/usr/bin/env bash
 
-
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
 source "$DOTFILES_DIR/lib/utils.sh"
-
 parse_args "$@"
+set_context "JavaScript runtimes"
 
-log "Setting up JavaScript runtimes (mise + Bun + Deno)..."
-
-# Set context for error tracking
-set_context "JavaScript Runtimes"
-
-if ! command_exists curl && ! command_exists wget; then
-    log_error "Neither curl nor wget is available. Run the 'packages' script first."
+manifest="$DOTFILES_DIR/profiles/tools/development.list"
+if ! command_exists mise; then
+    log_error "mise is required; install the development package manifest first"
+    exit 1
+fi
+if [[ ! -f "$manifest" ]]; then
+    log_error "Tool manifest not found: $manifest"
     exit 1
 fi
 
-if command_exists mise; then
-    current_version=$(mise --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
-    log "✓ mise already installed (version: $current_version)"
-
-    if [[ "${UPDATE_MISE:-no}" == "yes" ]]; then
-        log "→ Updating mise to latest version..."
-        if [[ $DRY_RUN == "0" ]]; then
-            mise self-update || log "⚠ Failed to update mise"
-        fi
-        log "✓ mise updated"
+status=0
+while read -r tool version active extra; do
+    [[ -n "${tool:-}" && "$tool" != \#* ]] || continue
+    if [[ -n "${extra:-}" || ! "$tool" =~ ^[a-z0-9_-]+$ \
+        || ! "$version" =~ ^[a-zA-Z0-9._+-]+$ || ! "$active" =~ ^(active|installed)$ ]]; then
+        log_error "Invalid tool entry in $manifest"
+        status=1
+        continue
     fi
-else
-    log "→ Installing mise..."
-    if [[ $DRY_RUN == "0" ]]; then
-        if command_exists curl; then
-            curl https://mise.run | sh
-        else
-            wget -qO- https://mise.run | sh
-        fi
-        
-        # Add mise to PATH for this session
-        export PATH="$HOME/.local/bin:$PATH"
-    else
-        log "Would install mise from https://mise.run"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would install $tool@$version with mise ($active)"
+        continue
     fi
-    log "✓ mise installed"
-fi
-
-if [[ $DRY_RUN == "0" ]] && command -v mise &> /dev/null; then
-    log "→ Installing Node.js versions..."
-
-    log "→ Installing Node.js LTS..."
-    mise install node@lts
-    mise use -g node@lts
-
-    log "→ Installing Node.js latest..."
-    mise install node@latest
-
-    log "✓ Installed Node.js versions:"
-    mise ls node
-
-    log "→ Installing global npm packages..."
-    global_packages=()
-
-    for package in "${global_packages[@]}"; do
-        log "→ Installing $package..."
-        npm install -g "$package" &> /dev/null || log "⚠ Failed to install $package"
-    done
-
-    log "✓ Global npm packages installed"
-
-elif [[ $DRY_RUN == "1" ]]; then
-    log "Would install Node.js LTS and latest versions"
-    log "Would install global packages: yarn pnpm typescript @angular/cli @vue/cli create-react-app next nuxt eslint prettier nodemon pm2 serve http-server live-server json-server"
-fi
-
-log "→ Configuring shell profiles for mise..."
-
-add_mise_to_profile() {
-    local profile_file="$1"
-    local profile_name="$2"
-
-    if [[ -f "$profile_file" ]]; then
-        if ! grep -q "# mise (development tool version manager)" "$profile_file" 2>/dev/null; then
-            log "→ Adding mise to $profile_name"
-            if [[ $DRY_RUN == "0" ]]; then
-                cat >> "$profile_file" << 'EOF'
-
-# mise (development tool version manager)
-export PATH="$HOME/.local/bin:$PATH"
-if command -v mise >/dev/null 2>&1; then
-    eval "$(mise activate $(basename "$SHELL") --shims)"
-fi
-EOF
-            fi
-        else
-            log "✓ mise already configured in $profile_name"
-        fi
-    else
-        log "→ $profile_name not found, skipping"
+    mise install "$tool@$version" || { status=1; continue; }
+    if [[ "$active" == "active" ]]; then
+        mise use --global "$tool@$version" || status=1
     fi
-}
+done < "$manifest"
 
-add_mise_to_profile "$HOME/.bashrc" ".bashrc"
-add_mise_to_profile "$HOME/.zshrc" ".zshrc"
-add_mise_to_profile "$HOME/.profile" ".profile"
-
-if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
-    fish_config="$HOME/.config/fish/config.fish"
-    if [[ -f "$fish_config" ]]; then
-        if ! grep -q "# mise (development tool version manager)" "$fish_config" 2>/dev/null; then
-            log "→ Adding mise to fish config"
-            if [[ $DRY_RUN == "0" ]]; then
-                echo "" >> "$fish_config"
-                echo "# mise (development tool version manager)" >> "$fish_config"
-                echo "fish_add_path \$HOME/.local/bin" >> "$fish_config"
-                echo "mise activate fish | source" >> "$fish_config"
-            fi
-        else
-            log "✓ mise already configured in fish config"
-        fi
-    fi
-fi
-
-log "→ Installing Bun..."
-
-if command_exists bun; then
-    current_bun_version=$(bun --version 2>/dev/null || echo "unknown")
-    log "✓ Bun already installed (version: $current_bun_version)"
-
-    if [[ "${UPDATE_BUN:-no}" == "yes" ]]; then
-        log "→ Updating Bun to latest version..."
-        if [[ $DRY_RUN == "0" ]]; then
-            bun upgrade || log "⚠ Failed to upgrade Bun"
-        fi
-        log "✓ Bun updated"
-    fi
-else
-    log "→ Installing Bun from official installer..."
-    if [[ $DRY_RUN == "0" ]]; then
-        if command_exists curl; then
-            curl -fsSL https://bun.sh/install | bash
-        else
-            log "⚠ curl not available, cannot install Bun"
-        fi
-
-        export PATH="$HOME/.bun/bin:$PATH"
-    else
-        log "Would install Bun from https://bun.sh/install"
-    fi
-    log "✓ Bun installed"
-fi
-
-log "→ Configuring shell profiles for Bun..."
-
-add_bun_to_profile() {
-    local profile_file="$1"
-    local profile_name="$2"
-
-    if [[ -f "$profile_file" ]]; then
-        if ! grep -q "# Bun" "$profile_file" 2>/dev/null; then
-            log "→ Adding Bun to $profile_name"
-            if [[ $DRY_RUN == "0" ]]; then
-                cat >> "$profile_file" << 'EOF'
-
-# Bun
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
-EOF
-            fi
-        else
-            log "✓ Bun already configured in $profile_name"
-        fi
-    else
-        log "→ $profile_name not found, skipping"
-    fi
-}
-
-add_bun_to_profile "$HOME/.bashrc" ".bashrc"
-add_bun_to_profile "$HOME/.zshrc" ".zshrc"
-add_bun_to_profile "$HOME/.profile" ".profile"
-
-if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
-    fish_config="$HOME/.config/fish/config.fish"
-    if [[ -f "$fish_config" ]]; then
-        if ! grep -q "# Bun" "$fish_config" 2>/dev/null; then
-            log "→ Adding Bun to fish config"
-            if [[ $DRY_RUN == "0" ]]; then
-                echo "" >> "$fish_config"
-                echo "# Bun" >> "$fish_config"
-                echo "set -gx BUN_INSTALL \"\$HOME/.bun\"" >> "$fish_config"
-                echo "set -gx PATH \"\$BUN_INSTALL/bin\" \$PATH" >> "$fish_config"
-            fi
-        else
-            log "✓ Bun already configured in fish config"
-        fi
-    fi
-fi
-
-if [[ $DRY_RUN == "0" ]] && command_exists bun; then
-    log "→ Installing global packages with Bun..."
-    bun_global_packages=()
-
-    for package in "${bun_global_packages[@]}"; do
-        log "→ Installing $package with Bun..."
-        bun add -g "$package" &> /dev/null || log "⚠ Failed to install $package with Bun"
-    done
-
-    log "✓ Global Bun packages installed"
-elif [[ $DRY_RUN == "1" ]]; then
-    log "Would install global packages with Bun: typescript prettier eslint @biomejs/biome vite vitest tsx"
-fi
-
-log "→ Installing Deno..."
-
-if command_exists deno; then
-    current_deno_version=$(deno --version 2>/dev/null | head -n1 | cut -d' ' -f2 || echo "unknown")
-    log "✓ Deno already installed (version: $current_deno_version)"
-
-    if [[ "${UPDATE_DENO:-no}" == "yes" ]]; then
-        log "→ Updating Deno to latest version..."
-        if [[ $DRY_RUN == "0" ]]; then
-            deno upgrade || log "⚠ Failed to upgrade Deno"
-        fi
-        log "✓ Deno updated"
-    fi
-else
-    log "→ Installing Deno from official installer..."
-    if [[ $DRY_RUN == "0" ]]; then
-        if command_exists curl; then
-            curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.deno" sh -s -- -y
-        else
-            log "⚠ curl not available, cannot install Deno"
-        fi
-
-        export PATH="$HOME/.deno/bin:$PATH"
-    else
-        log "Would install Deno from https://deno.land/install.sh"
-    fi
-    log "✓ Deno installed"
-fi
-
-log "→ Configuring shell profiles for Deno..."
-
-add_deno_to_profile() {
-    local profile_file="$1"
-    local profile_name="$2"
-
-    if [[ -f "$profile_file" ]]; then
-        if ! grep -q "# Deno" "$profile_file" 2>/dev/null; then
-            log "→ Adding Deno to $profile_name"
-            if [[ $DRY_RUN == "0" ]]; then
-                cat >> "$profile_file" << 'EOF'
-
-# Deno
-export DENO_INSTALL="$HOME/.deno"
-export PATH="$DENO_INSTALL/bin:$PATH"
-EOF
-            fi
-        else
-            log "✓ Deno already configured in $profile_name"
-        fi
-    else
-        log "→ $profile_name not found, skipping"
-    fi
-}
-
-add_deno_to_profile "$HOME/.bashrc" ".bashrc"
-add_deno_to_profile "$HOME/.zshrc" ".zshrc"
-add_deno_to_profile "$HOME/.profile" ".profile"
-
-if command_exists fish && [[ -d "$HOME/.config/fish" ]]; then
-    fish_config="$HOME/.config/fish/config.fish"
-    if [[ -f "$fish_config" ]]; then
-        if ! grep -q "# Deno" "$fish_config" 2>/dev/null; then
-            log "→ Adding Deno to fish config"
-            if [[ $DRY_RUN == "0" ]]; then
-                echo "" >> "$fish_config"
-                echo "# Deno" >> "$fish_config"
-                echo "set -gx DENO_INSTALL \"\$HOME/.deno\"" >> "$fish_config"
-                echo "set -gx PATH \"\$DENO_INSTALL/bin\" \$PATH" >> "$fish_config"
-            fi
-        else
-            log "✓ Deno already configured in fish config"
-        fi
-    fi
-fi
-
-log_success "JavaScript runtimes setup complete"
+((status == 0)) && log_success "Pinned JavaScript runtimes are installed"
+exit "$status"

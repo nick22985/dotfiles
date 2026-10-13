@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Docker"
+
+status=0
+apply_stage_services docker || status=1
+apply_stage_groups docker || status=1
+((status == 0)) && log_success "Docker is configured; group access applies after the next login"
+exit "$status"

@@ -1,162 +1,29 @@
 #!/usr/bin/env bash
 
-
+set -u -o pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
-
 source "$DOTFILES_DIR/lib/utils.sh"
-
 parse_args "$@"
+set_context "SSH server"
 
-log "Setting up SSH server with secure configuration..."
+if [[ "$DRY_RUN" != "1" && ! -s "$HOME/.ssh/authorized_keys" ]]; then
+    log_error "Refusing key-only SSH without a non-empty $HOME/.ssh/authorized_keys"
+    exit 1
+fi
 
-if ! command_exists sshd; then
-    log_info "Installing openssh server..."
-    if command_exists pacman; then
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo pacman -S --needed --noconfirm openssh
-        fi
-    elif command_exists apt; then
-        if [[ $DRY_RUN == "0" ]]; then
-            sudo apt update -qq
-            sudo apt install -y openssh-server
-        fi
-    else
-        log_warn "Unknown package manager. Please install openssh-server manually"
-        exit 1
+status=0
+apply_stage_system_files ssh || status=1
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would generate missing SSH host keys and validate the effective configuration"
+else
+    sudo ssh-keygen -A || status=1
+    sudo sshd -t || status=1
+    if ! sudo sshd -T | grep -Fxq 'passwordauthentication no'; then
+        log_error "The managed SSH drop-in is not active; check sshd_config Include directives"
+        status=1
     fi
-    log_success "OpenSSH server installed"
-else
-    log_success "OpenSSH server already installed"
 fi
-
-log_info "Updating SSH daemon configuration for key-only authentication..."
-
-if [[ $DRY_RUN == "0" ]]; then
-    if [[ -f /etc/ssh/sshd_config ]]; then
-        sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
-        log_success "Backed up existing SSH config"
-    fi
-
-    update_ssh_config() {
-        local key="$1"
-        local value="$2"
-        local config_file="/etc/ssh/sshd_config"
-
-        if sudo grep -q "^#*${key}" "$config_file"; then
-            sudo sed -i "s/^#*${key}.*/${key} ${value}/" "$config_file"
-        else
-            echo "${key} ${value}" | sudo tee -a "$config_file" > /dev/null
-        fi
-    }
-
-    log_info "Disabling password authentication..."
-    update_ssh_config "PasswordAuthentication" "no"
-    update_ssh_config "ChallengeResponseAuthentication" "no"
-    update_ssh_config "PermitEmptyPasswords" "no"
-
-    log_info "Enabling public key authentication..."
-    update_ssh_config "PubkeyAuthentication" "yes"
-
-    log_info "Disabling root login..."
-    update_ssh_config "PermitRootLogin" "no"
-
-    log_info "Setting security limits..."
-    update_ssh_config "MaxAuthTries" "3"
-
-    log_success "SSH daemon configuration updated with secure settings"
-else
-    log "Would backup existing SSH config and update security settings:"
-    log "  - PasswordAuthentication no"
-    log "  - ChallengeResponseAuthentication no"
-    log "  - PermitEmptyPasswords no"
-    log "  - PubkeyAuthentication yes"
-    log "  - PermitRootLogin no"
-    log "  - MaxAuthTries 3"
-fi
-
-log_info "Ensuring SSH host keys exist..."
-if [[ $DRY_RUN == "0" ]]; then
-    sudo ssh-keygen -A 2>/dev/null || log_warn "Failed to generate host keys (may already exist)"
-    log_success "SSH host keys ready"
-else
-    log "Would generate SSH host keys if needed"
-fi
-
-log_info "Setting SSH directory permissions..."
-if [[ $DRY_RUN == "0" ]]; then
-    sudo chmod 755 /etc/ssh
-    sudo chmod 600 /etc/ssh/sshd_config
-    sudo chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
-    sudo chmod 644 /etc/ssh/ssh_host_*_key.pub 2>/dev/null || true
-    log_success "SSH permissions set"
-else
-    log "Would set proper SSH directory and file permissions"
-fi
-
-log_info "Testing SSH configuration..."
-if [[ $DRY_RUN == "0" ]]; then
-    if sudo sshd -t; then
-        log_success "SSH configuration is valid"
-    else
-        log_error "SSH configuration test failed"
-        exit 1
-    fi
-else
-    log "Would test SSH configuration validity"
-fi
-
-log_info "Enabling SSH service..."
-if [[ $DRY_RUN == "0" ]]; then
-    if command_exists systemctl; then
-        sudo systemctl enable sshd
-        sudo systemctl restart sshd
-
-        if sudo systemctl is-active --quiet sshd; then
-            log_success "SSH service is running"
-        else
-            log_warn "SSH service failed to start"
-            sudo systemctl status sshd --no-pager -l
-        fi
-    else
-        log_warn "systemctl not available, please start SSH service manually"
-    fi
-else
-    log "Would enable and start SSH service"
-fi
-
-log_info "Setting up user SSH directory..."
-ssh_dir="$HOME/.ssh"
-if [[ $DRY_RUN == "0" ]]; then
-    mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
-
-    if [[ ! -f "$ssh_dir/authorized_keys" ]]; then
-        touch "$ssh_dir/authorized_keys"
-        chmod 600 "$ssh_dir/authorized_keys"
-        log_success "Created authorized_keys file"
-    else
-        log_success "authorized_keys file already exists"
-    fi
-
-    log_success "User SSH directory configured"
-else
-    log "Would create and configure user SSH directory"
-fi
-
-log_info "Checking for SSH key pair..."
-if [[ ! -f "$ssh_dir/id_ed25519" && ! -f "$ssh_dir/id_rsa" ]]; then
-    if [[ $DRY_RUN == "0" ]]; then
-        log_info "Generating new SSH key pair (Ed25519)..."
-        ssh-keygen -t ed25519 -f "$ssh_dir/id_ed25519" -N "" -C "$(whoami)@$(hostname)"
-        chmod 600 "$ssh_dir/id_ed25519"
-        chmod 644 "$ssh_dir/id_ed25519.pub"
-        log_success "SSH key pair generated: $ssh_dir/id_ed25519"
-        log_info "Public key content:"
-        cat "$ssh_dir/id_ed25519.pub"
-    else
-        log "Would generate new SSH key pair (Ed25519)"
-    fi
-else
-    log_success "SSH key pair already exists"
-fi
+((status == 0)) && apply_stage_services ssh || status=1
+((status == 0)) && log_success "SSH server is configured for key-only access"
+exit "$status"

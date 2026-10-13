@@ -1,0 +1,42 @@
+# Audit entries intentionally kept outside this dotfiles install.
+# Values are shell globs. Supported scopes:
+#   package, package-group, flatpak, config, bin, system-unit, user-unit,
+#   service, group, managed-file, system-file, tool, default
+
+# The base Arch installation is outside the scope of this post-install setup.
+package:base
+package:linux
+package:linux-*
+package:*-ucode
+
+# KDE Plasma is installed on this machine but intentionally disabled in .ignore.
+# The audit reports other groups containing four or more visible packages.
+package-group:plasma
+package-group:kde-applications
+
+# Generated or installer-owned executables.
+bin:activate-global-python-argcomplete
+bin:claude
+bin:gmapsapiscanner
+bin:graphify
+bin:ijfmt
+bin:musl-gcc
+bin:pipx
+bin:python-argcomplete-*
+bin:register-python-argcomplete
+bin:sbx*
+bin:updog
+bin:userpath
+bin:x86_64-linux-musl-*
+
+# Units enabled by the base desktop or user session.
+system-unit:dbus-broker.service
+system-unit:getty@.service
+user-unit:p11-kit-server.socket
+user-unit:systemd-tmpfiles-setup.service
+user-unit:xdg-user-dirs.service
+
+# Examples:
+# config:google-chrome*
+# flatpak:org.example.Application
+# user-unit:example.service

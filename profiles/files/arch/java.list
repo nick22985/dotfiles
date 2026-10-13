@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/profile.d/jre.sh /etc/profile.d/jre.sh

@@ -1,0 +1,25 @@
+# name|root|dependencies|platforms|risk|description
+packages|1||arch|normal|Install profile package manifests
+git|0|packages|arch|normal|Check Git and repository metadata
+fonts|1|packages|arch|normal|Install fonts and refresh the font cache
+shell|0|packages|arch|normal|Configure login shells
+dotfiles|0||arch|normal|Deploy selected user configuration bundles
+oh-my-zsh|0|dotfiles|arch|normal|Verify the repository-managed Zsh plugins
+java|1|packages|arch|high|Install Java and its declared system files
+tmux|0|dotfiles|arch|normal|Install tmux plugins
+hypr|1|packages|arch|normal|Install and configure Hyprland
+walker|0|hypr|arch|normal|Install Walker and Elephant
+node|0|packages|arch|normal|Install pinned JavaScript runtimes
+docker|1|packages|arch|normal|Enable Docker and grant group access
+ssh|1|packages|arch|high|Configure the SSH server
+sync-repos|0|git|arch|normal|Clone declared development repositories
+sbx|0|packages|arch|normal|Build and install sbx
+flatpak|0|packages|arch|normal|Install declared Flatpak applications
+snap|1|packages|arch|normal|Install declared Snap applications
+grub-multiboot|1|packages|arch|high|Configure GRUB multiboot
+kde-plasma|1|packages|arch|normal|Install and enable Plasma
+virtualization|1|packages|arch|normal|Enable libvirt and grant group access
+bluetooth|1|packages|arch|normal|Enable Bluetooth
+defaults|0|packages|arch|normal|Apply declared user application defaults
+clipboard|1|packages|arch|normal|Install screenshot and clipboard tools
+printer|1|packages|arch|normal|Install and enable printing

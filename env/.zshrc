@@ -200,11 +200,14 @@ vv() {
 
 fpath+=${ZDOTDIR:-~}/.zsh_functions
 
-[ -f ~/.env ] && {
-    set -o allexport
-    source ~/.env
-    set +o allexport
-}
+for env_file in ~/.env ~/.config/.nickInstall/install/configs/private/.env; do
+    [ -f "$env_file" ] && {
+        set -o allexport
+        source "$env_file"
+        set +o allexport
+    }
+done
+unset env_file
 [ -f "$HOME/.deno/env" ] && . "$HOME/.deno/env"
 
 autoload -Uz compinit
@@ -244,6 +247,40 @@ if command -v mise >/dev/null 2>&1; then
 fi
 
 alias ls='ls --block-size=MB'
+
+# Confirm any forced git command (--force*, -f clusters, +refspec pushes)
+git() {
+  local subcmd="" arg forced=0 skip=0
+  for arg in "$@"; do
+    (( skip )) && { skip=0; continue }
+    [[ "$arg" == "--" ]] && break
+    if [[ -z "$subcmd" && ( "$arg" == -C || "$arg" == -c ) ]]; then
+      skip=1
+      continue
+    fi
+    if [[ -z "$subcmd" && "$arg" != -* ]]; then
+      subcmd="$arg"
+      continue
+    fi
+    case "$arg" in
+      --force*) forced=1 ;;
+      -[a-zA-Z]*f*) [[ "$subcmd" != grep && "$arg" != --* ]] && forced=1 ;;
+      +*) [[ "$subcmd" == push ]] && forced=1 ;;
+    esac
+  done
+
+  if (( forced )); then
+    if [[ ! -t 0 ]]; then
+      echo "git: refusing forced command without a terminal: git $*" >&2
+      return 1
+    fi
+    local reply
+    read -r "reply?git: forced command, run 'git $*'? [y/N] "
+    [[ "$reply" == [yY] ]] || return 1
+  fi
+
+  command git "$@"
+}
 
 # alias npm='sbx shell -f npm npm'
 # alias npx='sbx shell -f npm npx'

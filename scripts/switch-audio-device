@@ -1,881 +1,469 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# PipeWire audio profile switcher.
+#
+# Profiles live in ~/.config/audio-switcher/profiles.conf, one per line:
+#   name|main_out|main_in|comm_out|comm_in|card:profile|description
+#
+# Device and card names accept shell globs, so USB serial/port suffixes don't break profiles.
+# "keep" leaves a device as is, "none" skips it, "same" (comm fields only) copies the main device.
+#
+# The main devices become the system defaults. Running streams from communication apps
+# (comm-apps.conf, or any stream tagged media.role=Communication) move to the comm devices and
+# every other stream moves to the main devices. Streams on virtual devices (EasyEffects,
+# loopbacks) are left where they are.
 
-# PipeWire Audio Profile Switcher
-# Switches audio input/output devices and moves all streams
-# Supports preset profiles for quick switching via keybinds
-# Handles both main and communication audio defaults + card profile switching
+# shellcheck disable=SC2016 # jq filters are single-quoted on purpose
+set -uo pipefail
 
-set -e
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
-
-# Configuration file for profiles
-CONFIG_DIR="$HOME/.config/audio-switcher"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/audio-switcher"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 EE_FILE="$CONFIG_DIR/easyeffects.conf"
+COMM_APPS_FILE="$CONFIG_DIR/comm-apps.conf"
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/audio-switcher/current_profile"
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/audio-switcher.lock"
 
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+DEFAULT_COMM_APPS=(discord vesktop webcord "webrtc voiceengine" zoom "teams*")
+DEVICE_TIMEOUT_MS=3000 # how long to wait for devices after a card profile change
+NOTIFY_TAG="string:x-canonical-private-synchronous:audio-switcher"
+EE_FLATPAK="com.github.wwmm.easyeffects"
+SEP=$'\x1f' # jq row separator; unlike tabs, read keeps empty fields
+
+JQ_DEFS='
+def props: .info.props // .props // {};
+def truthy: . == true or . == "true";
+def nodes($class): .[] | select(.type == "PipeWire:Interface:Node" and ((props."media.class" // "") | startswith($class)));
+def row: map(tostring) | join("\u001f");
+'
+
+# One row per stream: id, out|in, move|skip, current device, media.role, app name, binary, app id
+STREAMS_JQ='
+. as $all
+| ([$all[] | select(.type == "PipeWire:Interface:Node")] | INDEX(.id)) as $by_id
+| [$all[] | select(.type == "PipeWire:Interface:Link") | .info] as $links
+| nodes("Stream/") | (props."media.class") as $class
+| select($class == "Stream/Output/Audio" or $class == "Stream/Input/Audio")
+| .id as $id | props as $p
+| (first($links[] | select(."output-node-id" == $id or ."input-node-id" == $id)
+        | if ."output-node-id" == $id then ."input-node-id" else ."output-node-id" end) // null) as $peer_id
+| (($by_id[$peer_id | tostring] // {}) | props) as $peer
+| [ $id,
+    (if $class == "Stream/Output/Audio" then "out" else "in" end),
+    (if ($p."stream.monitor" | truthy) or ($p."node.dont-move" | truthy)
+        or $p."application.id" == $ee or (($p."node.name" // "") | startswith("ee_"))
+        or ($peer."node.virtual" | truthy) or (($peer."media.class" // "") | endswith("/Virtual"))
+        or (($peer."node.name" // "") | startswith("easyeffects"))
+      then "skip" else "move" end),
+    ($peer."node.name" // ""),
+    ($p."media.role" // ""),
+    ($p."application.name", $p."application.process.binary", $p."application.id" | . // "" | tostring | ascii_downcase)
+  ] | row
+'
+
+DUMP=""
+COMM_APPS=()
+EE_CMD=()
+declare -A RESOLVED=()
+
+notify() {
+    local urgency=$1
+    shift
+    command -v notify-send >/dev/null && notify-send -u "$urgency" -t 2500 -h "$NOTIFY_TAG" Audio "$*" 2>/dev/null
+    return 0
 }
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+die() {
+    echo "error: $*" >&2
+    notify critical "$*"
+    exit 1
 }
 
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_profile() {
-    echo -e "${CYAN}[PROFILE]${NC} $1"
-}
-
-print_communication() {
-    echo -e "${MAGENTA}[COMM]${NC} $1"
-}
-
-print_effects() {
-    echo -e "${CYAN}[FX]${NC} $1"
-}
-
-EE_CMD=""
-
-detect_easyeffects() {
-    if [ -n "$EE_CMD" ]; then
-        return 0
-    fi
-
-    if command -v easyeffects &> /dev/null; then
-        EE_CMD="easyeffects"
-        return 0
-    fi
-
-    if command -v flatpak &> /dev/null && flatpak info com.github.wwmm.easyeffects &> /dev/null; then
-        EE_CMD="flatpak run com.github.wwmm.easyeffects"
-        return 0
-    fi
-
+pactl_run() {
+    local err
+    err=$(timeout 5 pactl "$@" 2>&1 >/dev/null) && return 0
+    echo "warning: pactl $* failed${err:+: $err}" >&2
     return 1
 }
 
-easyeffects_running() {
-    pgrep -f "easyeffects" > /dev/null 2>&1
+config_lines() {
+    [[ -f $1 ]] && sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$1"
 }
 
-run_easyeffects() {
-    if ! detect_easyeffects; then
-        print_warning "EasyEffects not installed, skipping effects change"
+refresh_graph() {
+    DUMP=$(timeout 5 pw-dump 2>/dev/null) || die "pw-dump failed (is PipeWire running?)"
+}
+
+# graph [jq options...] FILTER: query the last pw-dump snapshot
+graph() {
+    jq -r "${@:1:$#-1}" "$JQ_DEFS ${*: -1}" <<<"$DUMP"
+}
+
+node_rows() {
+    graph --arg class "$1" 'nodes($class) | props | [."node.name" // "", ."node.description" // ""] | row'
+}
+
+default_node() {
+    graph --arg key "$1" 'first(.[] | select(.type == "PipeWire:Interface:Metadata" and props."metadata.name" == "default")
+        | .metadata[]? | select(.key == $key) | .value.name? // empty)'
+}
+
+node_description() {
+    local name desc
+    while IFS=$SEP read -r name desc; do
+        [[ $name == "$1" ]] && { echo "${desc:-$name}"; return; }
+    done < <(node_rows "$2")
+    echo "${1:-none}"
+}
+
+resolve() {
+    local pattern=$1 name _
+    while IFS=$SEP read -r name _; do
+        # shellcheck disable=SC2053 # pattern is a glob on purpose
+        [[ $name == $pattern ]] && { echo "$name"; return 0; }
+    done < <(node_rows "$2")
+    return 1
+}
+
+now_ms() {
+    local now=${EPOCHREALTIME//[.,]/}
+    echo $((now / 1000))
+}
+
+# Args are "class|pattern". Polls because card profile changes recreate nodes asynchronously.
+wait_for_devices() {
+    local spec missing deadline=$(($(now_ms) + DEVICE_TIMEOUT_MS))
+    while :; do
+        refresh_graph
+        missing=()
+        for spec in "$@"; do
+            RESOLVED[${spec#*|}]=$(resolve "${spec#*|}" "${spec%%|*}") || missing+=("${spec#*|}")
+        done
+        ((${#missing[@]} == 0)) && return 0
+        (($(now_ms) >= deadline)) && die "Device not found: ${missing[*]}"
+        sleep 0.1
+    done
+}
+
+set_card_profile() {
+    local spec=$1 name active
+    case $spec in
+        keep | none | "") return 0 ;;
+        *:*) ;;
+        *) die "Bad card profile '$spec', expected card:profile" ;;
+    esac
+    local card_pattern=${spec%%:*} profile=${spec#*:}
+    refresh_graph
+    while IFS=$SEP read -r name active; do
+        # shellcheck disable=SC2053
+        [[ $name == $card_pattern ]] || continue
+        # Re-applying the active profile recreates the nodes and glitches audio.
+        if [[ $active != "$profile" ]]; then
+            pactl_run set-card-profile "$name" "$profile" || die "Could not set card profile $profile"
+        fi
+        return 0
+    done < <(graph '.[] | select(.type == "PipeWire:Interface:Device")
+        | [props."device.name" // "", .info.params.Profile[0].name? // ""] | row')
+    die "Card not found: $card_pattern"
+}
+
+load_comm_apps() {
+    mapfile -t COMM_APPS < <(config_lines "$COMM_APPS_FILE")
+    ((${#COMM_APPS[@]})) || COMM_APPS=("${DEFAULT_COMM_APPS[@]}")
+}
+
+# is_comm_stream ROLE APP_IDS...: app ids arrive lowercased from jq
+is_comm_stream() {
+    local role=$1 id app
+    shift
+    [[ $role == Communication ]] && return 0
+    for id in "$@"; do
+        [[ -n $id ]] || continue
+        for app in "${COMM_APPS[@]}"; do
+            # shellcheck disable=SC2053
+            [[ $id == ${app,,} ]] && return 0
+        done
+    done
+    return 1
+}
+
+move_streams() {
+    local main_out=$1 comm_out=$2 main_in=$3 comm_in=$4
+    local id kind action peer role name binary app_id comm target
+    load_comm_apps
+    while IFS=$SEP read -r id kind action peer role name binary app_id; do
+        [[ $action == move ]] || continue
+        is_comm_stream "$role" "$name" "$binary" "$app_id" && comm=1 || comm=0
+        case $kind$comm in
+            out1) target=$comm_out ;;
+            out0) target=$main_out ;;
+            in1) target=$comm_in ;;
+            in0) target=$main_in ;;
+        esac
+        [[ -n $target && $target != "$peer" ]] || continue
+        if [[ $kind == out ]]; then
+            pactl_run move-sink-input "$id" "$target"
+        else
+            pactl_run move-source-output "$id" "$target"
+        fi
+    done < <(graph --arg ee "$EE_FLATPAK" "$STREAMS_JQ")
+}
+
+detect_easyeffects() {
+    ((${#EE_CMD[@]})) && return 0
+    if command -v easyeffects >/dev/null; then
+        EE_CMD=(easyeffects)
+    elif command -v flatpak >/dev/null && flatpak info "$EE_FLATPAK" >/dev/null 2>&1; then
+        EE_CMD=(flatpak run "$EE_FLATPAK")
+    else
         return 1
     fi
-
-    if ! easyeffects_running; then
-        print_effects "EasyEffects is not running, nothing to change"
-        return 2
-    fi
-
-    # shellcheck disable=SC2086
-    timeout 5s $EE_CMD "$@" > /dev/null 2>&1
 }
 
-set_easyeffects() {
-    local state="$1"
+ee_run() {
+    local message=$1
+    shift
+    if timeout 5 "${EE_CMD[@]}" "$@" >/dev/null 2>&1; then
+        echo "$message"
+    else
+        echo "EasyEffects command failed"
+    fi
+}
 
-    case "$state" in
-        on)
-            if run_easyeffects -b 2; then
-                print_effects "EasyEffects enabled"
-            fi
-            ;;
-        off)
-            if run_easyeffects -b 1; then
-                print_effects "EasyEffects bypassed (mic unprocessed)"
-            fi
-            ;;
+# Applies an EasyEffects action and prints a status message (nothing when there was nothing to do)
+ee_apply() {
+    local action=$1 state
+    case $action in none | "") return 0 ;; esac
+    detect_easyeffects || { echo "EasyEffects not installed"; return 0; }
+    pgrep -x easyeffects >/dev/null || { echo "EasyEffects not running"; return 0; }
+    case $action in
         status)
-            if ! detect_easyeffects; then
-                print_warning "EasyEffects not installed"
-                return 1
-            fi
-            if ! easyeffects_running; then
-                print_effects "EasyEffects is not running"
-                return 0
-            fi
-            # shellcheck disable=SC2086
-            local bypass
-            bypass=$(timeout 5s "$EE_CMD" -b 3 2>/dev/null | tr -d '[:space:]')
-            case "$bypass" in
-                *1|*true|*True) print_effects "EasyEffects: bypassed (effects OFF)" ;;
-                *0|*false|*False) print_effects "EasyEffects: active (effects ON)" ;;
-                *) print_effects "EasyEffects: unknown bypass state (${bypass:-no output})" ;;
+            state=$(timeout 5 "${EE_CMD[@]}" -b 3 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            case $state in
+                *1 | *true) echo "EasyEffects bypassed" ;;
+                *0 | *false) echo "EasyEffects active" ;;
+                *) echo "EasyEffects state unknown (${state:-no output})" ;;
             esac
             ;;
-        preset:*)
-            local preset="${state#preset:}"
-            if run_easyeffects -l "$preset"; then
-                print_effects "Loaded EasyEffects preset: $preset"
-            fi
-            ;;
-        none|"")
-            ;;
-        *)
-            print_warning "Unknown EasyEffects action: $state"
-            return 1
-            ;;
+        on) ee_run "EasyEffects on" -b 2 ;;
+        off) ee_run "EasyEffects bypassed" -b 1 ;;
+        preset:*) ee_run "EasyEffects preset: ${action#preset:}" -l "${action#preset:}" ;;
+        *) echo "Unknown EasyEffects action '$action'" ;;
     esac
-    return 0
 }
 
-create_default_ee_config() {
-    if [ -L "$EE_FILE" ]; then
-        print_status "EasyEffects actions are stowed from dotfiles, leaving alone"
-        return 0
-    fi
-
-    cat > "$EE_FILE" << 'EOF'
-# EasyEffects actions per audio profile
-# Format: profile_name=action
-#
-# Actions:
-#   on             Take EasyEffects out of bypass (processed mic)
-#   off            Put EasyEffects into bypass (raw, unprocessed mic)
-#   preset:<name>  Load the named EasyEffects preset instead of toggling bypass
-#   none           Leave EasyEffects alone
-#
-# Profiles with no entry here default to "none".
-# EasyEffects bypass is global, so "off" disables the output chain as well.
-
-gsx-scarlett=on
-btd-scarlett=on
-btd-full=none
-btd-mic=off
-EOF
-    print_success "Created EasyEffects profile actions in $EE_FILE"
+ee_profile_action() {
+    local key value action=none
+    while IFS='=' read -r key value; do
+        [[ ${key//[[:space:]]/} == "$1" ]] && action=${value//[[:space:]]/}
+    done < <(config_lines "$EE_FILE")
+    echo "$action"
 }
 
-apply_easyeffects() {
-    local profile_name="$1"
-
-    if [ ! -f "$EE_FILE" ]; then
-        return 0
-    fi
-
-    local action
-    action=$(grep -v "^[[:space:]]*#" "$EE_FILE" | grep "^[[:space:]]*$profile_name=" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || echo "")
-
-    if [ -z "$action" ]; then
-        return 0
-    fi
-
-    set_easyeffects "$action"
+require_profiles() {
+    [[ -f $PROFILES_FILE ]] || die "No profiles file, run --init to create $PROFILES_FILE"
 }
 
-# Check if PipeWire is running
-check_requirements() {
-    if ! pgrep -x "pipewire" > /dev/null; then
-        print_error "PipeWire is not running!"
-        exit 1
-    fi
-    
-    if ! command -v pactl &> /dev/null; then
-        print_error "pactl not found. Please install pulseaudio-utils."
-        exit 1
-    fi
-    
-    if ! command -v jq &> /dev/null; then
-        print_error "jq not found. Please install jq for communication defaults support."
-        exit 1
-    fi
+profile_names() {
+    config_lines "$PROFILES_FILE" | cut -d'|' -f1
 }
 
-# Initialize config directory and default profiles
-init_config() {
-    if [ ! -d "$CONFIG_DIR" ]; then
-        mkdir -p "$CONFIG_DIR"
-    fi
-    
-    if [ ! -f "$PROFILES_FILE" ]; then
-        create_default_profiles
-    fi
-
-    if [ ! -f "$EE_FILE" ]; then
-        create_default_ee_config
-    fi
+current_profile() {
+    [[ -f $STATE_FILE ]] && cat "$STATE_FILE"
 }
 
-# Create default profiles based on current devices
-create_default_profiles() {
-    cat > "$PROFILES_FILE" << 'EOF'
-# Audio Switcher Profiles Configuration
-# Format: profile_name|main_output|main_input|comm_output|comm_input|card_profile|description
-# 
-# Fields:
-# - profile_name: Name for the profile
-# - main_output: Main audio output device (music, games, etc.)
-# - main_input: Main audio input device
-# - comm_output: Communication audio output (voice calls, Discord, etc.)
-# - comm_input: Communication audio input (microphone for calls)
-# - card_profile: Optional card profile to set (format: card_name:profile_name)
-# - description: Human-readable description
-#
-# Use "same" to use the same device for main and comm
-# Use "none" to skip setting that device
-# Use "keep" to keep current setting
-
-# Gaming setup: GSX main + communication, Scarlett for recording
-gsx-scarlett|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-output-surround71|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-output|alsa_input.usb-Sennheiser_GSX_1200_Pro_Main_Audio_5698810299016559-00.analog-chat-input|none|GSX Gaming + Scarlett Recording
-
-# BTD 700 + Scarlett: Bluetooth main, Scarlett recording
-btd-scarlett|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_S2V6EVU3B1C1E7-00.HiFi__Mic1__source|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 + Scarlett
-
-# Full BTD 700: All audio through Bluetooth headset (output only)
-btd-full|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|keep|same|keep|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo|BTD 700 Only
-
-# BTD 700 with built-in mic: headset mode (stereo output + mono mic)
-btd-mic|alsa_output.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.analog-stereo|alsa_input.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02.mono-fallback|same|same|alsa_card.usb-Sennheiser_BTD_700_09B88CA93DB188AB3C08-02:output:analog-stereo+input:mono-fallback|BTD 700 + BTD Mic
-
-EOF
-    print_success "Created default profiles in $PROFILES_FILE"
-    print_warning "Edit $PROFILES_FILE to customize your audio profiles"
+# device_pattern VALUE [MAIN_VALUE]: prints the device pattern, or nothing for keep/none
+device_pattern() {
+    local value=$1
+    [[ $value == same ]] && value=${2:-}
+    case $value in keep | none | same | "") ;; *) echo "$value" ;; esac
 }
 
-# Get list of audio sink devices
-get_audio_sinks() {
-    pactl list short sinks | while IFS=$'\t' read -r id name driver sample_spec state; do
-        description=$(pactl list sinks | grep -A 20 "Sink #$id" | grep "Description:" | sed 's/.*Description: //' || echo "$name")
-        echo "$id|$name|$description"
-    done
+resolved() {
+    [[ -n $1 ]] && echo "${RESOLVED[$1]}"
 }
 
-# Get list of audio source devices (excluding monitors)
-get_audio_sources() {
-    pactl list short sources | grep -v "monitor" | while IFS=$'\t' read -r id name driver sample_spec state; do
-        description=$(pactl list sources | grep -A 20 "Source #$id" | grep "Description:" | sed 's/.*Description: //' || echo "$name")
-        echo "$id|$name|$description"
-    done
-}
-
-# Get current defaults
-get_current_sink() {
-    pactl get-default-sink 2>/dev/null || echo ""
-}
-
-get_current_source() {
-    pactl get-default-source 2>/dev/null || echo ""
-}
-
-# Get communication defaults using PipeWire metadata
-get_current_comm_sink() {
-    pw-dump 2>/dev/null | jq -r '
-        .[] | 
-        select(.type == "PipeWire:Interface:Metadata") | 
-        select(.props."metadata.name" == "default") | 
-        .metadata[] | 
-        select(.key == "default.configured.audio.sink") | 
-        .value.name // ""
-    ' 2>/dev/null || echo ""
-}
-
-get_current_comm_source() {
-    pw-dump 2>/dev/null | jq -r '
-        .[] | 
-        select(.type == "PipeWire:Interface:Metadata") | 
-        select(.props."metadata.name" == "default") | 
-        .metadata[] | 
-        select(.key == "default.configured.audio.source") | 
-        .value.name // ""
-    ' 2>/dev/null || echo ""
-}
-
-# Set communication defaults using pw-metadata with JSON format
-set_comm_sink() {
-    local sink_name="$1"
-    if [ -n "$sink_name" ] && [ "$sink_name" != "none" ] && [ "$sink_name" != "keep" ]; then
-        # Use pw-metadata to set communication default with proper JSON format
-        if timeout 5s pw-metadata -n default default.configured.audio.sink "{ \"name\": \"$sink_name\" }" >/dev/null 2>&1; then
-            print_communication "Set communication output: $sink_name"
-            return 0
-        else
-            print_warning "Failed to set communication output, using regular default"
-            return 1
-        fi
-    fi
-    return 0
-}
-
-set_comm_source() {
-    local source_name="$1"
-    if [ -n "$source_name" ] && [ "$source_name" != "none" ] && [ "$source_name" != "keep" ]; then
-        # Use pw-metadata to set communication default with proper JSON format
-        if timeout 5s pw-metadata -n default default.configured.audio.source "{ \"name\": \"$source_name\" }" >/dev/null 2>&1; then
-            print_communication "Set communication input: $source_name"
-            return 0
-        else
-            print_warning "Failed to set communication input, using regular default"
-            return 1
-        fi
-    fi
-    return 0
-}
-
-# Get active streams
-get_active_sink_inputs() {
-    pactl list short sink-inputs | cut -f1 2>/dev/null || echo ""
-}
-
-get_active_source_outputs() {
-    pactl list short source-outputs | cut -f1 2>/dev/null || echo ""
-}
-
-# Set card profile
-set_card_profile() {
-    local card_profile="$1"
-    
-    if [ -n "$card_profile" ] && [ "$card_profile" != "none" ] && [ "$card_profile" != "keep" ]; then
-        # Split on the FIRST colon only
-        local card_name="${card_profile%%:*}"
-        local profile_name="${card_profile#*:}"
-        
-        if [ "$card_name" = "$profile_name" ]; then
-            print_warning "Invalid card profile format: $card_profile (expected card:profile)"
-            return 1
-        fi
-        
-        if pactl set-card-profile "$card_name" "$profile_name" 2>/dev/null; then
-            print_success "Set card profile: $card_name -> $profile_name"
-            # Wait a moment for the profile change to take effect
-            sleep 0.5
-            return 0
-        else
-            print_error "Failed to set card profile: $card_name -> $profile_name"
-            return 1
-        fi
-    fi
-    return 0
-}
-
-# Set devices and move streams
-set_audio_profile() {
-    local main_sink="$1"
-    local main_source="$2"
-    local comm_sink="$3"
-    local comm_source="$4"
-    local card_profile="$5"
-    local profile_name="${6:-Manual}"
-    
-    print_profile "Switching to profile: $profile_name"
-    
-    local success=true
-    
-    # Set card profile first (if specified)
-    if ! set_card_profile "$card_profile"; then
-        success=false
-    fi
-    
-    # Handle "same" values for communication
-    if [ "$comm_sink" = "same" ]; then
-        comm_sink="$main_sink"
-    fi
-    if [ "$comm_source" = "same" ]; then
-        comm_source="$main_source"
-    fi
-    
-    # Set main sink if provided
-    if [ -n "$main_sink" ] && [ "$main_sink" != "none" ] && [ "$main_sink" != "keep" ]; then
-        if pactl set-default-sink "$main_sink" 2>/dev/null; then
-            print_success "Set main output: $main_sink"
-            
-            # Move all sink inputs to new sink
-            local streams=$(get_active_sink_inputs)
-            local moved_count=0
-            while IFS= read -r stream_id; do
-                if [ -n "$stream_id" ]; then
-                    if pactl move-sink-input "$stream_id" "$main_sink" 2>/dev/null; then
-                        ((moved_count++))
-                    fi
-                fi
-            done <<< "$streams"
-            
-            if [ $moved_count -gt 0 ]; then
-                print_success "Moved $moved_count audio stream(s) to new output"
-            fi
-        else
-            print_error "Failed to set main output: $main_sink"
-            success=false
-        fi
-    fi
-    
-    # Set main source if provided
-    if [ -n "$main_source" ] && [ "$main_source" != "none" ] && [ "$main_source" != "keep" ]; then
-        if pactl set-default-source "$main_source" 2>/dev/null; then
-            print_success "Set main input: $main_source"
-            
-            # Move all source outputs to new source
-            local streams=$(get_active_source_outputs)
-            local moved_count=0
-            while IFS= read -r stream_id; do
-                if [ -n "$stream_id" ]; then
-                    if pactl move-source-output "$stream_id" "$main_source" 2>/dev/null; then
-                        ((moved_count++))
-                    fi
-                fi
-            done <<< "$streams"
-            
-            if [ $moved_count -gt 0 ]; then
-                print_success "Moved $moved_count input stream(s) to new source"
-            fi
-        else
-            print_error "Failed to set main input: $main_source"
-            success=false
-        fi
-    fi
-    
-    # Set communication devices
-    if ! set_comm_sink "$comm_sink"; then
-        # Fallback to regular default if communication setting fails
-        if [ -n "$comm_sink" ] && [ "$comm_sink" != "none" ] && [ "$comm_sink" != "keep" ]; then
-            print_warning "Using regular default for communication output"
-        fi
-    fi
-    
-    if ! set_comm_source "$comm_source"; then
-        # Fallback to regular default if communication setting fails
-        if [ -n "$comm_source" ] && [ "$comm_source" != "none" ] && [ "$comm_source" != "keep" ]; then
-            print_warning "Using regular default for communication input"
-        fi
-    fi
-    
-    if $success; then
-        print_success "Audio profile switch completed!"
-        
-        # Show notification if notify-send is available
-        if command -v notify-send &> /dev/null; then
-            notify-send "Audio Profile" "Switched to: $profile_name" -t 2000 2>/dev/null || true
-        fi
-    else
-        print_error "Some devices failed to switch"
-        return 1
-    fi
-}
-
-# Load and use a profile
 use_profile() {
-    local profile_name="$1"
-    
-    if [ ! -f "$PROFILES_FILE" ]; then
-        print_error "Profiles file not found: $PROFILES_FILE"
-        print_warning "Run with --init to create default profiles"
-        exit 1
-    fi
-    
-    # Find the profile
-    local profile_line
-    profile_line=$(grep -v "^#" "$PROFILES_FILE" | grep "^$profile_name|" || echo "")
-    
-    if [ -z "$profile_line" ]; then
-        print_error "Profile '$profile_name' not found"
-        echo
-        print_status "Available profiles:"
-        list_profiles
-        exit 1
-    fi
-    
-    # Parse profile (7 fields: name|main_out|main_in|comm_out|comm_in|card_profile|description)
-    IFS='|' read -r name main_sink main_source comm_sink comm_source card_profile description <<< "$profile_line"
-    
-    # Set card profile FIRST (before verification) as it may create new devices
-    if ! set_card_profile "$card_profile"; then
-        print_warning "Card profile setting failed, but continuing..."
-    fi
-    
-    # Wait a moment for devices to appear after profile change
-    if [ -n "$card_profile" ] && [ "$card_profile" != "none" ] && [ "$card_profile" != "keep" ]; then
-        sleep 1
-    fi
-    
-    # Verify devices exist (only if not "none", "keep", or "same")
-    local verification_failed=false
-    
-    # Check output devices (main_sink and comm_sink)
-    for device in "$main_sink" "$comm_sink"; do
-        if [ -n "$device" ] && [ "$device" != "none" ] && [ "$device" != "keep" ] && [ "$device" != "same" ]; then
-            local device_exists=false
-            while IFS='|' read -r id name desc; do
-                if [ "$name" = "$device" ]; then
-                    device_exists=true
-                    break
-                fi
-            done <<< "$(get_audio_sinks)"
-            
-            if ! $device_exists; then
-                print_error "Output device not found: $device"
-                verification_failed=true
-            fi
-        fi
+    local wanted=$1 name main_out main_in comm_out comm_in card desc found=""
+    require_profiles
+    while IFS='|' read -r name main_out main_in comm_out comm_in card desc; do
+        [[ $name == "$wanted" ]] && { found=1; break; }
+    done < <(config_lines "$PROFILES_FILE")
+    [[ -n $found ]] || die "Unknown profile '$wanted' (have: $(profile_names | paste -sd' '))"
+
+    exec 9>"$LOCK_FILE"
+    flock 9
+
+    set_card_profile "$card"
+
+    local mo co mi ci spec specs=()
+    mo=$(device_pattern "$main_out")
+    co=$(device_pattern "$comm_out" "$main_out")
+    mi=$(device_pattern "$main_in")
+    ci=$(device_pattern "$comm_in" "$main_in")
+    for spec in "Audio/Sink|$mo" "Audio/Sink|$co" "Audio/Source|$mi" "Audio/Source|$ci"; do
+        [[ -n ${spec#*|} && " ${specs[*]} " != *" $spec "* ]] && specs+=("$spec")
     done
-    
-    # Check input devices (main_source and comm_source)
-    for device in "$main_source" "$comm_source"; do
-        if [ -n "$device" ] && [ "$device" != "none" ] && [ "$device" != "keep" ] && [ "$device" != "same" ]; then
-            local device_exists=false
-            while IFS='|' read -r id name desc; do
-                if [ "$name" = "$device" ]; then
-                    device_exists=true
-                    break
-                fi
-            done <<< "$(get_audio_sources)"
-            
-            if ! $device_exists; then
-                print_error "Input device not found: $device"
-                verification_failed=true
-            fi
-        fi
+    wait_for_devices "${specs[@]}"
+
+    local main_sink main_source
+    main_sink=$(resolved "$mo")
+    main_source=$(resolved "$mi")
+    if [[ -n $main_sink ]]; then
+        pactl_run set-default-sink "$main_sink" || die "Could not set output $main_sink"
+    fi
+    if [[ -n $main_source ]]; then
+        pactl_run set-default-source "$main_source" || die "Could not set input $main_source"
+    fi
+    move_streams "$main_sink" "$(resolved "$co")" "$main_source" "$(resolved "$ci")"
+
+    mkdir -p "${STATE_FILE%/*}"
+    echo "$name" >"$STATE_FILE"
+
+    local fx message=${desc:-$name}
+    fx=$(ee_apply "$(ee_profile_action "$name")")
+    echo "Switched to $message${fx:+ ($fx)}"
+    notify normal "$message${fx:+$'\n'$fx}"
+}
+
+cycle_profiles() {
+    require_profiles
+    local names current i next
+    mapfile -t names < <(profile_names)
+    ((${#names[@]})) || die "No profiles defined"
+    current=$(current_profile)
+    next=${names[0]}
+    for i in "${!names[@]}"; do
+        [[ ${names[i]} == "$current" ]] && next=${names[(i + 1) % ${#names[@]}]}
     done
-    
-    if $verification_failed; then
-        print_warning "Some devices not found. Run --list to see available devices."
-        return 1
-    fi
-    
-    # Apply the profile (card profile already set)
-    if ! set_audio_profile "$main_sink" "$main_source" "$comm_sink" "$comm_source" "none" "$description"; then
-        return 1
-    fi
-
-    # Match the EasyEffects chain to the mic this profile selected
-    apply_easyeffects "$name"
+    use_profile "$next"
 }
 
-# Interactive device selection
-select_devices_interactive() {
-    echo
-    print_status "Current audio devices:"
-    show_current_devices
-    echo
-    
-    echo "Select devices for your profile:"
-    echo "================================"
-    
-    # Select main output device
-    local sinks=$(get_audio_sinks)
-    if [ -z "$sinks" ]; then
-        print_error "No output devices found!"
-        exit 1
+menu() {
+    require_profiles
+    local menu_cmd current choice name desc _
+    if command -v walker >/dev/null; then
+        menu_cmd=(walker --dmenu --placeholder "Select audio profile...")
+    elif command -v fuzzel >/dev/null; then
+        menu_cmd=(fuzzel --dmenu --prompt "Audio profile: ")
+    elif command -v rofi >/dev/null; then
+        menu_cmd=(rofi -dmenu -p "Audio profile")
+    else
+        die "No menu program found (walker, fuzzel or rofi)"
     fi
-    
-    echo -e "${BOLD}Main Output Devices:${NC}"
-    local sink_list=()
-    local counter=1
-    local current_sink=$(get_current_sink)
-    
-    while IFS='|' read -r id name description; do
-        if [ -n "$id" ]; then
-            sink_list+=("$name")
-            if [ "$name" = "$current_sink" ]; then
-                echo -e "  ${GREEN}$counter)${NC} $description ${YELLOW}(current)${NC}"
-            else
-                echo "  $counter) $description"
-            fi
-            ((counter++))
-        fi
-    done <<< "$sinks"
-    
-    echo "  $counter) Keep current"
-    sink_list+=("KEEP")
-    
-    echo
-    read -p "Select main output (1-$counter): " main_sink_selection
-    
-    # Validate and get main sink
-    if ! [[ "$main_sink_selection" =~ ^[0-9]+$ ]] || [ "$main_sink_selection" -lt 1 ] || [ "$main_sink_selection" -gt "$counter" ]; then
-        print_error "Invalid selection!"
-        exit 1
-    fi
-    
-    local selected_main_sink=""
-    if [ "$main_sink_selection" -le "${#sink_list[@]}" ]; then
-        selected_main_sink="${sink_list[$((main_sink_selection-1))]}"
-        if [ "$selected_main_sink" = "KEEP" ]; then
-            selected_main_sink="keep"
-        fi
-    fi
-    
-    # Similar process for other devices...
-    # For brevity, I'll implement a simplified version here
-    # The full interactive mode would ask for all 4 device types
-    
-    echo
-    print_warning "Interactive mode simplified - using main devices for communication as well"
-    print_warning "For full control, use profile configuration or --edit"
-    
-    # Apply simple profile (main devices only)
-    set_audio_profile "$selected_main_sink" "keep" "$selected_main_sink" "keep" "none" "Interactive Selection"
+    current=$(current_profile)
+    choice=$(
+        while IFS='|' read -r name _ _ _ _ _ desc; do
+            [[ $name == "$current" ]] && printf '● '
+            echo "$name: $desc"
+        done < <(config_lines "$PROFILES_FILE") | "${menu_cmd[@]}"
+    )
+    [[ -n $choice ]] || return 0
+    choice=${choice#● }
+    use_profile "${choice%%:*}"
 }
 
-# Show current devices
-show_current_devices() {
-    local current_sink=$(get_current_sink)
-    local current_source=$(get_current_source)
-    local comm_sink=$(get_current_comm_sink)
-    local comm_source=$(get_current_comm_source)
-    
-    if [ -n "$current_sink" ]; then
-        local sink_desc=$(pactl list sinks | grep -A 20 "$current_sink" | grep "Description:" | sed 's/.*Description: //' | head -1)
-        print_status "Main output: ${sink_desc:-$current_sink}"
-    else
-        print_warning "No default output device set"
-    fi
-    
-    if [ -n "$current_source" ]; then
-        local source_desc=$(pactl list sources | grep -A 20 "$current_source" | grep "Description:" | sed 's/.*Description: //' | head -1)
-        print_status "Main input: ${source_desc:-$current_source}"
-    else
-        print_warning "No default input device set"
-    fi
-    
-    if [ -n "$comm_sink" ]; then
-        local comm_sink_desc=$(pactl list sinks | grep -A 20 "$comm_sink" | grep "Description:" | sed 's/.*Description: //' | head -1)
-        print_communication "Communication output: ${comm_sink_desc:-$comm_sink}"
-    else
-        print_communication "Communication output: Using main output"
-    fi
-    
-    if [ -n "$comm_source" ]; then
-        local comm_source_desc=$(pactl list sources | grep -A 20 "$comm_source" | grep "Description:" | sed 's/.*Description: //' | head -1)
-        print_communication "Communication input: ${comm_source_desc:-$comm_source}"
-    else
-        print_communication "Communication input: Using main input"
-    fi
-
-    set_easyeffects status || true
-}
-
-# List all devices
 list_devices() {
-    echo -e "${BOLD}Output Devices:${NC}"
-    echo "=============="
-    local sinks=$(get_audio_sinks)
-    local current_sink=$(get_current_sink)
-    local comm_sink=$(get_current_comm_sink)
-    
-    while IFS='|' read -r id name description; do
-        if [ -n "$id" ]; then
-            local markers=""
-            if [ "$name" = "$current_sink" ]; then
-                markers="$markers [MAIN]"
-            fi
-            if [ "$name" = "$comm_sink" ]; then
-                markers="$markers [COMM]"
-            fi
-            if [ -n "$markers" ]; then
-                echo "* ID: $id | Name: $name | Description: $description$markers"
-            else
-                echo "  ID: $id | Name: $name | Description: $description"
-            fi
-        fi
-    done <<< "$sinks"
-    
-    echo
-    echo -e "${BOLD}Input Devices:${NC}"
-    echo "============="
-    local sources=$(get_audio_sources)
-    local current_source=$(get_current_source)
-    local comm_source=$(get_current_comm_source)
-    
-    while IFS='|' read -r id name description; do
-        if [ -n "$id" ]; then
-            local markers=""
-            if [ "$name" = "$current_source" ]; then
-                markers="$markers [MAIN]"
-            fi
-            if [ "$name" = "$comm_source" ]; then
-                markers="$markers [COMM]"
-            fi
-            if [ -n "$markers" ]; then
-                echo "* ID: $id | Name: $name | Description: $description$markers"
-            else
-                echo "  ID: $id | Name: $name | Description: $description"
-            fi
-        fi
-    done <<< "$sources"
+    local entry title class key default name desc marker
+    refresh_graph
+    for entry in "Outputs|Audio/Sink|default.audio.sink" "Inputs|Audio/Source|default.audio.source"; do
+        IFS='|' read -r title class key <<<"$entry"
+        default=$(default_node "$key")
+        echo "$title:"
+        while IFS=$SEP read -r name desc; do
+            [[ $name == "$default" ]] && marker='*' || marker=' '
+            printf ' %s %s\n     %s\n' "$marker" "$desc" "$name"
+        done < <(node_rows "$class")
+    done
 }
 
-# List available profiles
+show_current() {
+    refresh_graph
+    echo "Profile: $(current_profile || echo unknown)"
+    echo "Output:  $(node_description "$(default_node default.audio.sink)" Audio/Sink)"
+    echo "Input:   $(node_description "$(default_node default.audio.source)" Audio/Source)"
+    ee_apply status
+}
+
 list_profiles() {
-    if [ ! -f "$PROFILES_FILE" ]; then
-        print_warning "No profiles file found. Run --init to create default profiles."
+    require_profiles
+    local current name desc _
+    current=$(current_profile)
+    while IFS='|' read -r name _ _ _ _ _ desc; do
+        [[ $name == "$current" ]] && printf '* ' || printf '  '
+        echo "$name: $desc"
+    done < <(config_lines "$PROFILES_FILE")
+}
+
+init_config() {
+    mkdir -p "$CONFIG_DIR"
+    if [[ -f $PROFILES_FILE ]]; then
+        echo "$PROFILES_FILE already exists, leaving it alone"
         return
     fi
-    
-    echo -e "${BOLD}Available Profiles:${NC}"
-    echo "=================="
-    
-    while IFS='|' read -r name main_sink main_source comm_sink comm_source card_profile description; do
-        if [[ ! "$name" =~ ^#.* ]] && [ -n "$name" ]; then
-            echo "  $name: $description"
-        fi
-    done < "$PROFILES_FILE"
+    cat >"$PROFILES_FILE" <<'EOF'
+# name|main_out|main_in|comm_out|comm_in|card:profile|description
+# Device and card names accept globs. keep = leave as is, none = skip, same = copy main (comm only).
+
+gsx-scarlett|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_*.analog-output-surround71|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_*.HiFi__Mic1__source|alsa_output.usb-Sennheiser_GSX_1200_Pro_Main_Audio_*.analog-chat-output|alsa_input.usb-Sennheiser_GSX_1200_Pro_Main_Audio_*.analog-chat-input|none|GSX Gaming + Scarlett Recording
+btd-scarlett|alsa_output.usb-Sennheiser_BTD_700_*.analog-stereo|alsa_input.usb-Focusrite_Scarlett_2i2_4th_Gen_*.HiFi__Mic1__source|same|same|alsa_card.usb-Sennheiser_BTD_700_*:output:analog-stereo|BTD 700 + Scarlett
+btd-full|alsa_output.usb-Sennheiser_BTD_700_*.analog-stereo|keep|same|keep|alsa_card.usb-Sennheiser_BTD_700_*:output:analog-stereo|BTD 700 Only
+btd-mic|alsa_output.usb-Sennheiser_BTD_700_*.analog-stereo|alsa_input.usb-Sennheiser_BTD_700_*.mono-fallback|same|same|alsa_card.usb-Sennheiser_BTD_700_*:output:analog-stereo+input:mono-fallback|BTD 700 + BTD Mic
+EOF
+    echo "Created $PROFILES_FILE"
 }
 
-# Cycle through profiles (for keybinding)
-cycle_profiles() {
-    if [ ! -f "$PROFILES_FILE" ]; then
-        print_error "No profiles file found"
-        exit 1
-    fi
-    
-    # Get list of profile names
-    local profiles=()
-    while IFS='|' read -r name main_sink main_source comm_sink comm_source card_profile description; do
-        if [[ ! "$name" =~ ^#.* ]] && [ -n "$name" ]; then
-            profiles+=("$name")
-        fi
-    done < "$PROFILES_FILE"
-    
-    if [ ${#profiles[@]} -eq 0 ]; then
-        print_error "No profiles defined"
-        exit 1
-    fi
-    
-    # Find current profile or default to first
-    local current_profile=""
-    local state_file="$CONFIG_DIR/current_profile"
-    if [ -f "$state_file" ]; then
-        current_profile=$(cat "$state_file" 2>/dev/null || echo "")
-    fi
-    
-    # Find next profile
-    local next_index=0
-    for i in "${!profiles[@]}"; do
-        if [ "${profiles[$i]}" = "$current_profile" ]; then
-            next_index=$(( (i + 1) % ${#profiles[@]} ))
-            break
-        fi
-    done
-    
-    local next_profile="${profiles[$next_index]}"
-    
-    # Save state and switch
-    echo "$next_profile" > "$state_file"
-    use_profile "$next_profile"
-}
-
-# Show usage
 show_usage() {
-    echo "PipeWire Audio Profile Switcher"
-    echo "==============================="
-    echo "Supports main + communication audio defaults and card profile switching"
-    echo
-    echo "Usage: $0 [OPTIONS]"
-    echo
-    echo "Options:"
-    echo "  -h, --help              Show this help message"
-    echo "  -l, --list              List all available devices"
-    echo "  -c, --current           Show current audio devices"
-    echo "  -p, --profiles          List available profiles"
-    echo "  -u, --use <PROFILE>     Use specified profile"
-    echo "  -n, --cycle             Cycle to next profile (good for keybinds)"
-    echo "  --ee [STATE]            EasyEffects: on | off | preset:<name> | status"
-    echo "  --init                  Initialize with default profiles"
-    echo "  --edit                  Edit profiles file"
-    echo "  --edit-ee               Edit per-profile EasyEffects actions"
-    echo "  (no options)            Interactive device selection"
-    echo
-    echo "Examples:"
-    echo "  $0 --use gsx-scarlett   # GSX gaming + Scarlett recording"
-    echo "  $0 --use btd-scarlett   # BTD main + Scarlett, BTD comm"  
-    echo "  $0 --use btd-full       # Full BTD 700 (main + communication)"
-    echo "  $0 --cycle              # Cycle to next profile"
-    echo
-    echo "Keybinding examples (Hyprland):"
-    echo "  bind = SUPER, F1, exec, $0 --use gsx-scarlett"
-    echo "  bind = SUPER, F2, exec, $0 --use btd-scarlett"
-    echo "  bind = SUPER, F3, exec, $0 --use btd-full"
-    echo "  bind = SUPER, F4, exec, $0 --cycle"
-    echo
-    echo "Features:"
-    echo "  • Separate main and communication audio defaults"
-    echo "  • Automatic card profile switching (e.g., BTD 700 stereo+mono)"
-    echo "  • Stream migration to new devices"
-    echo "  • Per-profile EasyEffects bypass (raw mic vs. processed mic)"
-    echo "  • Desktop notifications"
-    echo
-    echo "Config files:"
-    echo "  $PROFILES_FILE"
-    echo "  $EE_FILE"
+    cat <<EOF
+Usage: ${0##*/} OPTION
+
+  -u, --use PROFILE   switch to a profile
+  -n, --cycle         switch to the next profile
+  -m, --menu          pick a profile from walker/fuzzel/rofi
+  -l, --list          list devices (* = default)
+  -c, --current       show the current profile and devices
+  -p, --profiles      list profiles (* = current)
+  --ee [ACTION]       EasyEffects: on | off | preset:<name> | status (default)
+  --init              create profiles.conf if missing
+  --edit              edit profiles.conf
+  --edit-ee           edit per-profile EasyEffects actions
+  --edit-comm         edit the communication app list
+
+Config: $CONFIG_DIR
+EOF
 }
 
-# Main function
+check_requirements() {
+    local cmd
+    for cmd in pw-dump pactl jq flock; do
+        command -v "$cmd" >/dev/null || die "$cmd not found"
+    done
+}
+
 main() {
-    check_requirements
-    init_config
-    
     case "${1:-}" in
-        -h|--help)
-            show_usage
-            ;;
-        -l|--list)
-            list_devices
-            ;;
-        -c|--current)
-            show_current_devices
-            ;;
-        -p|--profiles)
-            list_profiles
-            ;;
-        -u|--use)
-            if [ -z "${2:-}" ]; then
-                print_error "Profile name required"
-                echo
-                print_status "Available profiles:"
-                list_profiles
-                exit 1
-            fi
+        "" | -h | --help) show_usage; return ;;
+        --init) init_config; return ;;
+        --edit) exec "${EDITOR:-nano}" "$PROFILES_FILE" ;;
+        --edit-ee) exec "${EDITOR:-nano}" "$EE_FILE" ;;
+        --edit-comm) exec "${EDITOR:-nano}" "$COMM_APPS_FILE" ;;
+    esac
+
+    check_requirements
+    case "$1" in
+        -u | --use)
+            [[ -n ${2:-} ]] || die "Profile name required (have: $(profile_names | paste -sd' '))"
             use_profile "$2"
             ;;
-        -n|--cycle)
-            cycle_profiles
-            ;;
-        --ee)
-            if [ -z "${2:-}" ]; then
-                set_easyeffects status
-            else
-                set_easyeffects "$2"
-            fi
-            ;;
-        --init)
-            create_default_profiles
-            create_default_ee_config
-            ;;
-        --edit)
-            ${EDITOR:-nano} "$PROFILES_FILE"
-            ;;
-        --edit-ee)
-            ${EDITOR:-nano} "$EE_FILE"
-            ;;
-        "")
-            select_devices_interactive
-            ;;
+        -n | --cycle) cycle_profiles ;;
+        -m | --menu) menu ;;
+        -l | --list) list_devices ;;
+        -c | --current) show_current ;;
+        -p | --profiles) list_profiles ;;
+        --ee) ee_apply "${2:-status}" ;;
         *)
-            print_error "Unknown option: $1"
-            echo
-            show_usage
+            show_usage >&2
             exit 1
             ;;
     esac
 }
 
-# Run main function
 main "$@"

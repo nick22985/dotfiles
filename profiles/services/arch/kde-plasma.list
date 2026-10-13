@@ -1,0 +1,2 @@
+# scope action requirement unit
+system enable required sddm.service

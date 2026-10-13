@@ -1,193 +1,688 @@
 #!/usr/bin/env bash
 
-script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+set -u -o pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 export DOTFILES_DIR="$script_dir"
 export DEV_ENV="$script_dir"
 
 source "$script_dir/lib/utils.sh"
+source "$script_dir/lib/profiles.sh"
+source "$script_dir/lib/stages.sh"
+source "$script_dir/lib/dotfiles.sh"
 
-# Initialize error tracking for the main script
-init_error_tracking
+action=""
+script_filter=""
+host_name=""
+sudo_keepalive_pid=""
+run_state_dir=""
+state_root=""
+receipt_dir=""
+apply_lock_fd=""
+declare -a failed_stages=()
+declare -A stage_results=()
 
-# Create Timeshift backup before making system changes
-create_dotfiles_backup "dotfiles-setup" "$@"
+usage() {
+    cat <<'EOF'
+Usage:
+  ./run plan [options]
+  ./run apply [options]
+  ./run audit [options]
+  ./run doctor
+  ./run self-update
+  ./run list profiles|stages
 
-keep_sudo_alive() {
-    while true; do
-        sudo -n true
-        sleep 60
-        kill -0 "$$" || exit
-    done 2>/dev/null &
+Options:
+  --profile NAME       Add an installer profile
+  --desktop NAME       Use hyprland, plasma, or both; implies desktop
+  --host NAME          Load a saved host selection
+  --skip NAME          Exclude a stage from the resolved plan
+  --script NAME        Run one stage after profile filtering
+  --dry                 Execute stages in dry-run mode
+  --quiet, -q           Reduce output
+  --auto-backup         Create a Timeshift backup without prompting
+  -h, --help            Show this help
+
+Mutating the machine always requires the explicit apply command.
+EOF
+    profile_usage
 }
 
-if [[ "${DRY_RUN:-0}" != "1" ]] && [[ "$*" != *"--dry"* ]]; then
-    log "Requesting sudo privileges upfront..."
-    if sudo -v; then
-        log "✓ Sudo privileges granted"
-        keep_sudo_alive
-    else
-        log "❌ Failed to get sudo privileges"
-        exit 1
+stage_path() {
+    printf '%s/runs/%s\n' "$script_dir" "$1"
+}
+
+validate_manifest() {
+    local manifest="$1"
+    local source package extra
+    local invalid=0
+
+    while read -r source package extra; do
+        [[ -n "${source:-}" && "$source" != \#* ]] || continue
+        if [[ -n "${extra:-}" || ! "${package:-}" =~ ^[a-z0-9][a-z0-9@._+:-]*$ ]]; then
+            printf 'Invalid package entry in %s: %s %s %s\n' \
+                "$manifest" "$source" "${package:-}" "${extra:-}" >&2
+            invalid=1
+            continue
+        fi
+        if ! platform_validate_package_source "$source"; then
+                printf "Unknown package source '%s' in %s\n" "$source" "$manifest" >&2
+                invalid=1
+        fi
+    done < "$manifest"
+    ((invalid == 0))
+}
+
+validate_flatpak_manifest() {
+    local manifest="$script_dir/profiles/apps/desktop.flatpak"
+    local line invalid=0
+
+    if [[ ! -f "$manifest" ]]; then
+        printf 'Flatpak manifest not found: %s\n' "$manifest" >&2
+        return 1
     fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" ]] || continue
+        if [[ ! "$line" =~ ^[[:alnum:]][[:alnum:]._-]+$ ]]; then
+            printf 'Invalid Flatpak ID in %s: %s\n' "$manifest" "$line" >&2
+            invalid=1
+        fi
+    done < "$manifest"
+    ((invalid == 0))
+}
+
+validate_profiles() {
+    local manifest line stage profile package_manifest
+    local invalid=0
+
+    for manifest in "$script_dir"/profiles/*.runs; do
+        [[ -f "$manifest" ]] || continue
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            stage="${line%%#*}"
+            stage="${stage#"${stage%%[![:space:]]*}"}"
+            stage="${stage%"${stage##*[![:space:]]}"}"
+            [[ -n "$stage" ]] || continue
+            if ! stage_is_registered "$stage"; then
+                printf 'Unregistered stage %s in %s\n' "$stage" "$manifest" >&2
+                invalid=1
+            elif [[ ! -f "$(stage_path "$stage")" ]]; then
+                printf 'Stage is missing: %s\n' "$(stage_path "$stage")" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for profile in "${resolved_profiles[@]}"; do
+        package_manifest="$DOTFILES_PACKAGE_DIR/$profile.list"
+        if [[ ! -f "$package_manifest" ]]; then
+            printf 'Package profile not found: %s\n' "$package_manifest" >&2
+            invalid=1
+        elif ! validate_manifest "$package_manifest"; then
+            invalid=1
+        fi
+    done
+    if profile_has_request desktop && ! validate_flatpak_manifest; then
+        invalid=1
+    fi
+    ((invalid == 0))
+}
+
+validate_all_registered_stages() {
+    local stage stage_file dependency invalid=0
+    local -A seen=()
+    for stage in "${execution_order[@]}"; do
+        seen["$stage"]=1
+        if [[ ! -f "$(stage_path "$stage")" ]]; then
+            printf 'Stage is missing: %s\n' "$(stage_path "$stage")" >&2
+            invalid=1
+        fi
+        while IFS= read -r dependency; do
+            [[ -n "$dependency" ]] || continue
+            if ! stage_is_registered "$dependency"; then
+                printf "Stage '%s' has unknown dependency '%s'.\n" "$stage" "$dependency" >&2
+                invalid=1
+            elif [[ -z "${seen[$dependency]+set}" ]]; then
+                printf "Stage '%s' must appear after dependency '%s'.\n" "$stage" "$dependency" >&2
+                invalid=1
+            fi
+        done < <(stage_dependency_list "$stage")
+    done
+    while IFS= read -r -d '' stage_file; do
+        stage="$(basename "$stage_file")"
+        if ! stage_is_registered "$stage"; then
+            printf 'Stage file is not registered: %s\n' "$stage_file" >&2
+            invalid=1
+        fi
+    done < <(find "$script_dir/runs" -maxdepth 1 -type f -print0)
+    ((invalid == 0))
+}
+
+validate_all_package_manifests() {
+    local manifest invalid=0
+    for manifest in "$DOTFILES_PACKAGE_DIR"/*.list "$DOTFILES_STAGE_PACKAGE_DIR"/*.list; do
+        [[ -f "$manifest" ]] || continue
+        validate_manifest "$manifest" || invalid=1
+    done
+    ((invalid == 0))
+}
+
+validate_state_manifests() {
+    local manifest scope action requirement unit extra group mode source target path root
+    local source_real target_real
+    local tool version active covered property value
+    local invalid=0
+    local -A assigned_paths=()
+
+    for manifest in "$DOTFILES_SERVICE_DIR"/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while read -r scope action requirement unit extra; do
+            [[ -n "${scope:-}" && "$scope" != \#* ]] || continue
+            if [[ -n "${extra:-}" || ! "$scope" =~ ^(system|user)$ \
+                || ! "$action" =~ ^(enable|enable-now|start|restart)$ \
+                || ! "$requirement" =~ ^(required|optional)$ \
+                || ! "${unit:-}" =~ ^[A-Za-z0-9@_.:-]+\.(service|socket|timer|path)$ ]]; then
+                printf 'Invalid service entry in %s\n' "$manifest" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for manifest in "$DOTFILES_GROUP_DIR"/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while read -r requirement group extra; do
+            [[ -n "${requirement:-}" && "$requirement" != \#* ]] || continue
+            if [[ -n "${extra:-}" || ! "$requirement" =~ ^(required|optional)$ \
+                || ! "${group:-}" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+                printf 'Invalid group entry in %s\n' "$manifest" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for manifest in "$DOTFILES_SYSTEM_FILE_DIR"/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while read -r mode source target extra; do
+            [[ -n "${mode:-}" && "$mode" != \#* ]] || continue
+            source_real="$(realpath -m -- "$DOTFILES_DIR/$source")"
+            target_real="$(realpath -m -- "$target")"
+            if [[ -n "${extra:-}" || ! "$mode" =~ ^0?[0-7]{3}$ \
+                || "$source_real" != "$DOTFILES_DIR"/* || ! -f "$source_real" \
+                || ( "$target_real" != /etc/* && "$target_real" != /usr/local/* ) ]]; then
+                printf 'Invalid system file entry in %s\n' "$manifest" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for manifest in "$script_dir"/profiles/tools/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while read -r tool version active extra; do
+            [[ -n "${tool:-}" && "$tool" != \#* ]] || continue
+            if [[ -n "${extra:-}" || ! "$tool" =~ ^[a-z0-9_-]+$ \
+                || ! "$version" =~ ^[a-zA-Z0-9._+-]+$ \
+                || ! "$active" =~ ^(active|installed)$ ]]; then
+                printf 'Invalid tool entry in %s\n' "$manifest" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for manifest in "$script_dir"/profiles/defaults/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while read -r property value extra; do
+            [[ -n "${property:-}" && "$property" != \#* ]] || continue
+            if [[ -n "${extra:-}" || ! "$property" =~ ^[a-z0-9-]+$ \
+                || ! "$value" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+                printf 'Invalid desktop default entry in %s\n' "$manifest" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
+
+    for manifest in "$script_dir"/profiles/dotfiles/*.list; do
+        [[ -f "$manifest" ]] || continue
+        while IFS= read -r path || [[ -n "$path" ]]; do
+            path="${path%%#*}"
+            path="${path#"${path%%[![:space:]]*}"}"
+            path="${path%"${path##*[![:space:]]}"}"
+            [[ -n "$path" ]] || continue
+            if ! validate_dotfile_path "$path" || [[ ! -e "$script_dir/env/$path" && ! -L "$script_dir/env/$path" ]]; then
+                printf 'Invalid dotfile entry in %s: %s\n' "$manifest" "$path" >&2
+                invalid=1
+            elif [[ -n "${assigned_paths[$path]+set}" ]]; then
+                printf 'Dotfile path declared by multiple bundles: %s\n' "$path" >&2
+                invalid=1
+            else
+                assigned_paths["$path"]="$manifest"
+            fi
+        done < "$manifest"
+    done
+
+    while IFS= read -r root; do
+        covered=0
+        for path in "${!assigned_paths[@]}"; do
+            if [[ "$path" == "$root" || "$path" == "$root"/* ]]; then
+                covered=1
+                break
+            fi
+        done
+        ((covered == 0)) || continue
+        printf 'Dotfile path is not assigned to a bundle: %s\n' "$root" >&2
+        invalid=1
+    done < <(
+        find "$script_dir/env" -mindepth 1 -maxdepth 1 \
+            ! -name .config ! -name .local ! -name .stow-local-ignore -printf '%P\n'
+        find "$script_dir/env/.config" -mindepth 1 -maxdepth 1 -printf '.config/%P\n'
+        find "$script_dir/env/.local" -mindepth 1 -maxdepth 1 -printf '.local/%P\n'
+    )
+
+    ((invalid == 0))
+}
+
+print_profiles() {
+    printf '%s\n' core development desktop system virtualization hardware security media ssh-server full
+}
+
+print_stages() {
+    printf '%s\n' "${execution_order[@]}"
+}
+
+print_plan() {
+    local stage marker risk
+    printf 'Platform: %s\n' "$DOTFILES_PLATFORM"
+    [[ -n "$host_name" ]] && printf 'Host preset: %s\n' "$host_name"
+    printf 'Profiles: %s\n' "${resolved_profiles[*]}"
+    if profile_has_request desktop; then
+        printf 'Desktop: %s\n' "$desktop_profile"
+    fi
+    if ((${#requested_skips[@]} > 0)); then
+        printf 'Skipped: %s\n' "${requested_skips[*]}"
+    fi
+    printf 'Stages:\n'
+    for stage in "${selected_stages[@]}"; do
+        marker="user"
+        [[ "${stage_needs_root[$stage]:-0}" == "1" ]] && marker="root"
+        risk="${stage_risks[$stage]}"
+        printf '  %-20s %-4s %-6s %s\n' "$stage" "$marker" "$risk" "${stage_descriptions[$stage]}"
+    done
+}
+
+cleanup_run() {
+    local status=$?
+    if [[ -n "$sudo_keepalive_pid" ]]; then
+        kill "$sudo_keepalive_pid" 2>/dev/null || true
+        wait "$sudo_keepalive_pid" 2>/dev/null || true
+    fi
+    cleanup_backup_tracking_if_owner "dotfiles-setup"
+    if [[ -n "$run_state_dir" && "$run_state_dir" == "${TMPDIR:-/tmp}"/dotfiles-run.* && -d "$run_state_dir" ]]; then
+        rm -rf -- "$run_state_dir"
+    fi
+    if [[ -n "$receipt_dir" && -d "$receipt_dir" && ! -f "$receipt_dir/exit-status" ]]; then
+        printf '%s\n' "$status" > "$receipt_dir/exit-status"
+    fi
+    return "$status"
+}
+
+keep_sudo_alive() {
+    while sudo -n true 2>/dev/null; do
+        sleep 50
+    done &
+    sudo_keepalive_pid=$!
+}
+
+if (($# == 0)); then
+    usage
+    exit 0
 fi
 
-grep_pattern=""
+case "$1" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    plan|apply|audit|doctor|self-update)
+        action="$1"
+        shift
+        ;;
+    list)
+        shift
+        case "${1:-}" in
+            profiles) print_profiles ;;
+            stages) print_stages ;;
+            *) printf 'Usage: ./run list profiles|stages\n' >&2; exit 2 ;;
+        esac
+        exit 0
+        ;;
+    *)
+        printf 'Unknown command: %s\n\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
 
-while [[ $# -gt 0 ]]; do
+if [[ "$action" == "audit" ]]; then
+    exec bash "$script_dir/libexec/audit-install" "$@"
+fi
+
+if [[ "$action" == "self-update" ]]; then
+    (($# == 0)) || { printf 'self-update does not accept options.\n' >&2; exit 2; }
+    [[ "$EUID" != 0 ]] || {
+        printf 'Do not run self-update as root.\n' >&2
+        exit 2
+    }
+    command -v git >/dev/null 2>&1 || {
+        printf 'git is required for self-update.\n' >&2
+        exit 1
+    }
+    [[ -z "$(git -C "$script_dir" status --porcelain --untracked-files=normal)" ]] || {
+            printf 'Refusing to update a dirty dotfiles worktree.\n' >&2
+            exit 1
+        }
+    current_branch="$(git -C "$script_dir" branch --show-current)"
+    [[ -n "$current_branch" ]] || {
+        printf 'Refusing to update a detached HEAD.\n' >&2
+        exit 1
+    }
+    git -C "$script_dir" pull --ff-only origin "$current_branch" || exit 1
+    git -C "$script_dir" submodule sync --recursive || exit 1
+    git -C "$script_dir" submodule update --init --recursive || exit 1
+    printf 'Updated dotfiles on %s. Run ./run plan before applying.\n' "$current_branch"
+    exit 0
+fi
+
+if [[ "$action" == "doctor" ]]; then
+    profile_validate_default || exit 1
+    profile_add_request full
+    profile_resolve || exit $?
+    platform_resolve || exit $?
+    validate_profiles || exit 1
+    validate_all_package_manifests || exit 1
+    validate_all_registered_stages || exit 1
+    validate_state_manifests || exit 1
+    platform_validate_bootstrap_manifests || exit 1
+    printf 'Installer manifests and stages are valid for %s.\n' "$DOTFILES_PLATFORM"
+    exit 0
+fi
+
+if [[ "$action" == "apply" && "$EUID" == 0 ]]; then
+    printf 'Do not run this installer as root. Run ./run apply as your normal user.\n' >&2
+    exit 2
+fi
+
+while (($# > 0)); do
     case "$1" in
         --dry)
-            DRY_RUN="1"
+            DRY_RUN=1
             export DRY_RUN
             ;;
         --quiet|-q)
-            QUIET="1"
+            QUIET=1
             export QUIET
             ;;
         --auto-backup)
-            AUTO_BACKUP="1"
+            AUTO_BACKUP=1
             export AUTO_BACKUP
             ;;
+        --profile)
+            (($# >= 2)) || { printf '%s\n' '--profile requires a value' >&2; exit 2; }
+            profile_add_request "$2" || exit $?
+            shift
+            ;;
+        --profile=*) profile_add_request "${1#*=}" || exit $? ;;
+        --desktop)
+            (($# >= 2)) || { printf '%s\n' '--desktop requires a value' >&2; exit 2; }
+            profile_set_desktop "$2" || exit $?
+            shift
+            ;;
+        --desktop=*) profile_set_desktop "${1#*=}" || exit $? ;;
+        --host)
+            (($# >= 2)) || { printf '%s\n' '--host requires a value' >&2; exit 2; }
+            host_name="$2"
+            profile_load_host "$host_name" || exit $?
+            shift
+            ;;
+        --host=*)
+            host_name="${1#*=}"
+            profile_load_host "$host_name" || exit $?
+            ;;
+        --skip)
+            (($# >= 2)) || { printf '%s\n' '--skip requires a value' >&2; exit 2; }
+            profile_add_skip "$2"
+            shift
+            ;;
+        --skip=*) profile_add_skip "${1#*=}" ;;
+        --script)
+            (($# >= 2)) || { printf '%s\n' '--script requires a value' >&2; exit 2; }
+            script_filter="$2"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --*)
+            printf 'Unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
         *)
-            grep_pattern="$1"
+            if [[ -n "$script_filter" ]]; then
+                printf 'Only one stage may be selected: %s, %s\n' "$script_filter" "$1" >&2
+                exit 2
+            fi
+            script_filter="$1"
             ;;
     esac
     shift
 done
 
-log "RUN: grep: $grep_pattern -- dry: $DRY_RUN"
-
-# Define execution order programmatically
-execution_order=(
-    "git"
-    "fonts"
-    "oh-my-zsh"
-    "dotfiles"
-    "packages"
-    "java"
-    "shell"
-    "hyprland-packages"
-    "tmux"
-    "hypr"
-    "node"
-    "ssh"
-    "sync-repos"
-    "sbx"
-    "flatpak"
-		"flatpak-overrides"
-    "snap"
-    "grub-multiboot"
-    "kde-plasma"
-    "defaults"
-		"clipboard"
-)
-
-# Load ignore list
-ignore_file="$script_dir/.ignore"
-ignored_scripts=()
-if [[ -f "$ignore_file" ]]; then
-    while IFS= read -r line; do
-        # Skip empty lines and comments
-        if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
-            ignored_scripts+=("$line")
-        fi
-    done < "$ignore_file"
+if ((profile_mode == 0)); then
+    profile_load_default || exit $?
 fi
 
-# Build ordered script list
-ordered_scripts=()
-for script_name in "${execution_order[@]}"; do
-    # Look for script with any numeric prefix or no prefix
-    script_path=""
-    if [[ -f "$script_dir/runs/$script_name" && -x "$script_dir/runs/$script_name" ]]; then
-        script_path="$script_dir/runs/$script_name"
-    fi
+profile_resolve || exit $?
+platform_resolve || exit $?
+validate_profiles || exit 1
 
-    if [[ -n "$script_path" ]]; then
-        ordered_scripts+=("$script_path")
+for skipped_stage in "${requested_skips[@]}"; do
+    if ! stage_is_registered "$skipped_stage"; then
+        printf 'Unknown stage in --skip: %s\n' "$skipped_stage" >&2
+        exit 2
     fi
 done
 
-# Add any remaining scripts not in the execution order
-for script in "$script_dir/runs/"*; do
-    if [[ -f "$script" && -x "$script" ]]; then
-        script_basename=$(basename "$script")
+declare -A selection_state=()
 
-        # Check if this script is already in our ordered list
-        found=false
-        for ordered_script in "${ordered_scripts[@]}"; do
-            if [[ "$script" == "$ordered_script" ]]; then
-                found=true
-                break
-            fi
-        done
+select_stage_with_dependencies() {
+    local wanted="$1"
+    local dependency
 
-        # If not found and not in execution order, add it to the end
-        if [[ "$found" == false ]]; then
-            in_order=false
-            for order_name in "${execution_order[@]}"; do
-                if [[ "$script_basename" == "$order_name" ]]; then
-                    in_order=true
-                    break
-                fi
-            done
-            if [[ "$in_order" == false ]]; then
-                ordered_scripts+=("$script")
-            fi
+    if [[ "${selection_state[$wanted]:-}" == "selected" ]]; then
+        return 0
+    fi
+    if [[ "${selection_state[$wanted]:-}" == "visiting" ]]; then
+        printf 'Dependency cycle contains stage: %s\n' "$wanted" >&2
+        return 2
+    fi
+    if profile_skips_run "$wanted"; then
+        printf "Required stage '%s' was excluded with --skip.\n" "$wanted" >&2
+        return 2
+    fi
+    if ! stage_supports_platform "$wanted" "$DOTFILES_PLATFORM"; then
+        printf "Stage '%s' does not support platform '%s'.\n" "$wanted" "$DOTFILES_PLATFORM" >&2
+        return 2
+    fi
+
+    selection_state["$wanted"]="visiting"
+    while IFS= read -r dependency; do
+        [[ -n "$dependency" ]] || continue
+        select_stage_with_dependencies "$dependency" || return $?
+    done < <(stage_dependency_list "$wanted")
+    selection_state["$wanted"]="selected"
+}
+
+if [[ -n "$script_filter" ]]; then
+    if ! stage_is_registered "$script_filter" || ! profile_includes_run "$script_filter"; then
+        printf "Stage '%s' is unknown, skipped, or outside the selected profiles.\n" "$script_filter" >&2
+        exit 2
+    fi
+    select_stage_with_dependencies "$script_filter" || exit $?
+else
+    for stage in "${execution_order[@]}"; do
+        profile_includes_run "$stage" || continue
+        select_stage_with_dependencies "$stage" || exit $?
+    done
+fi
+
+declare -a selected_stages=()
+for stage in "${execution_order[@]}"; do
+    [[ "${selection_state[$stage]:-}" == "selected" ]] || continue
+    [[ -f "$(stage_path "$stage")" ]] || {
+        printf 'Selected stage is missing: %s\n' "$(stage_path "$stage")" >&2
+        exit 1
+    }
+    selected_stages+=("$stage")
+done
+
+if ((${#selected_stages[@]} == 0)); then
+    if [[ -n "$script_filter" ]]; then
+        printf "Stage '%s' is unknown, skipped, or outside the selected profiles.\n" "$script_filter" >&2
+    else
+        printf 'The selected profiles resolve to no stages.\n' >&2
+    fi
+    exit 2
+fi
+
+if [[ "$action" == "plan" ]]; then
+    print_plan
+    exit 0
+fi
+
+print_plan
+printf '\n'
+
+state_root="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
+mkdir -p "$state_root"
+chmod 700 "$state_root"
+if ! command -v flock >/dev/null 2>&1; then
+    printf 'flock is required to protect apply from concurrent runs.\n' >&2
+    exit 1
+fi
+exec {apply_lock_fd}> "$state_root/apply.lock"
+if ! flock -n "$apply_lock_fd"; then
+    printf 'Another dotfiles apply is already running.\n' >&2
+    exit 1
+fi
+
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+receipt_dir="$state_root/runs/$run_id"
+mkdir -p "$receipt_dir/backups/user" "$receipt_dir/backups/system"
+chmod 700 "$state_root/runs" "$receipt_dir" "$receipt_dir/backups" \
+    "$receipt_dir/backups/user" "$receipt_dir/backups/system"
+export DOTFILES_RECEIPT_DIR="$receipt_dir"
+export DOTFILES_BACKUP_ID_FILE="$receipt_dir/backup-id"
+print_plan > "$receipt_dir/plan.txt"
+git -C "$script_dir" rev-parse HEAD > "$receipt_dir/commit" 2>/dev/null \
+    || printf 'unknown\n' > "$receipt_dir/commit"
+printf 'stage\tstatus\tduration_seconds\n' > "$receipt_dir/stages.tsv"
+printf '#!/usr/bin/env bash\nset -eu\n' > "$receipt_dir/restore-user.sh"
+printf '#!/usr/bin/env bash\nset -eu\n' > "$receipt_dir/restore-system.sh"
+chmod 700 "$receipt_dir/restore-user.sh" "$receipt_dir/restore-system.sh"
+ln -sfn "runs/$run_id" "$state_root/latest"
+
+needs_root=0
+requires_backup=0
+for stage in "${selected_stages[@]}"; do
+    if [[ "${stage_needs_root[$stage]:-0}" == "1" ]]; then
+        needs_root=1
+    fi
+    [[ "${stage_risks[$stage]}" == "high" ]] && requires_backup=1
+done
+
+run_state_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-run.XXXXXX")" || exit 1
+export DOTFILES_RUN_DIR="$run_state_dir"
+export DOTFILES_TEMP_DIR="$run_state_dir/tracking"
+export DOTFILES_ERRORS_FILE="$DOTFILES_TEMP_DIR/errors.log"
+export DOTFILES_WARNINGS_FILE="$DOTFILES_TEMP_DIR/warnings.log"
+export DOTFILES_BACKUP_CREATED="$run_state_dir/backup-created"
+export DOTFILES_BACKUP_CREATOR="$run_state_dir/backup-creator"
+trap cleanup_run EXIT
+trap 'exit 130' INT TERM
+init_error_tracking
+export DOTFILES_RUNNER_ACTIVE=1
+export DOTFILES_RUNNER_PID="$$"
+
+if ((needs_root == 1)) && [[ "$DRY_RUN" != "1" ]]; then
+    log 'Requesting sudo privileges...'
+    if ! sudo -v; then
+        log_error 'Failed to get sudo privileges'
+        exit 1
+    fi
+    keep_sudo_alive
+    export REQUIRE_BACKUP="$requires_backup"
+    create_dotfiles_backup "dotfiles-setup" "$action" || exit 1
+fi
+
+for stage in "${selected_stages[@]}"; do
+    blocked_by=""
+    blocked_status=""
+    while IFS= read -r dependency; do
+        [[ -n "$dependency" ]] || continue
+        if [[ "${stage_results[$dependency]:-success}" != "success" ]]; then
+            blocked_by="$dependency"
+            blocked_status="${stage_results[$dependency]}"
+            break
         fi
-    fi
-done
-
-script_count=0
-executed_count=0
-
-for script in "${ordered_scripts[@]}"; do
-    script_name=$(basename "$script")
-    script_count=$((script_count + 1))
-
-    if [[ -n "$grep_pattern" ]] && [[ "$script_name" != "$grep_pattern" ]]; then
-        log "grep \"$grep_pattern\" filtered out $script"
+    done < <(stage_dependency_list "$stage")
+    if [[ -n "$blocked_by" ]]; then
+        log_error "Skipping stage $stage because dependency $blocked_by $blocked_status"
+        stage_results["$stage"]="skipped"
+        failed_stages+=("$stage")
+        printf '%s\tskipped\t0\n' "$stage" >> "$receipt_dir/stages.tsv"
+        printf '\n'
         continue
     fi
 
-    # Check if script is in ignore list
-    for ignored in "${ignored_scripts[@]}"; do
-        if [[ "$script_name" == "$ignored" ]]; then
-            log "ignored script: $script (found in .ignore file)"
-            continue 2
-        fi
-    done
-
-    log "running script: $script"
-    executed_count=$((executed_count + 1))
-
-    if [[ $DRY_RUN == "0" ]]; then
-        if [[ "$script_name" =~ (git|fonts|packages|hyprland-packages|flatpak|snap) ]]; then
-            sudo -v 2>/dev/null || true
-        fi
-
-        if "$script"; then
-            echo ""
-        else
-            log_error "Script $script_name failed"
-            echo ""
-            # Don't exit - continue with other scripts and show summary at end
-        fi
+    stage_file="$(stage_path "$stage")"
+    errors_before="$(get_error_count)"
+    stage_status=0
+    stage_started="$(date +%s)"
+    log "Running stage: $stage"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        bash "$stage_file" --dry || stage_status=$?
     else
-        "$script" --dry
-        echo ""
+        bash "$stage_file" || stage_status=$?
     fi
+    errors_after="$(get_error_count)"
+    stage_duration=$(($(date +%s) - stage_started))
+    if ((stage_status != 0)) || ((errors_after > errors_before)); then
+        stage_results["$stage"]="failed"
+        failed_stages+=("$stage")
+        ((stage_status != 0)) && log_error "Stage $stage exited with status $stage_status"
+        printf '%s\tfailed\t%s\n' "$stage" "$stage_duration" >> "$receipt_dir/stages.tsv"
+    else
+        stage_results["$stage"]="success"
+        printf '%s\tsuccess\t%s\n' "$stage" "$stage_duration" >> "$receipt_dir/stages.tsv"
+    fi
+    printf '\n'
 done
 
-if [[ $DRY_RUN == "1" ]]; then
-    log "Would execute $executed_count of $script_count scripts"
-else
-    echo "✅ Executed $executed_count of $script_count scripts successfully"
-    echo "🎉 Dotfiles setup complete! You can rerun this anytime to update."
+summary_status=0
+show_summary 'Dotfiles Setup' || summary_status=$?
+
+if ((${#failed_stages[@]} > 0)) || ((summary_status != 0)); then
+    printf '\nFailed stages: %s\n' "${failed_stages[*]:-unknown}"
+    printf '1\n' > "$receipt_dir/exit-status"
+    printf 'Run receipt: %s\n' "$receipt_dir"
+    exit 1
 fi
 
-# Show summary of all errors and warnings
-show_summary "Dotfiles Setup"
-
-# Cleanup backup tracking only if this script created the backup
-cleanup_backup_tracking_if_owner "dotfiles-setup"
+if [[ "$DRY_RUN" == "1" ]]; then
+    printf 'Dry run completed for %s stage(s).\n' "${#selected_stages[@]}"
+else
+    printf 'Applied %s stage(s) successfully.\n' "${#selected_stages[@]}"
+fi
+printf '0\n' > "$receipt_dir/exit-status"
+printf 'Run receipt: %s\n' "$receipt_dir"

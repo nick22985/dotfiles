@@ -1,19 +1,30 @@
 #!/bin/sh
 
-has_conflicts=0
+conflicts=$(git diff --cached --no-color --no-ext-diff --diff-filter=ACMR -U0 | awk '
+  function flush() {
+    if (file != "" && has_edge) printf "Merge conflict markers found in: %s\n%s", file, lines
+    lines = ""; has_edge = 0; seen_sep = 0
+  }
+  /^\+\+\+ / { flush(); file = substr($0, 7); sub(/\t$/, "", file); next }
+  /^@@ / {
+    split($3, range, ",")
+    lineno = substr(range[1], 2) + 0
+    next
+  }
+  /^\+/ {
+    text = substr($0, 2)
+    sub(/\r$/, "", text)
+    if (text ~ /^<<<<<<<( |$)/) { has_edge = 1; lines = lines lineno ":" text "\n" }
+    else if (text ~ /^>>>>>>>( |$)/) { if (seen_sep) has_edge = 1; lines = lines lineno ":" text "\n" }
+    else if (text ~ /^=======$/) { seen_sep = 1; lines = lines lineno ":" text "\n" }
+    else if (text ~ /^\|\|\|\|\|\|\|( |$)/) { lines = lines lineno ":" text "\n" }
+    lineno++
+  }
+  END { flush() }
+')
 
-for file in $(git diff --cached --name-only); do
-  if [ -f "$file" ]; then
-    conflict_lines=$(grep -n -E '^(<<<<<<<|=======|>>>>>>>)' "$file")
-    if [ -n "$conflict_lines" ]; then
-      echo "Merge conflict markers found in: $file"
-      echo "$conflict_lines"
-      has_conflicts=1
-    fi
-  fi
-done
-
-if [ $has_conflicts -eq 1 ]; then
+if [ -n "$conflicts" ]; then
+  printf '%s\n' "$conflicts"
   echo "Please resolve conflicts before committing."
   exit 1
 fi

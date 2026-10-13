@@ -6,7 +6,7 @@
 
 -- discord & slack always on 9 and 10
 hl.window_rule({ match = { class = "(discord)$" }, workspace = "9 silent" })
-hl.window_rule({ match = { class = "(slack)$" },   workspace = "10 silent", no_initial_focus = true })
+hl.window_rule({ match = { class = "^[Ss]lack$" }, workspace = "10 silent", no_initial_focus = true })
 
 -- flameshot setup
 -- (noanim isn't necessary but animations with these rules might look bad)

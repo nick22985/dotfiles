@@ -554,7 +554,7 @@ install_packages_aur() {
                 if [ ${#failed_packages[@]} -gt 0 ]; then
                     log_error "Failed to install AUR packages: ${failed_packages[*]} (not found in AUR)"
                 else
-                    log_error "AUR package installation failed: $(echo "$install_output" | grep -i 'error' | tail -3 | tr '\n' ' ')"
+                    log_error "AUR package installation failed: $(echo "$install_output" | grep -iE 'error|conflict' | tail -3 | tr '\n' ' ')"
                 fi
                 status=1
                 # Don't exit - continue execution and let summary show the error

@@ -8,7 +8,6 @@ repo ghostty
 repo fastfetch
 repo bluez
 repo bluez-utils
-aur steam-native-runtime
 repo gnome-keyring
 repo seahorse
 repo archlinux-xdg-menu

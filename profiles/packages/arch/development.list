@@ -4,7 +4,6 @@ repo docker-compose
 repo ansible
 repo mise
 repo go
-repo rustup
 repo lazygit
 repo lazydocker
 repo act

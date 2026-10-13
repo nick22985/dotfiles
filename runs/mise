@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
 source "$DOTFILES_DIR/lib/utils.sh"
 parse_args "$@"
-set_context "JavaScript runtimes"
+set_context "mise tools"
 
 manifest="$DOTFILES_DIR/profiles/tools/development.list"
 if ! command_exists mise; then
@@ -36,5 +36,5 @@ while read -r tool version active extra; do
     fi
 done < "$manifest"
 
-((status == 0)) && log_success "Pinned JavaScript runtimes are installed"
+((status == 0)) && log_success "Pinned mise tools are installed"
 exit "$status"

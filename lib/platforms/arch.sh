@@ -147,7 +147,8 @@ platform_install_aur_helper() {
         log_error "Paru bootstrap checkout does not match its pinned commit"
         return 1
     fi
-    if ! (cd "$checkout_dir/repository" && makepkg -si --needed --noconfirm); then
+    # --rmdeps drops the pacman rust makedepend afterwards; mise owns the user toolchain.
+    if ! (cd "$checkout_dir/repository" && makepkg -si --rmdeps --needed --noconfirm); then
         log_error "Failed to build and install $aur_helper_package"
         return 1
     fi

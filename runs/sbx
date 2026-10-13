@@ -21,9 +21,12 @@ if [[ ! -f "$SBX_SRC/Cargo.toml" ]]; then
     exit 0
 fi
 
-if ! command_exists cargo; then
+# Run cargo through mise so the pinned toolchain applies without shell activation.
+cargo_cmd=(cargo)
+command_exists mise && cargo_cmd=(mise exec -- cargo)
+if ! "${cargo_cmd[@]}" --version >/dev/null 2>&1; then
     log_error "cargo not found — install Rust before this script runs"
-    log_info "e.g. add rust to runs/node's mise stack, or run 'rustup-init'"
+    log_info "add rust to profiles/tools/development.list and run the mise stage"
     exit 1
 fi
 
@@ -41,7 +44,7 @@ fi
 
 log "→ Building sbx from $SBX_SRC..."
 if [[ $DRY_RUN == "0" ]]; then
-    if ! (cd "$SBX_SRC" && cargo build --release --quiet); then
+    if ! (cd "$SBX_SRC" && "${cargo_cmd[@]}" build --release --quiet); then
         log_error "cargo build failed"
         exit 1
     fi

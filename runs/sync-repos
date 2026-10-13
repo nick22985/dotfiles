@@ -31,8 +31,14 @@ ensure_ssh_agent() {
     ((agent_status != 0)) || return 0
     # Exit status 2 means no agent is reachable; start one for this stage only.
     if ((agent_status == 2)); then
-        eval "$(ssh-agent -s)" >/dev/null || return 0
-        trap 'ssh-agent -k >/dev/null 2>&1' EXIT
+        # Use a private socket dir: OpenSSH 10.1+ defaults to ~/.ssh/agent, which may be unwritable.
+        local agent_dir
+        agent_dir="$(mktemp -d)" || return 0
+        if ! eval "$(ssh-agent -s -a "$agent_dir/agent.sock")" >/dev/null; then
+            rmdir -- "$agent_dir"
+            return 0
+        fi
+        trap 'ssh-agent -k >/dev/null 2>&1; rm -f -- "'"$agent_dir"'/agent.sock"; rmdir -- "'"$agent_dir"'"' EXIT
     fi
     ssh-add || log_warn "Could not load an SSH key into the agent; each clone may prompt for the passphrase"
 }

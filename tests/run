@@ -147,7 +147,7 @@ fi
     platform_install_aur_helper
 ) >/dev/null || fail "pinned paru bootstrap dry run failed"
 
-printf 'aur paru-bin\naur example-package\n' > "$test_dir/aur-routing.list"
+printf 'aur paru\naur example-package\n' > "$test_dir/aur-routing.list"
 (
     export DOTFILES_DIR="$repo_dir"
     source "$repo_dir/lib/utils.sh"
@@ -156,7 +156,7 @@ printf 'aur paru-bin\naur example-package\n' > "$test_dir/aur-routing.list"
     platform_install_package_manifest "$test_dir/aur-routing.list"
 ) > "$test_dir/aur-routing.output" || fail "AUR helper routing failed"
 [[ "$(< "$test_dir/aur-routing.output")" == $'helper\naur example-package' ]] \
-    || fail "paru-bin was routed through paru after bootstrap"
+    || fail "paru was routed through paru after bootstrap"
 
 walker_plan="$($repo_dir/run plan --profile desktop --desktop hyprland --script walker)"
 grep -q '^  hypr ' <<< "$walker_plan" || fail "Walker plan omitted its Hyprland dependency"

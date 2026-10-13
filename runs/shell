@@ -38,7 +38,7 @@ setup_zsh() {
             fi
             printf 'chsh -s %q\n' "$current_shell" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
             chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
-            chsh -s "$zsh_path" || return 1
+            sudo chsh -s "$zsh_path" -- "$USER" || return 1
         fi
         log_success "Default shell changed to zsh (restart terminal to take effect)"
     else

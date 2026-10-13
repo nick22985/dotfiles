@@ -38,4 +38,4 @@ repo networkmanager
 repo networkmanager-openvpn
 repo sshs
 repo ncdu
-aur paru-bin
+aur paru

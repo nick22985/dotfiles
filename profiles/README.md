@@ -80,9 +80,9 @@ The installer and auditor consume the same manifests:
 
 Package sources are `repo`, `multilib`, `aur`, and `group`. `multilib` packages
 enable the multilib repository in `/etc/pacman.conf` first (backed up into the
-run receipt). On first use of an AUR package, the Arch backend builds `paru-bin`
-from the official AUR repository at the exact commit in
-`bootstrap/arch/paru-bin.conf`, falling back to the `paru-bin` branch of the
+run receipt). On first use of an AUR package, the Arch backend builds `paru` from
+source from the official AUR repository at the exact commit in
+`bootstrap/arch/paru.conf`, falling back to the `paru` branch of the
 GitHub AUR mirror when the AUR is unreachable. Later runs reuse the installed `paru`.
 Review the upstream PKGBUILD before intentionally updating that pin.
 

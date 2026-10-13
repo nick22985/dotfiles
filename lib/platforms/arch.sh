@@ -15,7 +15,7 @@ platform_validate_package_source() {
 }
 
 platform_read_aur_helper_manifest() {
-    local manifest="${1:-$DOTFILES_BOOTSTRAP_DIR/paru-bin.conf}"
+    local manifest="${1:-$DOTFILES_BOOTSTRAP_DIR/paru.conf}"
     local key value extra
     local saw_repository=0
     local saw_commit=0
@@ -77,9 +77,9 @@ platform_read_aur_helper_manifest() {
         esac
     done < "$manifest"
 
-    if [[ "$aur_helper_repository" != "https://aur.archlinux.org/paru-bin.git" \
+    if [[ "$aur_helper_repository" != "https://aur.archlinux.org/paru.git" \
         || ! "$aur_helper_commit" =~ ^[0-9a-f]{40}$ \
-        || "$aur_helper_package" != "paru-bin" \
+        || "$aur_helper_package" != "paru" \
         || ( -n "$aur_helper_mirror" && "$aur_helper_mirror" != "https://github.com/archlinux/aur.git" ) ]]; then
         printf 'Invalid or incomplete AUR helper bootstrap manifest: %s\n' "$manifest" >&2
         return 1
@@ -93,11 +93,14 @@ platform_validate_bootstrap_manifests() {
 platform_install_aur_helper() {
     local checkout_dir resolved_commit
 
-    if command_exists paru; then
+    if command_exists paru && paru --version >/dev/null 2>&1; then
         log_success "Paru already installed"
         return 0
     fi
     platform_read_aur_helper_manifest || return 1
+    if command_exists paru; then
+        log_warn "Installed paru is broken (likely built against an older libalpm); rebuilding from source"
+    fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
         log_info "Would bootstrap $aur_helper_package at ${aur_helper_commit:0:12} from $aur_helper_repository"
@@ -112,7 +115,15 @@ platform_install_aur_helper() {
         return 1
     fi
 
-    checkout_dir="$(mktemp -d "$DOTFILES_RUN_DIR/paru-bin.XXXXXX")" || return 1
+    if pacman -Qq paru-bin >/dev/null 2>&1; then
+        # paru-bin conflicts with paru, and --noconfirm declines the removal prompt.
+        if ! sudo pacman -Rdd --noconfirm paru-bin; then
+            log_error "Failed to remove the broken paru-bin package"
+            return 1
+        fi
+    fi
+
+    checkout_dir="$(mktemp -d "$DOTFILES_RUN_DIR/paru.XXXXXX")" || return 1
     if ! git clone --no-checkout --quiet -- "$aur_helper_repository" "$checkout_dir/repository"; then
         rm -rf -- "$checkout_dir/repository"
         if [[ -z "$aur_helper_mirror" ]]; then
@@ -140,8 +151,8 @@ platform_install_aur_helper() {
         log_error "Failed to build and install $aur_helper_package"
         return 1
     fi
-    if ! command_exists paru; then
-        log_error "$aur_helper_package installed without providing the paru command"
+    if ! paru --version >/dev/null 2>&1; then
+        log_error "$aur_helper_package installed without a working paru command"
         return 1
     fi
     log_success "Installed $aur_helper_package from pinned commit ${aur_helper_commit:0:12}"
@@ -191,6 +202,32 @@ platform_enable_multilib() {
     log_success "Enabled the multilib repository"
 }
 
+# pacman --noconfirm answers "Remove <old>? [y/N]" with no, so swap known
+# conflicting providers explicitly before installing their replacements.
+platform_replace_conflicting_packages() {
+    local package old
+    local status=0
+
+    for package in "$@"; do
+        case "$package" in
+            pipewire-jack) old="jack2" ;;
+            *) continue ;;
+        esac
+        pacman -Qq "$package" >/dev/null 2>&1 && continue
+        pacman -Qq "$old" >/dev/null 2>&1 || continue
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Would replace $old with $package"
+            continue
+        fi
+        log_info "Replacing $old with $package"
+        if ! sudo pacman -Rdd --noconfirm -- "$old"; then
+            log_error "Failed to remove $old before installing $package"
+            status=1
+        fi
+    done
+    return "$status"
+}
+
 platform_install_package_manifest() {
     local manifest="$1"
     local source package extra
@@ -222,7 +259,7 @@ platform_install_package_manifest() {
                 fi
                 ;;
             aur)
-                if [[ "$package" == "paru-bin" ]]; then
+                if [[ "$package" == "paru" ]]; then
                     aur_helper_requested=1
                 else
                     aur_packages+=("$package")
@@ -240,6 +277,7 @@ platform_install_package_manifest() {
         fi
     fi
     if ((${#repo_packages[@]} > 0)); then
+        platform_replace_conflicting_packages "${repo_packages[@]}" || status=1
         install_packages_pacman "${repo_packages[@]}" || status=1
     fi
     if ((aur_helper_requested == 1 || ${#aur_packages[@]} > 0)); then

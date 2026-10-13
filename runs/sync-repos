@@ -21,6 +21,22 @@ if [[ ! -f "$repos_file" ]]; then
     exit 1
 fi
 
+# Load the SSH key once so each clone doesn't prompt for its passphrase again.
+ssh_agent_ready=0
+ensure_ssh_agent() {
+    ((ssh_agent_ready == 0)) || return 0
+    ssh_agent_ready=1
+    local agent_status=0
+    ssh-add -l >/dev/null 2>&1 || agent_status=$?
+    ((agent_status != 0)) || return 0
+    # Exit status 2 means no agent is reachable; start one for this stage only.
+    if ((agent_status == 2)); then
+        eval "$(ssh-agent -s)" >/dev/null || return 0
+        trap 'ssh-agent -k >/dev/null 2>&1' EXIT
+    fi
+    ssh-add || log_warn "Could not load an SSH key into the agent; each clone may prompt for the passphrase"
+}
+
 status=0
 processed=0
 cloned=0
@@ -101,6 +117,7 @@ while read -r repo_spec target option extra; do
         status=1
         continue
     }
+    ensure_ssh_agent
     clone_args=(git clone)
     ((bare == 0)) || clone_args+=(--bare)
     if "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \

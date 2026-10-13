@@ -1,3 +1,4 @@
 # scope action requirement unit
 system enable-now required NetworkManager.service
 user enable optional waybar.service
+system enable required sddm.service

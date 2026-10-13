@@ -1,5 +1,6 @@
 # source package
 repo hyprland
+repo sddm
 repo waybar
 repo rofi
 repo hyprpaper

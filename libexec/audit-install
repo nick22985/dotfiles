@@ -221,7 +221,7 @@ declared_packages() {
         while read -r source package extra; do
             [[ -n "${source:-}" && "$source" != \#* ]] || continue
             case "$source" in
-                repo|aur) printf '%s\n' "$package" ;;
+                repo|multilib|aur) printf '%s\n' "$package" ;;
                 group) pacman -Sgq "$package" 2>/dev/null \
                     || touch "$audit_tmp/check-incomplete" ;;
             esac

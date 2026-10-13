@@ -78,9 +78,12 @@ The installer and auditor consume the same manifests:
 - `tools/*.list`: exact versions installed through mise
 - `defaults/*.list`: user desktop properties applied through xdg-settings
 
-Package sources are `repo`, `aur`, and `group`. On first use of an AUR package,
-the Arch backend builds `paru-bin` from the official AUR repository at the exact
-commit in `bootstrap/arch/paru-bin.conf`. Later runs reuse the installed `paru`.
+Package sources are `repo`, `multilib`, `aur`, and `group`. `multilib` packages
+enable the multilib repository in `/etc/pacman.conf` first (backed up into the
+run receipt). On first use of an AUR package, the Arch backend builds `paru-bin`
+from the official AUR repository at the exact commit in
+`bootstrap/arch/paru-bin.conf`, falling back to the `paru-bin` branch of the
+GitHub AUR mirror when the AUR is unreachable. Later runs reuse the installed `paru`.
 Review the upstream PKGBUILD before intentionally updating that pin.
 
 Dotfile directories merge at file level. The installer never replaces an

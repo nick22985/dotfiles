@@ -11,7 +11,7 @@ dotfiles_platform_activate() {
 }
 
 platform_validate_package_source() {
-    [[ "$1" == "repo" || "$1" == "aur" || "$1" == "group" ]]
+    [[ "$1" == "repo" || "$1" == "multilib" || "$1" == "aur" || "$1" == "group" ]]
 }
 
 platform_read_aur_helper_manifest() {
@@ -20,8 +20,10 @@ platform_read_aur_helper_manifest() {
     local saw_repository=0
     local saw_commit=0
     local saw_package=0
+    local saw_mirror=0
 
     aur_helper_repository=""
+    aur_helper_mirror=""
     aur_helper_commit=""
     aur_helper_package=""
     if [[ ! -f "$manifest" ]]; then
@@ -52,6 +54,14 @@ platform_read_aur_helper_manifest() {
                 aur_helper_commit="$value"
                 saw_commit=1
                 ;;
+            mirror)
+                ((saw_mirror == 0)) || {
+                    printf 'Duplicate mirror in %s\n' "$manifest" >&2
+                    return 1
+                }
+                aur_helper_mirror="$value"
+                saw_mirror=1
+                ;;
             package)
                 ((saw_package == 0)) || {
                     printf 'Duplicate package in %s\n' "$manifest" >&2
@@ -69,7 +79,8 @@ platform_read_aur_helper_manifest() {
 
     if [[ "$aur_helper_repository" != "https://aur.archlinux.org/paru-bin.git" \
         || ! "$aur_helper_commit" =~ ^[0-9a-f]{40}$ \
-        || "$aur_helper_package" != "paru-bin" ]]; then
+        || "$aur_helper_package" != "paru-bin" \
+        || ( -n "$aur_helper_mirror" && "$aur_helper_mirror" != "https://github.com/archlinux/aur.git" ) ]]; then
         printf 'Invalid or incomplete AUR helper bootstrap manifest: %s\n' "$manifest" >&2
         return 1
     fi
@@ -103,8 +114,17 @@ platform_install_aur_helper() {
 
     checkout_dir="$(mktemp -d "$DOTFILES_RUN_DIR/paru-bin.XXXXXX")" || return 1
     if ! git clone --no-checkout --quiet -- "$aur_helper_repository" "$checkout_dir/repository"; then
-        log_error "Failed to clone the pinned paru bootstrap repository"
-        return 1
+        rm -rf -- "$checkout_dir/repository"
+        if [[ -z "$aur_helper_mirror" ]]; then
+            log_error "Failed to clone the pinned paru bootstrap repository"
+            return 1
+        fi
+        log_warn "AUR clone failed; trying the $aur_helper_package branch of $aur_helper_mirror"
+        if ! git clone --no-checkout --quiet --single-branch --branch "$aur_helper_package" \
+            -- "$aur_helper_mirror" "$checkout_dir/repository"; then
+            log_error "Failed to clone the pinned paru bootstrap repository from the AUR or its mirror"
+            return 1
+        fi
     fi
     if ! git -C "$checkout_dir/repository" cat-file -e "$aur_helper_commit^{commit}" \
         || ! git -C "$checkout_dir/repository" checkout --detach --quiet "$aur_helper_commit"; then
@@ -127,10 +147,55 @@ platform_install_aur_helper() {
     log_success "Installed $aur_helper_package from pinned commit ${aur_helper_commit:0:12}"
 }
 
+platform_enable_multilib() {
+    local pacman_conf="/etc/pacman.conf"
+    local backup
+
+    if pacman-conf --repo-list 2>/dev/null | grep -Fxq multilib; then
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would enable the multilib repository in $pacman_conf"
+        return 0
+    fi
+    if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+        log_error "Enabling multilib requires the top-level runner and its recovery receipt"
+        return 1
+    fi
+    if ! grep -Eq '^#[[:space:]]*\[multilib\][[:space:]]*$' "$pacman_conf"; then
+        log_error "No commented [multilib] section found in $pacman_conf; enable it manually"
+        return 1
+    fi
+
+    backup="$DOTFILES_RECEIPT_DIR/backups/system$pacman_conf"
+    mkdir -p "$(dirname "$backup")"
+    if ! sudo cp -a -- "$pacman_conf" "$backup"; then
+        log_error "Failed to back up $pacman_conf"
+        return 1
+    fi
+    printf 'sudo cp -a -- %q %q\n' "$backup" "$pacman_conf" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+
+    if ! sudo sed -i -E '/^#[[:space:]]*\[multilib\][[:space:]]*$/{s/^#[[:space:]]*//;n;s/^#[[:space:]]*(Include)/\1/}' "$pacman_conf"; then
+        log_error "Failed to enable multilib in $pacman_conf"
+        return 1
+    fi
+    if ! pacman-conf --repo-list 2>/dev/null | grep -Fxq multilib; then
+        log_error "multilib is still disabled after editing $pacman_conf"
+        return 1
+    fi
+    # A sync without the matching upgrade would leave a partial upgrade.
+    if ! sudo pacman -Syu --noconfirm; then
+        log_error "Failed to sync and upgrade after enabling multilib"
+        return 1
+    fi
+    log_success "Enabled the multilib repository"
+}
+
 platform_install_package_manifest() {
     local manifest="$1"
     local source package extra
     local -a repo_packages=()
+    local -a multilib_packages=()
     local -a aur_packages=()
     local -a group_packages=()
     local aur_helper_requested=0
@@ -146,6 +211,7 @@ platform_install_package_manifest() {
         fi
         case "$source" in
             repo) repo_packages+=("$package") ;;
+            multilib) multilib_packages+=("$package") ;;
             group)
                 if mapfile -t group_packages < <(pacman -Sgq -- "$package") \
                     && ((${#group_packages[@]} > 0)); then
@@ -166,6 +232,13 @@ platform_install_package_manifest() {
         esac
     done < "$manifest"
 
+    if ((${#multilib_packages[@]} > 0)); then
+        if platform_enable_multilib; then
+            repo_packages+=("${multilib_packages[@]}")
+        else
+            status=1
+        fi
+    fi
     if ((${#repo_packages[@]} > 0)); then
         install_packages_pacman "${repo_packages[@]}" || status=1
     fi

@@ -6,7 +6,7 @@ repo blisp
 repo dfu-util
 repo guvcview
 repo gvfs-mtp
-repo lib32-vulkan-radeon
+multilib lib32-vulkan-radeon
 repo libinput-tools
 repo mtpfs
 repo rocminfo

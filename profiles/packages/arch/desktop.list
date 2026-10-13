@@ -8,7 +8,7 @@ repo ghostty
 repo fastfetch
 repo bluez
 repo bluez-utils
-repo steam-native-runtime
+aur steam-native-runtime
 repo gnome-keyring
 repo seahorse
 repo archlinux-xdg-menu
@@ -24,7 +24,7 @@ repo pipewire
 repo pipewire-pulse
 repo pipewire-jack
 repo wireplumber
-repo lib32-pipewire
+multilib lib32-pipewire
 aur 1password
 aur 1password-cli
 aur snapd

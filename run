@@ -327,9 +327,11 @@ cleanup_run() {
 }
 
 keep_sudo_alive() {
+    # Close the apply lock in the loop: killing the subshell orphans its sleep,
+    # which would otherwise hold the lock for up to 50s after the run exits.
     while sudo -n true 2>/dev/null; do
         sleep 50
-    done &
+    done {apply_lock_fd}>&- &
     sudo_keepalive_pid=$!
 }
 
@@ -572,7 +574,7 @@ if ! command -v flock >/dev/null 2>&1; then
 fi
 exec {apply_lock_fd}> "$state_root/apply.lock"
 if ! flock -n "$apply_lock_fd"; then
-    printf 'Another dotfiles apply is already running.\n' >&2
+    printf 'Another dotfiles apply is already running (check: fuser -v %s).\n' "$state_root/apply.lock" >&2
     exit 1
 fi
 

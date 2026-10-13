@@ -532,9 +532,15 @@ install_packages_aur() {
     if [ ${#packages_to_install[@]} -gt 0 ]; then
         log_info "Installing AUR packages: ${packages_to_install[*]}"
         if [[ $DRY_RUN == "0" ]]; then
-            # Try to install packages and capture output
-            local install_output
-            if install_output=$(paru -S --needed --noconfirm -- "${packages_to_install[@]}" 2>&1); then
+            # Stream paru output so build progress and errors stay visible, keeping a copy to parse.
+            # --removemake drops build-only deps (pacman's rust/cargo); mise owns the user toolchains.
+            local install_output install_log paru_status
+            install_log="$(mktemp)"
+            paru -S --needed --noconfirm --removemake -- "${packages_to_install[@]}" 2>&1 | tee "$install_log"
+            paru_status="${PIPESTATUS[0]}"
+            install_output="$(<"$install_log")"
+            rm -f "$install_log"
+            if [[ "$paru_status" == "0" ]]; then
                 log_success "All AUR packages installed successfully"
             else
                 # Parse the output to find specific failed packages
@@ -548,7 +554,7 @@ install_packages_aur() {
                 if [ ${#failed_packages[@]} -gt 0 ]; then
                     log_error "Failed to install AUR packages: ${failed_packages[*]} (not found in AUR)"
                 else
-                    log_error "AUR package installation failed: $(echo "$install_output" | head -3 | tr '\n' ' ')"
+                    log_error "AUR package installation failed: $(echo "$install_output" | grep -i 'error' | tail -3 | tr '\n' ' ')"
                 fi
                 status=1
                 # Don't exit - continue execution and let summary show the error

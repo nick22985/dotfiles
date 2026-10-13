@@ -91,7 +91,8 @@ platform_validate_bootstrap_manifests() {
 }
 
 platform_install_aur_helper() {
-    local checkout_dir resolved_commit
+    local checkout_dir resolved_commit key value dep built_package installed_before
+    local -a build_deps=() missing_deps=() added_deps=() stale_helpers=()
 
     if command_exists paru && paru --version >/dev/null 2>&1; then
         log_success "Paru already installed"
@@ -119,12 +120,11 @@ platform_install_aur_helper() {
         return 1
     fi
 
-    if pacman -Qq paru-bin >/dev/null 2>&1; then
-        # paru-bin conflicts with paru, and --noconfirm declines the removal prompt.
-        if ! sudo pacman -Rdd --noconfirm paru-bin; then
-            log_error "Failed to remove the broken paru-bin package"
-            return 1
-        fi
+    # paru-bin (and its debug package) conflict with paru, and --noconfirm declines the removal prompt.
+    mapfile -t stale_helpers < <(pacman -Qq paru-bin paru-bin-debug 2>/dev/null)
+    if ((${#stale_helpers[@]} > 0)) && ! sudo pacman -Rdd --noconfirm -- "${stale_helpers[@]}"; then
+        log_error "Failed to remove the broken paru-bin packages: ${stale_helpers[*]}"
+        return 1
     fi
 
     checkout_dir="$(mktemp -d "$DOTFILES_RUN_DIR/paru.XXXXXX")" || return 1
@@ -164,11 +164,39 @@ platform_install_aur_helper() {
             chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
         fi
     fi
-    # --rmdeps drops the pacman rust makedepend afterwards; mise owns the user toolchain.
-    if ! (cd "$checkout_dir/repository" && makepkg -si --rmdeps --needed --noconfirm); then
+    # pacman steps run through our sudo so the runner's cached credentials apply;
+    # makepkg's own sudo calls prompt for the password again.
+    while read -r key _ value; do
+        case "$key" in
+            depends|makedepends) build_deps+=("${value%%[<>=]*}") ;;
+        esac
+    done < "$checkout_dir/repository/.SRCINFO"
+    for dep in "${build_deps[@]}"; do
+        pacman -T "$dep" >/dev/null 2>&1 || missing_deps+=("$dep")
+    done
+    if ((${#missing_deps[@]} > 0)); then
+        installed_before="$(pacman -Qq)"
+        if ! sudo pacman -S --needed --asdeps --noconfirm -- "${missing_deps[@]}"; then
+            aur_helper_bootstrap_failed=1
+            log_error "Failed to install build dependencies for $aur_helper_package: ${missing_deps[*]}"
+            return 1
+        fi
+        mapfile -t added_deps < <(comm -13 <(sort <<<"$installed_before") <(pacman -Qq | sort))
+    fi
+    built_package=""
+    if (cd "$checkout_dir/repository" && PKGDEST="$checkout_dir/pkg" makepkg --noconfirm); then
+        for built_package in "$checkout_dir/pkg/$aur_helper_package"-[0-9]*.pkg.tar.*; do
+            [[ -f "$built_package" ]] && break
+        done
+    fi
+    if [[ ! -f "$built_package" ]] || ! sudo pacman -U --needed --noconfirm -- "$built_package"; then
         aur_helper_bootstrap_failed=1
         log_error "Failed to build and install $aur_helper_package"
         return 1
+    fi
+    # Drop build-only deps (pacman's rust); mise owns the user toolchain.
+    if ((${#added_deps[@]} > 0)) && ! sudo pacman -Rns --noconfirm -- "${added_deps[@]}"; then
+        log_warn "Could not remove paru build dependencies: ${added_deps[*]}"
     fi
     if ! paru --version >/dev/null 2>&1; then
         log_error "$aur_helper_package installed without a working paru command"

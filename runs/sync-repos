@@ -158,9 +158,19 @@ log_info "Repositories: $processed declared, $cloned cloned, $skipped already pr
 
 # Clone or update every repository in each declared GitHub organization.
 if [[ -f "$orgs_file" ]]; then
-    gh_ready=1
-    if ! command_exists gh || ! gh auth status >/dev/null 2>&1; then
-        gh_ready=0
+    gh_ready=0
+    if ! command_exists gh; then
+        log_warn "GitHub CLI is not installed; skipping organization sync"
+    elif gh auth status >/dev/null 2>&1; then
+        gh_ready=1
+    elif [[ "$DRY_RUN" == "0" && -t 0 ]]; then
+        log "→ Logging in to GitHub CLI for organization sync..."
+        if gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web; then
+            gh_ready=1
+        fi
+    fi
+    if ((gh_ready == 0)) && command_exists gh; then
+        log_warn "GitHub CLI is not authenticated; skipping organization sync (run: gh auth login)"
     fi
     while read -r org target options; do
         [[ -n "${org:-}" && "$org" != \#* ]] || continue
@@ -212,16 +222,16 @@ if [[ -f "$orgs_file" ]]; then
             log_info "Would sync organization $org to $destination ${org_args[*]}"
             continue
         fi
-        if ((gh_ready == 0)); then
-            log_warn "GitHub CLI is not authenticated; skipping organization $org (run: gh auth login)"
-            continue
-        fi
+        ((gh_ready == 1)) || continue
+        ensure_ssh_agent
         log "→ Syncing organization $org to $destination..."
         if ! "$DOTFILES_DIR/scripts/clone-org.sh" -d "$destination" "${org_args[@]}" "$org"; then
             log_error "Failed to sync organization $org"
             status=1
         fi
     done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$orgs_file")
+else
+    log_warn "Organization manifest is unavailable: $orgs_file (run: git submodule update --init)"
 fi
 
 ((status == 0)) && log_success "Repository sync is complete"

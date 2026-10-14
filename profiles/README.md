@@ -31,16 +31,19 @@ HEADs, pulls with `--ff-only`, updates pinned submodules, and exits.
 
 Profiles are additive. `core` is always included.
 
-- `core`: shell, Git, user dotfiles, and tmux
-- `development`: Java, pinned mise tools (Node, Bun, Rust), Docker, repositories, and sbx
+- `core`: shell, Git, user dotfiles, tmux, periodic TRIM, and package cache cleanup
+- `development`: Java, pinned mise tools (Node, Bun, Rust), Docker, repositories, private home files, sbx, and snd
 - `desktop`: Flatpaks, defaults, clipboard tools, Bluetooth, and a desktop selection
-- `system`: GRUB and multiboot configuration
+- `system`: GRUB, multiboot, Timeshift snapshot boot entries, weekly mirror refresh, and system monitors
 - `virtualization`: QEMU, libvirt, and VM tools
-- `hardware`: device, SDR, GPU, and printing tools
-- `security`: network and host security packages
+- `hardware`: device, SDR, firmware update checks, and printing tools
+- `security`: network and host security packages, Tailscale, and the ufw firewall
 - `media`: audio, recording, and media packages
 - `ssh-server`: opt-in key-only SSH daemon configuration
-- `full`: all general workstation profiles, excluding `ssh-server`
+- `gpu-amd`, `gpu-intel`, `gpu-nvidia`: graphics drivers for the machine's GPUs (NVIDIA also enables its suspend handling)
+- `laptop`: power profiles, thermal management, and fingerprint sudo
+- `full`: all general workstation profiles, excluding `ssh-server`, the GPU
+  profiles, and `laptop`
 
 Desktop selections are `hyprland`, `plasma`, and `both`. Hyprland is the default
 for an explicitly selected desktop profile.
@@ -60,6 +63,12 @@ profile desktop
 desktop both
 skip snap
 ```
+
+`include NAME` loads another preset first, so machines share one base selection
+and add only their hardware. `common.conf` holds the profiles every machine
+gets; `overlord.conf` and `kirito.conf` include it and add their GPU and laptop
+profiles. Presets may include several others (for example a shared `laptop`
+preset), and each preset loads once however often it is included.
 
 ## Desired-state files
 

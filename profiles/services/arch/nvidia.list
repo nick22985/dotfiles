@@ -1,0 +1,4 @@
+# scope action requirement unit
+system enable required nvidia-suspend.service
+system enable required nvidia-resume.service
+system enable required nvidia-hibernate.service

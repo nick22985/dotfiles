@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/systemd/system/grub-btrfsd.service.d/timeshift.conf /etc/systemd/system/grub-btrfsd.service.d/timeshift.conf

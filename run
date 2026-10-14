@@ -283,7 +283,7 @@ validate_state_manifests() {
 }
 
 print_profiles() {
-    printf '%s\n' core development desktop system virtualization hardware security media ssh-server full
+    printf '%s\n' core development desktop system virtualization hardware security media ssh-server gpu-amd gpu-intel gpu-nvidia laptop full
 }
 
 print_stages() {
@@ -618,7 +618,7 @@ export DOTFILES_RUNNER_PID="$$"
 
 if ((needs_root == 1)) && [[ "$DRY_RUN" != "1" ]]; then
     log 'Requesting sudo privileges...'
-    if ! sudo -v; then
+    if ! sudo -n true 2>/dev/null && ! sudo -v; then
         log_error 'Failed to get sudo privileges'
         exit 1
     fi

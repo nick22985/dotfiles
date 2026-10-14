@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Maintenance"
+
+apply_stage_services maintenance || exit 1
+log_success "Periodic TRIM and package cache cleanup are enabled"

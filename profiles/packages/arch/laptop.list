@@ -1,0 +1,4 @@
+# source package
+repo power-profiles-daemon
+repo thermald
+repo fprintd

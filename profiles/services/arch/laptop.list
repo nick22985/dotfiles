@@ -1,0 +1,3 @@
+# scope action requirement unit
+system enable-now required power-profiles-daemon.service
+system enable-now required thermald.service

@@ -20,12 +20,13 @@ declare -a requested_profiles=()
 declare -a resolved_profiles=()
 declare -a resolved_profile_runs=()
 declare -a requested_skips=()
+declare -A loaded_host_presets=()
 
 profile_usage() {
     cat <<'EOF'
 Profiles:
   core         Base packages, shell, Git, tmux, and the SSH client
-  development  Java, JavaScript runtimes, repositories, and sbx
+  development  Java, JavaScript runtimes, repositories, sbx, and snd
   desktop      Flatpaks, clipboard tools, and a desktop selection
   system       Boot and multiboot configuration
   virtualization  QEMU, libvirt, and VM tools
@@ -33,6 +34,10 @@ Profiles:
   security     Network and host security tools
   media        Audio, recording, and media tools
   ssh-server   SSH daemon configuration and remote access
+  gpu-amd      AMD graphics drivers and ROCm tools
+  gpu-intel    Intel graphics drivers and video acceleration
+  gpu-nvidia   NVIDIA graphics drivers and PRIME offload
+  laptop       Power profiles and thermal management
   full         Every general workstation profile
 
 Desktop selections: hyprland, plasma, both
@@ -44,7 +49,7 @@ profile_add_request() {
     local existing
 
     case "$profile" in
-        core|development|desktop|system|virtualization|hardware|security|media|ssh-server|full)
+        core|development|desktop|system|virtualization|hardware|security|media|ssh-server|gpu-amd|gpu-intel|gpu-nvidia|laptop|full)
             ;;
         *)
             printf 'Unknown profile: %s\n' "$profile" >&2
@@ -88,6 +93,7 @@ profile_load_selection_manifest() {
             desktop) profile_set_desktop "$value" || return $? ;;
             skip) profile_add_skip "$value" ;;
             platform) requested_platform="$value" ;;
+            include) profile_load_host "$value" || return $? ;;
             *)
                 printf "Unknown %s key '%s' in %s\n" "$label" "$key" "$manifest" >&2
                 return 2
@@ -108,6 +114,9 @@ profile_load_host() {
         printf 'Host preset not found: %s\n' "$manifest" >&2
         return 2
     fi
+    # Presets can include each other; load each once so cycles and diamonds are harmless.
+    [[ -n "${loaded_host_presets[$host]+set}" ]] && return 0
+    loaded_host_presets["$host"]=1
 
     profile_mode=1
     profile_load_selection_manifest "$manifest" "host preset"

@@ -12,22 +12,12 @@ set_context "sbx"
 log "Setting up sbx (sandboxed Docker dev environments)..."
 
 SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
-DEST="$HOME/.local/bin/sbx"
 
 if [[ ! -f "$SBX_SRC/Cargo.toml" ]]; then
     log_warn "sbx source not found at $SBX_SRC, skipping"
     log_info "clone the repo (or add it to repos.txt) and re-run this script"
     log_info "override the path with SBX_SRC=/path/to/sbx"
     exit 0
-fi
-
-# Run cargo through mise so the pinned toolchain applies without shell activation.
-cargo_cmd=(cargo)
-command_exists mise && cargo_cmd=(mise exec -- cargo)
-if ! "${cargo_cmd[@]}" --version >/dev/null 2>&1; then
-    log_error "cargo not found — install Rust before this script runs"
-    log_info "add rust to profiles/tools/development.list and run the mise stage"
-    exit 1
 fi
 
 SYNC_SCRIPT="$DOTFILES_DIR/scripts/sync-sbx-flavors"
@@ -42,42 +32,4 @@ else
     log_warn "$SYNC_SCRIPT not found or not executable; skipping flavor sync"
 fi
 
-log "→ Building sbx from $SBX_SRC..."
-if [[ $DRY_RUN == "0" ]]; then
-    if ! (cd "$SBX_SRC" && "${cargo_cmd[@]}" build --release --quiet); then
-        log_error "cargo build failed"
-        exit 1
-    fi
-else
-    log "Would run: cargo build --release in $SBX_SRC"
-fi
-
-log "→ Installing to $DEST..."
-if [[ $DRY_RUN == "0" ]]; then
-    mkdir -p "$(dirname "$DEST")"
-    if [[ -f "$DEST" ]] && cmp -s "$SBX_SRC/target/release/sbx" "$DEST"; then
-        log_success "$DEST is current"
-    else
-        if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-            log_error "Installing sbx requires a run receipt"
-            exit 1
-        fi
-        if [[ -e "$DEST" || -L "$DEST" ]]; then
-            backup="$DOTFILES_RECEIPT_DIR/backups/user/.local/bin/sbx"
-            mkdir -p "$(dirname "$backup")"
-            mv -- "$DEST" "$backup" || exit 1
-            printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q\n' \
-                "$DEST" "$(dirname "$DEST")" "$backup" "$DEST" \
-                >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
-        else
-            printf 'rm -f -- %q\n' "$DEST" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
-        fi
-        chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
-        install -m 755 "$SBX_SRC/target/release/sbx" "$DEST" || exit 1
-    fi
-else
-    log "Would copy $SBX_SRC/target/release/sbx → $DEST"
-fi
-
-log_success "sbx installed to $DEST"
-log_info "completions: 'source <(COMPLETE=\$(basename \$SHELL) sbx)' in your rc file"
+install_cargo_binary sbx "$SBX_SRC" || exit 1

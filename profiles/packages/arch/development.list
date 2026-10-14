@@ -1,6 +1,7 @@
 # source package
 repo docker
 repo docker-compose
+repo docker-buildx
 repo ansible
 repo mise
 repo go

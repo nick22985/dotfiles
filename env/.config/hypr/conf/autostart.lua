@@ -1,25 +1,23 @@
 -- Autostart. Converted from conf/autostart.conf.
--- Also consolidates the two startup execs that lived in other sourced files:
---   * conf/env.conf       -> kbuildsycoca6
---   * conf/windowrule.conf -> flameshot
--- (both noted inline below).
+-- Also consolidates the startup exec that lived in conf/env.conf (kbuildsycoca6,
+-- noted inline below).
 
 local vars = require("conf.env")
 
 hl.on("hyprland.start", function()
 	hl.exec_cmd("/usr/lib/pam_kwallet_init & hyprpaper & kwalletd5 & nm-applet")
-	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
+	-- Start the user services after exporting the session environment: they require WAYLAND_DISPLAY,
+	-- and outside a uwsm session graphical-session.target never starts them. Apps launched through
+	-- elephant inherit its environment; without XCURSOR_SIZE, X11 apps size the cursor from the DPI.
+	-- elephant restarts because it may already be running without these variables.
+	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE XCURSOR_SIZE HYPRCURSOR_SIZE && systemctl --user start hyprpolkitagent swaync hypridle && systemctl --user restart elephant")
 	-- hl.exec_cmd("uwsm app -- waybar")
 	hl.exec_cmd("uwsm app -- 1password --silent")
 	hl.exec_cmd("uwsm app -- steam")
-	hl.exec_cmd("uwsm app -- elephant")
 	hl.exec_cmd("uwsm app -- walker --gapplication-service")
 	hl.exec_cmd("uwsm app -- tailscale systray")
-	hl.exec_cmd("uwsm app swaync")
-	-- hl.exec_cmd("hypridle")
 	hl.exec_cmd("wl-paste --type text --watch cliphist store")
 	hl.exec_cmd("wl-paste --type image --watch cliphist store")
-	hl.exec_cmd("systemctl --user start hyprpolkitagent")
 	hl.exec_cmd([[sudo -b ydotoold --socket-path="$HOME/.ydotool_socket" --socket-own="$(id -u):$(id -g)"]])
 
 	-- dark mode
@@ -29,23 +27,15 @@ hl.on("hyprland.start", function()
 	hl.exec_cmd("sleep 2 && bash $HOME/.config/hypr/scripts/ultrawide_manager_v3.sh")
 	hl.exec_cmd("bash ~/.config/eww/launch.sh")
 
-	-- Launch apps onto specific workspaces.
-	-- NOTE: hl.exec_cmd takes ONLY a command string (run via /bin/sh) — the old
-	-- `exec-once = [workspace N silent] <cmd>` inline-rule form has no direct
-	-- equivalent here, so a `{ workspace = ... }` 2nd arg is NOT valid and was
-	-- removed. Placement is instead done by class-matched window rules:
-	--   * discord -> ws9, slack -> ws10  are set in conf/windowrule.lua and
-	--     fire for these launched instances too.
-	--   * terminal opens on ws1 (the default focused workspace at startup).
-	hl.exec_cmd(vars.terminal)
-	hl.exec_cmd("brave --disable-features=WaylandWpColorManagerV1")
+	-- Launch apps onto specific workspaces. The second argument is an exec rule that applies only to the
+	-- window this command opens; discord (ws9) and slack (ws10) use class rules in conf/windowrule.lua instead.
+	-- The terminal's rule is not silent so the session starts focused on ws1 on any monitor layout.
+	hl.exec_cmd(vars.terminal, { workspace = "1" })
+	hl.exec_cmd("brave --disable-features=WaylandWpColorManagerV1", { workspace = "2 silent" })
 	hl.exec_cmd("flatpak run com.discordapp.Discord")
 	-- hl.exec_cmd("discord")
 	hl.exec_cmd("flatpak run com.slack.Slack")
 
 	-- From conf/env.conf
 	hl.exec_cmd("XDG_MENU_PREFIX=arch- kbuildsycoca6")
-
-	-- From conf/windowrule.conf (original had a typo "Flamehsot"; corrected here)
-	hl.exec_cmd("flatpak run org.flameshot.Flameshot")
 end)

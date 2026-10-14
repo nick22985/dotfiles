@@ -14,6 +14,8 @@ hl.config({
 
 		touchpad = {
 			natural_scroll = false,
+			-- Keep the touchpad live while keys are held (e.g. moving with WASD in games).
+			disable_while_typing = false,
 		},
 	},
 })

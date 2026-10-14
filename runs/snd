@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+set_context "snd"
+
+log "Setting up snd..."
+
+SND_SRC="${SND_SRC:-$HOME/projects/personal/snd}"
+
+install_cargo_binary snd "$SND_SRC" || exit 1

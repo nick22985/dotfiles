@@ -6,11 +6,11 @@ hl.bind("SUPER + SHIFT + G", hl.dsp.window.move({ workspace = "special:game" }))
 
 -- Special workspace settings
 hl.workspace_rule({ workspace = "special:game", gaps_in = 0, gaps_out = 0, no_border = true })
+hl.workspace_rule({ workspace = "special:game", monitor = "desc:Samsung Electric Company Odyssey G95NC HNTX400116" })
+-- The side gaps centre games on the ultrawide only; on narrower screens (kirito) they leave a negative width.
 hl.workspace_rule({
-	workspace = "special:game",
-	monitor = "desc:Samsung Electric Company Odyssey G95NC HNTX400116",
+	workspace = "n[e:game] m[desc:Samsung Electric Company Odyssey G95NC HNTX400116]",
 	gaps_out = { top = 0, right = 1900, bottom = 0, left = 1900 },
-	gaps_in = 0,
 })
 
 hl.window_rule({

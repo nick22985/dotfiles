@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "NVIDIA"
+
+# The driver preserves video memory across sleep, which only works when these units run around it.
+apply_stage_services nvidia || exit 1
+log_success "NVIDIA suspend, resume, and hibernate handling is enabled"
+
+# Flatpaks only see the NVIDIA driver through the GL extension built for the exact host driver version.
+# Driver updates need the new extension; `flatpak update` installs it.
+# The overrides put these games on the dGPU (PRIME offload); everything else stays on the iGPU.
+offload_apps=(net.labymod.LabyMod com.mojang.Minecraft org.prismlauncher.PrismLauncher)
+
+if ! command_exists flatpak; then
+    log_warn "flatpak not found; skipping the Flatpak NVIDIA runtime and game offload"
+    exit 0
+fi
+
+driver="$(pacman -Q nvidia-utils 2>/dev/null | awk '{print $2}')"
+driver="${driver%-*}"
+if [[ -z "$driver" ]]; then
+    log_error "nvidia-utils is not installed"
+    exit 1
+fi
+extension="org.freedesktop.Platform.GL.nvidia-${driver//./-}"
+
+status=0
+installed="$(flatpak list --user --runtime --columns=application)"
+if grep -Fxq -- "$extension" <<< "$installed"; then
+    log_success "$extension is installed"
+elif [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would install $extension"
+else
+    flatpak install --user -y --noninteractive flathub "$extension" || status=1
+fi
+
+installed="$(flatpak list --user --app --columns=application)"
+for app in "${offload_apps[@]}"; do
+    grep -Fxq -- "$app" <<< "$installed" || continue
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would run $app on the NVIDIA GPU"
+        continue
+    fi
+    flatpak override --user "$app" \
+        --env=__NV_PRIME_RENDER_OFFLOAD=1 \
+        --env=__GLX_VENDOR_LIBRARY_NAME=nvidia \
+        --env=__VK_LAYER_NV_optimus=NVIDIA_only \
+        || status=1
+done
+((status == 0)) && log_success "Flatpak games run on the NVIDIA GPU"
+exit "$status"

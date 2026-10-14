@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/pam.d/sudo /etc/pam.d/sudo

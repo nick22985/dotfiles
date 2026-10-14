@@ -1,0 +1,3 @@
+# scope action requirement unit
+system enable-now required fstrim.timer
+system enable-now required paccache.timer

@@ -19,7 +19,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
 else
     sudo ssh-keygen -A || status=1
     sudo sshd -t || status=1
-    if ! sudo sshd -T | grep -Fxq 'passwordauthentication no'; then
+    # Capture first: grep -q exits on a match, and pipefail would count sshd's SIGPIPE as failure.
+    effective="$(sudo sshd -T)" || status=1
+    if ! grep -Fxiq 'passwordauthentication no' <<< "$effective"; then
         log_error "The managed SSH drop-in is not active; check sshd_config Include directives"
         status=1
     fi

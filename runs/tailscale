@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Tailscale"
+
+apply_stage_services tailscale || exit 1
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would make $USER the Tailscale operator"
+else
+    # The operator can run tailscale commands without sudo once the node is logged in.
+    if ! sudo tailscale set --operator="$USER"; then
+        log_error "Failed to make $USER the Tailscale operator"
+        exit 1
+    fi
+    if ! tailscale status >/dev/null 2>&1; then
+        log_warn "Tailscale is not logged in; run 'sudo tailscale up --operator=$USER' once (the first login needs root)"
+    fi
+fi
+log_success "Tailscale daemon is enabled"

@@ -1,7 +1,9 @@
 # source package
 repo hyprland
+repo uwsm
 repo sddm
 repo waybar
+repo wayland-utils
 repo rofi
 repo hyprpaper
 repo hypridle
@@ -29,6 +31,7 @@ repo wf-recorder
 aur hyprpicker
 aur grimblast-git
 aur swaync
+aur eww
 aur wofi
 aur qr-rs-bin
 aur wayfreeze-git

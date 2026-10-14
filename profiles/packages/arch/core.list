@@ -16,6 +16,7 @@ repo git-delta
 repo eza
 repo zoxide
 repo base-devel
+repo pacman-contrib
 repo python
 repo python-pip
 repo jq

@@ -1,0 +1,5 @@
+# source package
+repo nvidia-open
+repo nvidia-utils
+repo nvidia-prime
+multilib lib32-nvidia-utils

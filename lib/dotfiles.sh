@@ -53,11 +53,17 @@ dotfile_deploy_paths() {
             printf '%s\n' "$path"
             continue
         }
+        # Nested repositories (submodules) are linked whole: their .git files hold
+        # relative gitdir paths that only resolve from inside the repository.
+        # Docker build contexts are linked whole too: BuildKit refuses symlinks
+        # that point outside the context, so a per-file link to the Dockerfile fails.
         while IFS= read -r -d '' source_file; do
             relative="${source_file#"$source"/}"
             [[ "$relative" == .git || "$relative" == .git/* ]] && continue
             printf '%s/%s\n' "$path" "$relative"
-        done < <(find "$source" \( -type f -o -type l \) -print0)
+        done < <(find "$source" -mindepth 1 \
+            \( -type d \( -exec test -e '{}/.git' \; -o -exec test -e '{}/Dockerfile' \; \) -prune -print0 \) \
+            -o \( -type f -o -type l \) -print0)
     done < <(dotfile_manifest_paths)
 }
 

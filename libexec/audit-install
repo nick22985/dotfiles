@@ -446,7 +446,17 @@ audit_user_and_system_files() {
     while IFS= read -r manifest; do
         while read -r mode source_path target extra; do
             [[ -n "${mode:-}" && "$mode" != \#* ]] || continue
-            if [[ ! -f "$target" ]] || ! cmp -s "$dotfiles_dir/$source_path" "$target"; then
+            # Root-only targets (e.g. the 0600 sshd drop-in) need cached sudo; without it the check is incomplete, not drift.
+            if [[ -f "$target" && ! -r "$target" ]]; then
+                if ! sudo -n true 2>/dev/null; then
+                    printf '%s unreadable\n' "$target" >> "$audit_tmp/system-file-drift.raw"
+                    checks_incomplete=1
+                elif ! sudo -n cmp -s "$dotfiles_dir/$source_path" "$target"; then
+                    printf '%s content-or-missing\n' "$target" >> "$audit_tmp/system-file-drift.raw"
+                elif [[ "$(stat -c %a "$target")" != "${mode#0}" ]]; then
+                    printf '%s mode\n' "$target" >> "$audit_tmp/system-file-drift.raw"
+                fi
+            elif [[ ! -f "$target" ]] || ! cmp -s "$dotfiles_dir/$source_path" "$target"; then
                 printf '%s content-or-missing\n' "$target" >> "$audit_tmp/system-file-drift.raw"
             elif [[ "$(stat -c %a "$target")" != "${mode#0}" ]]; then
                 printf '%s mode\n' "$target" >> "$audit_tmp/system-file-drift.raw"

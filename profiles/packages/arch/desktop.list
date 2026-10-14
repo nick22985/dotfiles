@@ -23,7 +23,10 @@ repo pipewire
 repo pipewire-pulse
 repo pipewire-jack
 repo wireplumber
+repo rtkit
 multilib lib32-pipewire
+multilib steam
+repo firefox
 aur 1password
 aur 1password-cli
 aur snapd

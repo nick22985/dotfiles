@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Triage pending lazy.nvim plugin updates before running :Lazy update.
+# Run :Lazy check first (it fetches without changing the checkout), then:
+#
+#   nvim-plugin-audit [plugin...]      # all plugins with pending commits, or just these
+#   nvim-plugin-audit -d <plugin>      # page the full diff for one plugin
+#
+# For each plugin it compares the installed commit (HEAD) with the fetched
+# upstream and flags what deserves a real read:
+#   - rewritten history (installed commit not an ancestor of upstream)
+#   - commit authors who never committed to the plugin before
+#   - changed build/install files, scripts and binaries
+#   - added lines that run commands, download, eval code or touch the network
+#   - breaking changes: `type!:`/BREAKING commits, and removed functions that
+#     your config or dev plugin checkouts (lazy `dev = true`, never updated by
+#     :Lazy update) still call
+
+lazy_dir="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy"
+# Code that calls into plugins but isn't moved by :Lazy update.
+callers=("${XDG_CONFIG_HOME:-$HOME/.config}/nvim" "${NVIM_DEV_PLUGINS:-$HOME/projects/personal/neovim/plugins}")
+
+risky='vim\.fn\.system|vim\.system|jobstart|termopen|io\.popen|os\.execute|uv\.spawn|(^|[^.:A-Za-z_])(load|loadstring|dofile)\(|(^|[^A-Za-z_])(curl|wget)([^A-Za-z_]|$)|base64|ffi\.|socket|sudo|chmod|setuid|\.ssh/|/etc/'
+# Tests, CI and docs never run inside nvim.
+skip=(':(exclude)test/*' ':(exclude)tests/*' ':(exclude)spec/*' ':(exclude).github/*' ':(exclude)doc/*' ':(exclude)scripts/ci/*')
+build_files='(^|/)(build\.lua|Makefile|CMakeLists\.txt|Cargo\.toml|package\.json|.*\.rockspec|install\.sh|lazy\.lua|.*\.(sh|ps1|py|js|ts|so|dll|dylib|exe|node|wasm))$'
+
+# lazy.nvim checks out a detached HEAD, so there is often no @{u}. Plugins
+# pinned to a non-default branch (harpoon2, nvim-treesitter main) would compare
+# against the wrong branch via origin/HEAD, so use the branch holding HEAD then.
+upstream() {
+    local branch
+    git -C "$1" rev-parse -q --verify '@{u}' 2>/dev/null && return
+    if ! git -C "$1" merge-base --is-ancestor HEAD origin/HEAD 2>/dev/null; then
+        branch=$(git -C "$1" branch -r --contains HEAD --format='%(refname:short)' 2>/dev/null |
+            grep -v -e '/HEAD$' -e '^origin$' | head -n 1)
+        [[ -n $branch ]] && git -C "$1" rev-parse -q --verify "$branch" 2>/dev/null && return
+    fi
+    git -C "$1" rev-parse -q --verify origin/HEAD 2>/dev/null
+}
+
+# Names of non-local functions defined on diff lines starting with $1
+# (`function M.a.b(` / `M.a.b = function`), by last name segment. Skips mini.nvim
+# style private helper tables (`H.x`).
+defined() {
+    grep -vE "^\\$1[[:space:]]*(function[[:space:]]+)?H[.:]" |
+        sed -nE -e "s/^\\$1[[:space:]]*function[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*[.:]([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\(.*/\\1/p" \
+        -e "s/^\\$1[[:space:]]*[A-Za-z_][A-Za-z0-9_.]*\\.([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*function.*/\\1/p" | sort -u
+}
+
+# Prints a heading and the first 8 lines of a list, indented.
+section() {
+    [[ -n $2 ]] || return
+    local n
+    n=$(wc -l <<<"$2")
+    printf '  \e[33m%s (%s):\e[0m\n' "$1" "$n"
+    head -n 8 <<<"$2" | sed 's/^/    /'
+    ((n > 8)) && printf '    ... +%s more\n' "$((n - 8))"
+}
+
+if [[ $1 == -d ]]; then
+    dir="$lazy_dir/$2"
+    up=$(upstream "$dir") || { echo "no upstream for $2" >&2; exit 1; }
+    git -C "$dir" diff --stat HEAD "$up" 2>/dev/null
+    git -C "$dir" diff HEAD "$up" 2>/dev/null
+    exit
+fi
+
+if (($#)); then
+    plugins=("$@")
+else
+    plugins=()
+    for dir in "$lazy_dir"/*/; do
+        plugins+=("$(basename "$dir")")
+    done
+fi
+
+for name in "${plugins[@]}"; do
+    dir="$lazy_dir/$name"
+    [[ -d $dir/.git ]] || continue
+    up=$(upstream "$dir") || continue
+    head=$(git -C "$dir" rev-parse HEAD)
+    [[ $head == "$up" ]] && continue
+
+    flags=()
+    if git -C "$dir" merge-base --is-ancestor "$head" "$up"; then
+        range="$head..$up"
+    else
+        flags+=("HISTORY REWRITTEN (installed commit is not in upstream; check the repo for a force-push/move)")
+        range="$(git -C "$dir" merge-base "$head" "$up" 2>/dev/null || echo "$head")..$up"
+    fi
+    count=$(git -C "$dir" rev-list --count "$range")
+
+    known=$(git -C "$dir" log --format='%ae' "$head" | sort -u)
+    new_authors=$(git -C "$dir" log --format='%an <%ae>' "$range" | sort -u |
+        while IFS= read -r a; do
+            email=${a##*<}
+            grep -qxF "${email%>}" <<<"$known" || printf '%s\n' "$a"
+        done)
+
+    # Plugins are partial clones, so diffs download file contents on demand;
+    # 2>/dev/null hides that progress output. A failed diff is reported rather
+    # than silently showing as "nothing flagged".
+    if ! files=$(git -C "$dir" diff --name-only "$head" "$up" -- . "${skip[@]}" 2>/dev/null) ||
+        ! diff=$(git -C "$dir" diff -U0 "$head" "$up" -- '*.lua' '*.vim' '*.sh' '*.py' '*.js' "${skip[@]}" 2>/dev/null); then
+        flags+=("could not diff (offline?), review with: $(basename "$0") -d $name")
+    fi
+    builds=$(grep -E "$build_files" <<<"$files")
+    breaking=$(git -C "$dir" log --format='%h %s' -E --grep='BREAKING' "$range"
+        git -C "$dir" log --format='%h %s' "$range" | grep -E '^[0-9a-f]+ [a-z]+(\([^)]*\))?!:')
+    breaking=$(sort -u <<<"$breaking" | sed '/^$/d')
+    # Non-local functions deleted and not re-added (by last name segment), then
+    # every call to them in config and dev checkouts.
+    removed=$(comm -23 <(defined - <<<"$diff") <(defined + <<<"$diff"))
+    uses=$(for fn in $removed; do
+        for c in "${callers[@]}"; do
+            # Calls through vim.* are Neovim's API, not the plugin's.
+            [[ -d $c ]] && grep -rnP --include='*.lua' "(?<![\w.])(?!vim\b)\w+(?:\.\w+)*[.:]$fn\s*\(" "$c" 2>/dev/null
+        done
+    done | sed "s|^$HOME|~|" | cut -c1-160)
+    # The pattern goes through ENVIRON, not awk -v, which would eat its backslashes.
+    hits=$(RISKY=$risky awk '
+            /^\+\+\+ / { file = substr($0, 7); next }
+            /^@@/ { split($3, a, ","); line = substr(a[1], 2); next }
+            /^\+/ { if ($0 ~ ENVIRON["RISKY"] && $0 !~ /^\+[[:space:]]*--/) printf "%s:%d: %s\n", file, line, substr($0, 2); line++ }' <<<"$diff" |
+        cut -c1-160)
+
+    printf '\n\e[1m%s\e[0m  %s commits\n' "$name" "$count"
+    for f in "${flags[@]}"; do printf '  \e[31m! %s\e[0m\n' "$f"; done
+    section "new authors" "$new_authors"
+    section "build/script/binary files changed" "$builds"
+    section "risky-looking added lines" "$hits"
+    section "breaking-change commits" "$breaking"
+    section "removed functions still called from your config/dev plugins" "$uses"
+    [[ ${#flags[@]} -eq 0 && -z $new_authors && -z $builds && -z $hits && -z $breaking && -z $uses ]] && printf '  \e[32mnothing flagged\e[0m\n'
+done

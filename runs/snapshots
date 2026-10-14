@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Snapshot boot entries"
+
+install_stage_packages snapshots || exit 1
+apply_stage_system_files snapshots || exit 1
+if [[ "$DRY_RUN" != "1" ]]; then
+    sudo systemctl daemon-reload || exit 1
+fi
+apply_stage_services snapshots || exit 1
+log_success "GRUB lists Timeshift snapshots as boot entries"

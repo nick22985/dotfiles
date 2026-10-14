@@ -3,7 +3,6 @@ repo clamav
 repo cryfs
 repo mkcert
 repo nmap
-repo reflector
 repo tailscale
 repo tcpdump
 repo ufw

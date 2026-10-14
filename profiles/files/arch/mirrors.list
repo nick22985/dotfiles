@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/xdg/reflector/reflector.conf /etc/xdg/reflector/reflector.conf

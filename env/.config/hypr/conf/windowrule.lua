@@ -6,19 +6,7 @@
 
 -- discord & slack always on 9 and 10
 hl.window_rule({ match = { class = "(discord)$" }, workspace = "9 silent" })
-hl.window_rule({ match = { class = "^[Ss]lack$" }, workspace = "10 silent", no_initial_focus = true })
-
--- flameshot setup
--- (noanim isn't necessary but animations with these rules might look bad)
-hl.window_rule({
-    match            = { class = "^(flameshot)$" },
-    no_anim          = true,
-    float            = true,
-    move             = { 0, 0 },
-    pin              = true,
-    no_initial_focus = true,
-})
--- The corresponding `exec` for flameshot was moved to conf/autostart.lua.
+hl.window_rule({ match = { class = "^(com\\.slack\\.Slack|[Ss]lack)$" }, workspace = "10 silent", no_initial_focus = true })
 
 -- 1Password quick access popup centering
 hl.window_rule({

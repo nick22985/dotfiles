@@ -4,8 +4,6 @@ fi
 autoload -Uz compinit
 compinit
 
-source <(COMPLETE=zsh sbx)
-source <(COMPLETE=zsh snd)
 
 
 # If you come from bash you might have to change your $PATH.
@@ -133,6 +131,9 @@ export GPG_TTY
 path+=("$HOME/.local/bin")
 path+=("$HOME/install/configs/private/.local/bin")
 export PATH
+
+command -v sbx >/dev/null && source <(COMPLETE=zsh sbx)
+command -v snd >/dev/null && source <(COMPLETE=zsh snd)
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 

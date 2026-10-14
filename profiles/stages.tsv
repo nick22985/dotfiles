@@ -5,7 +5,7 @@ git|0|packages|arch|normal|Check Git and repository metadata
 fonts|1|packages|arch|normal|Install fonts and refresh the font cache
 shell|0|packages|arch|normal|Configure login shells
 dotfiles|0||arch|normal|Deploy selected user configuration bundles
-oh-my-zsh|0|dotfiles|arch|normal|Verify the repository-managed Zsh plugins
+oh-my-zsh|0|dotfiles|arch|normal|Install Oh My Zsh and verify the repository-managed plugins
 java|1|packages|arch|high|Install Java and its declared system files
 tmux|0|dotfiles|arch|normal|Install tmux plugins
 hypr|1|packages|arch|normal|Install and configure Hyprland
@@ -13,7 +13,9 @@ walker|0|hypr|arch|normal|Install Walker and Elephant
 docker|1|packages|arch|normal|Enable Docker and grant group access
 ssh|1|packages|arch|high|Configure the SSH server
 sync-repos|0|git|arch|normal|Clone declared development repositories
+private-files|0|git|arch|normal|Copy private home files such as ijfmt styles
 sbx|0|packages,mise,sync-repos|arch|normal|Build and install sbx
+snd|0|packages,mise,sync-repos|arch|normal|Build and install snd
 flatpak|0|packages|arch|normal|Install declared Flatpak applications
 snap|1|packages|arch|normal|Install declared Snap applications
 grub-multiboot|1|packages|arch|high|Configure GRUB multiboot
@@ -23,3 +25,11 @@ bluetooth|1|packages|arch|normal|Enable Bluetooth
 defaults|0|packages|arch|normal|Apply declared user application defaults
 clipboard|1|packages|arch|normal|Install screenshot and clipboard tools
 printer|1|packages|arch|normal|Install and enable printing
+maintenance|1|packages|arch|normal|Enable periodic TRIM and package cache cleanup
+firewall|1|packages|arch|high|Enable the ufw firewall
+laptop|1|packages|arch|normal|Enable power profiles, thermal management, and fingerprint sudo
+tailscale|1|packages|arch|normal|Enable the Tailscale daemon
+firmware|1|packages|arch|normal|Enable LVFS metadata refresh and report firmware updates
+nvidia|1|packages|arch|normal|Enable NVIDIA sleep handling and run Flatpak games on the NVIDIA GPU
+snapshots|1|packages|arch|normal|Add Timeshift snapshots to the GRUB menu
+mirrors|1|packages|arch|normal|Refresh the pacman mirror list weekly with reflector

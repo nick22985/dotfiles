@@ -168,7 +168,7 @@ ensure_sudo() {
 
     # If not, request sudo (this should only happen if main script didn't handle it)
     log "→ Requesting sudo privileges for this script..."
-    if sudo -v; then
+    if sudo -n true 2>/dev/null || sudo -v; then
         return 0
     else
         log "❌ Failed to get sudo privileges"
@@ -205,6 +205,64 @@ parse_args() {
 # Check if command exists
 command_exists() {
     command -v "$1" &> /dev/null
+}
+
+# Build a Rust binary from a local checkout and install it to ~/.local/bin,
+# recording a restore step in the run receipt when it replaces a file.
+# Usage: install_cargo_binary <name> <source dir>
+install_cargo_binary() {
+    local name="$1" src="$2"
+    local dest="$HOME/.local/bin/$name"
+
+    if [[ ! -f "$src/Cargo.toml" ]]; then
+        log_warn "$name source not found at $src, skipping"
+        log_info "clone the repo (or add it to repos.txt) and re-run this script"
+        return 0
+    fi
+
+    # Run cargo through mise so the pinned toolchain applies without shell activation.
+    local -a cargo_cmd=(cargo)
+    command_exists mise && cargo_cmd=(mise exec -- cargo)
+    if ! "${cargo_cmd[@]}" --version >/dev/null 2>&1; then
+        log_error "cargo not found — install Rust before this script runs"
+        log_info "add rust to profiles/tools/development.list and run the mise stage"
+        return 1
+    fi
+
+    log "→ Building $name from $src..."
+    if [[ $DRY_RUN == "1" ]]; then
+        log "Would run: cargo build --release in $src"
+        log "Would copy $src/target/release/$name → $dest"
+        return 0
+    fi
+    if ! (cd "$src" && "${cargo_cmd[@]}" build --release --quiet); then
+        log_error "cargo build failed for $name"
+        return 1
+    fi
+
+    log "→ Installing to $dest..."
+    mkdir -p "$(dirname "$dest")"
+    if [[ -f "$dest" ]] && cmp -s "$src/target/release/$name" "$dest"; then
+        log_success "$dest is current"
+        return 0
+    fi
+    if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+        log_error "Installing $name requires a run receipt"
+        return 1
+    fi
+    if [[ -e "$dest" || -L "$dest" ]]; then
+        local backup="$DOTFILES_RECEIPT_DIR/backups/user/.local/bin/$name"
+        mkdir -p "$(dirname "$backup")"
+        mv -- "$dest" "$backup" || return 1
+        printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q\n' \
+            "$dest" "$(dirname "$dest")" "$backup" "$dest" \
+            >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+    else
+        printf 'rm -f -- %q\n' "$dest" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+    fi
+    chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+    install -m 755 "$src/target/release/$name" "$dest" || return 1
+    log_success "$name installed to $dest"
 }
 
 # Check if package is installed (Arch)

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Toggle a NetworkManager Wi-Fi hotspot: hotspot [toggle|on|off|status]
+
+set -u -o pipefail
+
+connection="Hotspot"
+
+notify() {
+    command -v notify-send >/dev/null && notify-send -a hotspot "Hotspot" "$1"
+    printf '%s\n' "$1"
+}
+
+is_active() {
+    grep -Fxq "$connection" <<< "$(nmcli -t -f NAME connection show --active)"
+}
+
+start() {
+    if grep -Fxq "$connection" <<< "$(nmcli -t -f NAME connection show)"; then
+        nmcli connection up "$connection" >/dev/null || { notify "Failed to start the hotspot"; return 1; }
+    else
+        # First run: NetworkManager generates the SSID and password and saves them as "$connection".
+        nmcli device wifi hotspot >/dev/null || { notify "Failed to create the hotspot"; return 1; }
+    fi
+    notify "$(nmcli -t -f 802-11-wireless.ssid,802-11-wireless-security.psk --show-secrets connection show "$connection" | sed 's/^802-11-wireless.ssid:/SSID: /; s/^802-11-wireless-security.psk:/Password: /')"
+}
+
+stop() {
+    nmcli connection down "$connection" >/dev/null && notify "Hotspot stopped"
+}
+
+case "${1:-toggle}" in
+    toggle) if is_active; then stop; else start; fi ;;
+    on) start ;;
+    off) stop ;;
+    status) if is_active; then echo active; else echo inactive; fi ;;
+    *) echo "usage: hotspot [toggle|on|off|status]" >&2; exit 2 ;;
+esac

@@ -2,7 +2,8 @@
 
 hl.window_rule({
     name             = "labymodfreezefix",
-    match            = { title = [[^Minecraft .* \| LabyMod .*$]] },
+    -- LabyMod titles read "Minecraft 26.3 | Laby Client v47.2"; older builds said "| LabyMod".
+    match            = { class = [[^com\.mojang\.minecraft$]], title = [[^Minecraft .* \| Laby.*$]] },
     render_unfocused = true,
     workspace        = "special:game silent",
     no_initial_focus = true,

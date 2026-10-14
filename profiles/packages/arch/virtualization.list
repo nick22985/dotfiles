@@ -3,6 +3,7 @@ repo dnsmasq
 repo edk2-ovmf
 repo libguestfs
 repo libvirt
+repo dmidecode
 repo qemu-full
 repo swtpm
 repo vde2

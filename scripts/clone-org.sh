@@ -46,7 +46,8 @@ fi
 ORG="$1"
 
 echo "Checking GitHub authentication..."
-if ! gh auth status &>/dev/null; then
+# Only check that a token is stored; `gh auth status` also fails while GitHub is rate limiting.
+if ! gh auth token &>/dev/null; then
     echo "You are not authenticated. Run: gh auth login"
     exit 1
 fi
@@ -131,7 +132,7 @@ clone_or_update_normal() {
     fi
 
     echo "Cloning: $repo"
-    if gh repo clone "$repo" "$container" 2>/dev/null; then
+    if git clone --quiet "git@github.com:${repo}.git" "$container"; then
         normalize_remote_to_ssh "$container"
         echo "cloned $name $url" >> "$STATS_FILE"
     else
@@ -219,7 +220,7 @@ clone_or_update_bare() {
     local is_fresh=0
     if [ ! -e "$container" ]; then
         echo "Cloning: $repo"
-        if ! gh repo clone "$repo" "$container" 2>/dev/null; then
+        if ! git clone --quiet "git@github.com:${repo}.git" "$container"; then
             echo "Failed to clone: $repo"
             echo "failed $name $url" >> "$STATS_FILE"
             return
@@ -289,8 +290,11 @@ clone_or_update_repo() {
     fi
 }
 
-repos_public=$(gh repo list "$ORG" --visibility public --limit "$LIMIT" --json nameWithOwner -q '.[].nameWithOwner' || true)
-repos_private=$(gh repo list "$ORG" --visibility private --limit "$LIMIT" --json nameWithOwner -q '.[].nameWithOwner' || true)
+if ! repos_public=$(gh repo list "$ORG" --visibility public --limit "$LIMIT" --json nameWithOwner -q '.[].nameWithOwner') \
+    || ! repos_private=$(gh repo list "$ORG" --visibility private --limit "$LIMIT" --json nameWithOwner -q '.[].nameWithOwner'); then
+    echo "Failed to list repositories for $ORG (check: gh auth status)"
+    exit 1
+fi
 repos=$(printf "%s\n%s\n" "$repos_public" "$repos_private" | sort -u)
 
 count=$(echo "$repos" | grep -c . || true)

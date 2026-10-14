@@ -161,11 +161,16 @@ if [[ -f "$orgs_file" ]]; then
     gh_ready=0
     if ! command_exists gh; then
         log_warn "GitHub CLI is not installed; skipping organization sync"
-    elif gh auth status >/dev/null 2>&1; then
+    elif gh auth token >/dev/null 2>&1; then
         gh_ready=1
     elif [[ "$DRY_RUN" == "0" && -t 0 ]]; then
         log "→ Logging in to GitHub CLI for organization sync..."
-        if gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web; then
+        gh_env=()
+        if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" ]]; then
+            log_info "Open https://github.com/login/device on another device and enter the code below"
+            gh_env=(GH_BROWSER=true)
+        fi
+        if env "${gh_env[@]}" gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web; then
             gh_ready=1
         fi
     fi

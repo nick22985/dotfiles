@@ -8,6 +8,7 @@ parse_args "$@"
 set_context "Repository sync"
 
 repos_file="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/repos.txt"
+orgs_file="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/orgs.txt"
 clone_root="$(realpath -m -- "${REPOS_CLONE_DIR:-$HOME/repos}")"
 projects_root="$(realpath -m -- "${REPOS_PROJECTS_DIR:-$HOME/projects}")"
 home_root="$(realpath -m -- "$HOME")"
@@ -43,6 +44,19 @@ ensure_ssh_agent() {
     ssh-add || log_warn "Could not load an SSH key into the agent; each clone may prompt for the passphrase"
 }
 
+declared_repos=()
+while read -r url; do
+    case "$url" in
+        git@github.com:*) url="${url#git@github.com:}" ;;
+        https://github.com/*) url="${url#https://github.com/}" ;;
+        *) continue ;;
+    esac
+    declared_repos+=("${url%.git}")
+done < <(
+    git -C "$DOTFILES_DIR" remote get-url origin 2>/dev/null
+    git config -f "$DOTFILES_DIR/.gitmodules" --get-regexp '\.url$' 2>/dev/null | cut -d' ' -f2
+)
+
 status=0
 processed=0
 cloned=0
@@ -65,6 +79,7 @@ while read -r repo_spec target option extra; do
         status=1
         continue
     fi
+    declared_repos+=("$repo_spec")
 
     bare=0
     if [[ "${target:-}" == "--bare" ]]; then
@@ -140,5 +155,74 @@ while read -r repo_spec target option extra; do
 done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$repos_file")
 
 log_info "Repositories: $processed declared, $cloned cloned, $skipped already present"
+
+# Clone or update every repository in each declared GitHub organization.
+if [[ -f "$orgs_file" ]]; then
+    gh_ready=1
+    if ! command_exists gh || ! gh auth status >/dev/null 2>&1; then
+        gh_ready=0
+    fi
+    while read -r org target options; do
+        [[ -n "${org:-}" && "$org" != \#* ]] || continue
+        if [[ ! "$org" =~ ^[[:alnum:]_.-]+$ || "${target:-}" != "~/"* ]]; then
+            log_error "Invalid organization entry: $org ${target:-} ${options:-}"
+            status=1
+            continue
+        fi
+        destination="$(realpath -m -- "${target/#\~/$HOME}")"
+        if [[ "$destination" != "$clone_root"/* && "$destination" != "$projects_root"/* ]]; then
+            log_error "Organization target is outside managed roots: $destination"
+            status=1
+            continue
+        fi
+        read -r -a options_list <<< "${options:-}"
+        org_args=()
+        excludes=()
+        valid=1
+        for ((i = 0; i < ${#options_list[@]}; i++)); do
+            case "${options_list[i]}" in
+                --bare) org_args+=(--bare) ;;
+                -j)
+                    [[ "${options_list[i + 1]:-}" =~ ^[0-9]+$ ]] || valid=0
+                    org_args+=(-j "${options_list[i + 1]:-}")
+                    i=$((i + 1))
+                    ;;
+                -e)
+                    [[ "${options_list[i + 1]:-}" =~ ^[[:alnum:]_.,/-]+$ ]] || valid=0
+                    excludes+=("${options_list[i + 1]:-}")
+                    i=$((i + 1))
+                    ;;
+                *) valid=0 ;;
+            esac
+        done
+        if ((valid == 0)); then
+            log_error "Unknown organization options for $org: $options"
+            status=1
+            continue
+        fi
+        for repo in "${declared_repos[@]}"; do
+            owner="${repo%%/*}"
+            [[ "${owner,,}" == "${org,,}" ]] || continue
+            excludes+=("$repo")
+        done
+        if ((${#excludes[@]} > 0)); then
+            org_args+=(-e "$(IFS=,; printf '%s' "${excludes[*]}")")
+        fi
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Would sync organization $org to $destination ${org_args[*]}"
+            continue
+        fi
+        if ((gh_ready == 0)); then
+            log_warn "GitHub CLI is not authenticated; skipping organization $org (run: gh auth login)"
+            continue
+        fi
+        log "→ Syncing organization $org to $destination..."
+        if ! "$DOTFILES_DIR/scripts/clone-org.sh" -d "$destination" "${org_args[@]}" "$org"; then
+            log_error "Failed to sync organization $org"
+            status=1
+        fi
+    done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$orgs_file")
+fi
+
 ((status == 0)) && log_success "Repository sync is complete"
 exit "$status"

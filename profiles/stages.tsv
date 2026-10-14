@@ -13,7 +13,7 @@ walker|0|hypr|arch|normal|Install Walker and Elephant
 docker|1|packages|arch|normal|Enable Docker and grant group access
 ssh|1|packages|arch|high|Configure the SSH server
 sync-repos|0|git|arch|normal|Clone declared development repositories
-sbx|0|packages,mise|arch|normal|Build and install sbx
+sbx|0|packages,mise,sync-repos|arch|normal|Build and install sbx
 flatpak|0|packages|arch|normal|Install declared Flatpak applications
 snap|1|packages|arch|normal|Install declared Snap applications
 grub-multiboot|1|packages|arch|high|Configure GRUB multiboot

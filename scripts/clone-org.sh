@@ -304,7 +304,7 @@ if [ -n "$EXCLUDE_REPOS" ]; then
         excluded=false
         IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_REPOS"
         for exclude in "${EXCLUDE_ARRAY[@]}"; do
-            if [[ "$repo" == "$exclude" || "$repo" == "$ORG/$exclude" ]]; then
+            if [[ "${repo,,}" == "${exclude,,}" || "${repo,,}" == "${ORG,,}/${exclude,,}" ]]; then
                 excluded=true
                 break
             fi

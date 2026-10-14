@@ -3,6 +3,7 @@
 private_dir="$HOME/.config/.nickInstall/install/configs/private"
 history_file="${XDG_DATA_HOME:-$HOME/.local/share}/tmux-sessionizer/history"
 claude_state_file="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-sessionizer/claude"
+trust_file="${XDG_DATA_HOME:-$HOME/.local/share}/tmux-sessionizer/trusted"
 
 switch_to() {
     if [[ -z $TMUX ]]; then
@@ -17,10 +18,10 @@ has_session() {
 }
 
 resolve_session_name() {
-    local session_name session_path session_host
-    while IFS=$'\t' read -r session_name session_path session_host; do
+    local session_name session_path session_host session_dir
+    while IFS=$'\t' read -r session_name session_path session_host session_dir; do
         if [[ -n $ssh_host ]]; then
-            if [[ $session_host == "$ssh_host" ]]; then
+            if [[ $session_host == "$ssh_host" && $session_dir == "$ssh_dir" ]]; then
                 printf '%s\n' "$session_name"
                 return
             fi
@@ -28,7 +29,7 @@ resolve_session_name() {
             printf '%s\n' "$session_name"
             return
         fi
-    done < <(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}" 2>/dev/null)
+    done < <(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{TMUX_SSH_DIR}" 2>/dev/null)
 
     local candidate=$project_name
     local suffix=2
@@ -39,20 +40,97 @@ resolve_session_name() {
     printf '%s\n' "$candidate"
 }
 
+# Local sessions source the first of <dir>/.tmux-sessionizer, the private
+# .tmux-sessionizer/<project name> or ~/.tmux-sessionizer in their first pane.
+# SSH sessions run the first of .tmux-sessionizer/<project name>
+# (ssh-<host>[-<remote dir name>]) or .tmux-sessionizer/ssh-<host> locally in
+# the background instead, as their pane is a remote shell, with args
+# <session> <host> <remote dir> and TMUX_PANE set to that pane.
 hydrate() {
     local sessionizer_dir=".config/.nickInstall/install/configs/private/.tmux-sessionizer"
     local project_name=$3
 
-    # Check project dir
-    if [ -f "$2"/.tmux-sessionizer ]; then
-        tmux send-keys -t "=$1:" "source $2/.tmux-sessionizer $1 $2" c-M
-    # check folder
-    elif [ -d "$HOME/$sessionizer_dir" ] && [ -f "$HOME/$sessionizer_dir/${project_name}" ]; then
-        tmux send-keys -t "=$1:" "source $HOME/$sessionizer_dir/${project_name} $1 $2" C-m
-    # use default home dir
-    elif [ -f "$HOME"/.tmux-sessionizer ]; then
-        tmux send-keys -t "=$1:" "source $HOME/.tmux-sessionizer $1 $2" c-M
+    if [[ -n $ssh_host ]]; then
+        local file pane
+        for file in "$HOME/$sessionizer_dir/$project_name" "$HOME/$sessionizer_dir/ssh-$(tr '.:' '__' <<<"$ssh_host")"; do
+            [[ -f $file ]] || continue
+            pane=$(tmux display-message -p -t "=$1:" '#{pane_id}')
+            tmux run-shell -b "cd ~ && TMUX_PANE=$pane bash $(printf '%q ' "$file" "$1" "$ssh_host" "$ssh_dir")"
+            return
+        done
+        return
     fi
+
+    local file
+    if [[ -f $2/.tmux-sessionizer && $2/.tmux-sessionizer -ef $HOME/.tmux-sessionizer ]]; then
+        file="$HOME/.tmux-sessionizer"
+    elif [[ -f $2/.tmux-sessionizer ]]; then
+        file="$2/.tmux-sessionizer"
+        # Comes with the project (a cloned repo, someone else's home), so it only
+        # runs once trusted; otherwise the command is typed but not run, behind a
+        # --trust that shows the file and asks first.
+        if trust_enabled && ! is_trusted "$file"; then
+            tmux send-keys -t "=$1:" "$(printf '%q' "$(readlink -f "$0")") --trust $(printf '%q' "$file") && source $(printf '%q ' "$file" "$1" "$2")"
+            return
+        fi
+    elif [[ -f $HOME/$sessionizer_dir/$project_name ]]; then
+        file="$HOME/$sessionizer_dir/$project_name"
+    elif [[ -f $HOME/.tmux-sessionizer ]]; then
+        file="$HOME/.tmux-sessionizer"
+    else
+        return
+    fi
+    tmux send-keys -t "=$1:" "source $(printf '%q ' "$file" "$1" "$2")" C-m
+}
+
+# Project .tmux-sessionizer files must be trusted (like `direnv allow`) before
+# hydrate runs them; disable with: set -g @sessionizer_trust off
+trust_enabled() {
+    [[ $(tmux show-option -gqv @sessionizer_trust 2>/dev/null) != off ]]
+}
+
+# Trust is per path and content hash, so any edit needs trusting again. Files
+# someone else can change (another owner, group/world writable) never count.
+is_trusted() {
+    local file
+    file=$(readlink -f -- "$1") && safe_owner "$file" || return 1
+    [[ -f $trust_file ]] &&
+        grep -qxF "$(sha256sum <"$file" | cut -d' ' -f1)"$'\t'"$file" "$trust_file"
+}
+
+safe_owner() {
+    [[ -O $1 && -z $(find "$1" -maxdepth 0 -perm /022) ]]
+}
+
+# Shows the file and records it as trusted if confirmed.
+trust() {
+    local file answer tmp
+    file=$(readlink -f -- "$1") && [[ -f $file ]] || {
+        echo "tmux-sessionizer: no such file: $1" >&2
+        return 1
+    }
+    if ! safe_owner "$file"; then
+        echo "tmux-sessionizer: refusing to trust $file: not owned by you, or writable by others" >&2
+        return 1
+    fi
+    printf '\e[1m==> %s\e[0m\n' "$file"
+    cat -v -- "$file"
+    read -rp "Trust and run this file? [y/N] " answer
+    [[ $answer == [yY]* ]] || return 1
+    (
+        umask 077
+        private_dir_for "$trust_file"
+        tmp="$trust_file.$$"
+        { [[ -f $trust_file ]] && awk -F'\t' -v file="$file" '$2 != file' "$trust_file"; } >"$tmp"
+        printf '%s\t%s\n' "$(sha256sum <"$file" | cut -d' ' -f1)" "$file" >>"$tmp"
+        mv "$tmp" "$trust_file"
+    )
+}
+
+# History, trust and state files list your projects and hosts; keep their
+# directories private.
+private_dir_for() {
+    mkdir -p "${1%/*}" && chmod 700 "${1%/*}"
 }
 
 # Every candidate line is "kind<TAB>target<TAB>display"; fzf only shows display.
@@ -119,7 +197,7 @@ claude_sessions() {
             ((finished[$session]++))
         fi
     done < <(claude_panes)
-    mkdir -p "${claude_state_file%/*}"
+    private_dir_for "$claude_state_file"
     for key in "${!last_busy[@]}"; do
         ((now - last_busy[$key] < 600)) && printf '%s\t%s\n' "$key" "${last_busy[$key]}"
     done >"$claude_state_file"
@@ -133,7 +211,7 @@ claude_sessions() {
 # every keystroke don't rescan every pane.
 list_sessions() {
     local claude_cache=$1 claude_info
-    local current activity name windows path host working finished claude
+    local current activity name windows path host remote_dir working finished claude
     local -A claude_working=() claude_finished=()
     [[ -n $TMUX ]] && current=$(tmux display-message -p '#{session_name}')
     if [[ -n $claude_cache && -f $claude_cache ]]; then
@@ -147,12 +225,12 @@ list_sessions() {
         claude_working[$name]=$working
         claude_finished[$name]=$finished
     done <<<"$claude_info"
-    tmux list-sessions -F "#{session_activity}"$'\t'"#{session_name}"$'\t'"#{session_windows}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}" 2>/dev/null |
+    tmux list-sessions -F "#{session_activity}"$'\t'"#{session_name}"$'\t'"#{session_windows}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{TMUX_SSH_DIR}" 2>/dev/null |
         sort -rn |
-        while IFS=$'\t' read -r activity name windows path host; do
+        while IFS=$'\t' read -r activity name windows path host remote_dir; do
             [[ $name == "$current" ]] && continue
             if [[ -n $host ]]; then
-                path="ssh/$host"
+                path="ssh/$host${remote_dir:+:$remote_dir}"
             elif [[ $path == "$HOME" || $path == "$HOME"/* ]]; then
                 path="~${path#"$HOME"}"
             fi
@@ -171,16 +249,65 @@ list_sessions() {
         done
 }
 
-# Hosts that already have a session are listed by list_sessions instead.
+# Prints ~/.ssh/config and every file it Includes, recursively.
+ssh_config_files() {
+    local file=$1 depth=${2:-0} pattern path
+    [[ -f $file && -r $file ]] && ((depth < 10)) || return
+    printf '%s\n' "$file"
+    while read -r pattern; do
+        pattern=${pattern/#\~/$HOME}
+        [[ $pattern == /* ]] || pattern=$HOME/.ssh/$pattern
+        while read -r path; do
+            ssh_config_files "$path" $((depth + 1))
+        done < <(compgen -G "$pattern")
+    done < <(awk '{ sub(/^[ \t]+/, ""); n = split($0, f, /[ \t=]+/) }
+        tolower(f[1]) == "include" { for (i = 2; i <= n; i++) print f[i] }' "$file")
+}
+
+# SSH targets ("<host>" or "<host>:<remote dir>"): Host aliases from the ssh
+# config (wildcard patterns skipped) shown with their user@hostname, then
+# "<host>:<dir>" lines from the private .ssh_paths.txt, then ad-hoc hosts and
+# remote dirs opened before (from the frecency history).
+# Targets that already have a session are listed by list_sessions instead.
 list_ssh_hosts() {
-    local open_hosts
-    open_hosts=$(tmux list-sessions -F "#{TMUX_SSH_HOST}" 2>/dev/null)
-    grep -Rh "^Host " ~/.ssh/config ~/.ssh/config.d 2>/dev/null |
-        awk '{ for (i = 2; i <= NF; i++) if ($i != "*") print $i }' |
-        sort -u |
-        awk -v open="$open_hosts" '
-            BEGIN { n = split(open, hosts, "\n"); for (i = 1; i <= n; i++) skip[hosts[i]] = 1 }
-            !($1 in skip) { printf "ssh\t%s\t\033[34mssh/%s\033[0m\n", $1, $1 }'
+    local open_targets files=() path
+    open_targets=$(tmux list-sessions -F "#{TMUX_SSH_HOST}"$'\t'"#{TMUX_SSH_DIR}" 2>/dev/null |
+        awk -F'\t' '$1 != "" { print ($2 == "" ? $1 : $1 ":" $2) }')
+    mapfile -t files < <({
+        ssh_config_files "$HOME/.ssh/config"
+        while read -r path; do
+            ssh_config_files "$path"
+        done < <(compgen -G "$HOME/.ssh/config.d/*")
+    } | awk '!seen[$0]++')
+    {
+        ((${#files[@]})) && awk '
+            function flush(   i, detail) {
+                for (i = 1; i <= nh; i++) {
+                    detail = hostname == hosts[i] ? "" : hostname
+                    if (user != "") detail = user "@" (detail != "" ? detail : hosts[i])
+                    print hosts[i] "\t" detail
+                }
+                nh = 0; user = hostname = ""
+            }
+            FNR == 1 { flush() }
+            { sub(/^[ \t]+/, ""); n = split($0, f, /[ \t=]+/); key = tolower(f[1]) }
+            key == "host" {
+                flush()
+                for (i = 2; i <= n; i++) if (f[i] != "" && f[i] !~ /[*?!]/) hosts[++nh] = f[i]
+                next
+            }
+            key == "match" { flush(); next }
+            key == "hostname" && hostname == "" { hostname = f[2] }
+            key == "user" && user == "" { user = f[2] }
+            END { flush() }' "${files[@]}"
+        [[ -f $private_dir/.ssh_paths.txt ]] && grep -v '^[[:space:]]*\(#\|$\)' "$private_dir/.ssh_paths.txt"
+        [[ -f $history_file ]] && awk -F'\t' '$1 ~ /^ssh\// { print substr($1, 5) }' "$history_file"
+    } | awk -F'\t' -v open="$open_targets" '
+        BEGIN { n = split(open, targets, "\n"); for (i = 1; i <= n; i++) seen[targets[i]] = 1 }
+        $1 ~ /[^:]\/$/ { sub(/\/$/, "", $1) }
+        $1 != "" && !seen[$1]++ {
+            printf "ssh\t%s\t\033[34mssh/%s\033[0m%s\n", $1, $1, ($2 != "" ? " \033[2m" $2 "\033[0m" : "")
+        }'
 }
 
 find_dirs() {
@@ -219,7 +346,10 @@ list_dirs() {
         BEGIN { n = split(open, paths, "\n"); for (i = 1; i <= n; i++) seen[paths[i]] = 1 }
         !seen[$0]++ {
             display = $0
-            if (display == home || index(display, home "/") == 1)
+            # Home itself also shows its path so typing "home" or the user name finds it.
+            if (display == home)
+                display = "~ \033[2m" home "\033[0m"
+            else if (index(display, home "/") == 1)
                 display = "~" substr(display, length(home) + 1)
             printf "dir\t%s\t%s\n", $0, display
             fflush()
@@ -235,7 +365,7 @@ frecency_enabled() {
 # Entries not visited for 90 days are dropped.
 record_visit() {
     [[ -n $1 ]] && frecency_enabled || return
-    mkdir -p "${history_file%/*}"
+    private_dir_for "$history_file"
     local tmp="$history_file.$$"
     { [[ -f $history_file ]] && cat "$history_file"; } |
         awk -F'\t' -v OFS='\t' -v key="$1" -v now="$(date +%s)" '
@@ -300,6 +430,49 @@ rank() {
         cut -f3-
 }
 
+# Splits an SSH target "<host>[:<remote dir>]" into $ssh_host and $ssh_dir.
+# The dir must start with / or ~, so ssh://user@host:port URIs stay whole.
+parse_ssh_target() {
+    ssh_host=$1
+    ssh_dir=""
+    if [[ $1 != ssh://* && $1 == *:[/~]* ]]; then
+        ssh_host=${1%%:[/~]*}
+        ssh_dir=${1#"$ssh_host:"}
+        [[ $ssh_dir != / ]] && ssh_dir=${ssh_dir%/}
+    fi
+}
+
+# Prints "kind<TAB>target" for a typed query, used when nothing in the list
+# matched or alt-enter was pressed: "ssh <dest>", "ssh/<dest>" or
+# "<user>@<host>[:<dir>]" connect over SSH, and an existing path opens a dir.
+query_target() {
+    local query=$1 path
+    query=${query#"${query%%[![:space:]]*}"}
+    query=${query%"${query##*[![:space:]]}"}
+    if [[ $query =~ ^ssh[[:space:]/]+([^[:space:]]+)$ ]]; then
+        printf 'ssh\t%s\n' "${BASH_REMATCH[1]}"
+    elif [[ $query =~ ^[^[:space:]/]+@[^[:space:]]+$ ]]; then
+        printf 'ssh\t%s\n' "$query"
+    else
+        path=${query/#\~/$HOME}
+        [[ -n $query && -d $path ]] && printf 'dir\t%s\n' "$path"
+    fi
+}
+
+# SSH targets end up as ssh/getopts arguments and in shell commands (hydrate),
+# so only allow hostname-ish characters, never a leading "-" (which ssh would
+# take as an option such as -oProxyCommand=...), and no control characters
+# in the remote dir.
+valid_ssh_target() {
+    local host_chars='^[]A-Za-z0-9_.@%+:/[-]+$'
+    [[ $ssh_host =~ $host_chars && $ssh_host != -* && $ssh_dir != *[[:cntrl:]]* ]]
+}
+
+if [[ $1 == --trust ]]; then
+    trust "$2"
+    exit
+fi
+
 if [[ $1 == --rank ]]; then
     rank "$2" "$3"
     exit 0
@@ -321,49 +494,64 @@ else
     cache=$(mktemp)
     trap 'rm -f "$cache" "$cache.done" "$cache.claude"' EXIT
     rank_cmd="$(printf '%q' "$(readlink -f "$0")") --rank $(printf '%q' "$cache") {q}"
-    choice=$({ list_sessions "$cache.claude"; list_ssh_hosts; list_dirs; } |
+    output=$({ list_sessions "$cache.claude"; list_ssh_hosts; list_dirs; } |
         { tee -p "$cache"; touch "$cache.done"; } |
         fzf --ansi --no-sort --delimiter=$'\t' --with-nth=3 --color=gutter:-1 \
-            --header 'ctrl-x: kill session' \
+            --print-query --expect=alt-enter \
+            --header 'ctrl-x: kill session · alt-enter: open typed user@host[:dir], ssh <host>[:dir] or path' \
             --bind "change:reload($rank_cmd)" \
             --bind "ctrl-x:execute-silent([ {1} = session ] && tmux kill-session -t ={2})+reload($rank_cmd)" \
             --bind "load:reload($rank_cmd)+unbind(load)")
-    if [[ -z $choice ]]; then
-        exit 0
+    (($? == 130)) && exit 0
+    {
+        IFS= read -r query
+        IFS= read -r key
+        IFS=$'\t' read -r kind target _
+    } <<<"$output"
+    if [[ $key == alt-enter || -z $kind ]]; then
+        IFS=$'\t' read -r kind target < <(query_target "$query")
+        [[ -n $kind ]] || exit 0
     fi
-    IFS=$'\t' read -r kind target _ <<<"$choice"
 fi
 
 if [[ $kind == session ]]; then
-    record_visit "$(tmux list-sessions -F "#{session_name}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{session_path}"$'\t'"#{TMUX_SESSIONIZER_PATH}" 2>/dev/null |
-        awk -F'\t' -v name="$target" '$1 == name { print ($2 != "" ? "ssh/" $2 : $4 != "" ? $4 : $3) }')"
+    record_visit "$(tmux list-sessions -F "#{session_name}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{TMUX_SSH_DIR}"$'\t'"#{session_path}"$'\t'"#{TMUX_SESSIONIZER_PATH}" 2>/dev/null |
+        awk -F'\t' -v name="$target" '$1 == name { print ($2 != "" ? "ssh/" $2 ($3 != "" ? ":" $3 : "") : $5 != "" ? $5 : $4) }')"
     switch_to "$target"
     exit 0
 fi
 
 ssh_host=""
+ssh_dir=""
 if [[ $kind == ssh ]]; then
-    ssh_host=$target
-    selected="ssh/$target"
+    parse_ssh_target "$target"
+    if ! valid_ssh_target; then
+        tmux display-message "tmux-sessionizer: invalid ssh target: $target" 2>/dev/null
+        echo "tmux-sessionizer: invalid ssh target: $target" >&2
+        exit 1
+    fi
+    selected="ssh/$ssh_host${ssh_dir:+:$ssh_dir}"
+    record_visit "$selected"
+    project_name="ssh-$(basename "$ssh_host")${ssh_dir:+-$(basename "$ssh_dir")}"
 else
     selected=$(cd -- "$target" && pwd -P) || exit 1
-fi
-if [[ -n $ssh_host ]]; then
-    record_visit "ssh/$ssh_host"
-else
     record_visit "$target"
+    project_name=$(basename "$selected")
 fi
-project_name=$(basename "$selected" | tr '.:' '__')
-if [[ -n $ssh_host ]]; then
-    project_name="ssh-$project_name"
-fi
+project_name=$(tr '.:' '__' <<<"$project_name")
 selected_name=$(resolve_session_name)
 
 # Always create detached so the environment and hydrate are in place before
 # attaching (this also starts the server when tmux isn't running yet).
 if ! has_session "$selected_name"; then
     if [[ -n $ssh_host ]]; then
-        tmux new-session -ds "$selected_name" -e "TMUX_SSH_HOST=$ssh_host" "tmux-ssh-connect $ssh_host"
+        env_args=(-e "TMUX_SSH_HOST=$ssh_host")
+        connect=(tmux-ssh-connect)
+        if [[ -n $ssh_dir ]]; then
+            env_args+=(-e "TMUX_SSH_DIR=$ssh_dir")
+            connect+=(-d "$ssh_dir")
+        fi
+        tmux new-session -ds "$selected_name" -c "$HOME" "${env_args[@]}" "${connect[@]}" -- "$ssh_host"
     else
         tmux new-session -ds "$selected_name" -c "$selected" -e "TMUX_SESSIONIZER_PATH=$target"
     fi

@@ -32,7 +32,7 @@ fi
 
 SYNC_SCRIPT="$DOTFILES_DIR/scripts/sync-sbx-flavors"
 if [[ -x "$SYNC_SCRIPT" ]]; then
-    log "→ Syncing flavor definitions from $SBX_SRC/examples/flavors..."
+    log "→ Syncing flavor definitions from $SBX_SRC..."
     sync_args=()
     [[ $DRY_RUN == "1" ]] && sync_args+=(--dry-run)
     if ! SBX_SRC="$SBX_SRC" "$SYNC_SCRIPT" "${sync_args[@]}"; then

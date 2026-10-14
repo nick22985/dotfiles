@@ -1,21 +1,43 @@
 #!/usr/bin/env bash
-# SSH wrapper that injects an OSC 7 emitter into the remote interactive
-# bash so tmux's #{pane_path} reflects the remote cwd. No remote files
-# are modified — the snippet is delivered via base64 and consumed by
-# bash --rcfile <(...) for this connection only.
+# SSH wrapper used for every pane of an SSH session (tmux-sessionizer,
+# tmux-ssh-pane) and for remote one-off commands (nvim's remote git popup).
 #
-# Used by tmux-ssh-window/tmux-ssh-pane in place of a bare `ssh $host`
-# so prefix+E (tmux-ssh-nvim) can open oil at the remote cwd.
+#   tmux-ssh-connect [-d remote-dir] [-c remote-command] <ssh-host> [ssh args...]
+#
+# - Injects an OSC 7 emitter into the remote interactive bash so tmux's
+#   #{pane_path} follows the remote cwd (see tmux-ssh-cwd). No remote files
+#   are modified: the snippet is sent base64 encoded and read through
+#   bash --rcfile <(...) for this connection only. Remotes without bash
+#   (or base64) get their login shell instead.
+# - Starts in remote-dir when given (absolute, or relative to remote ~).
+# - Shares one connection per host through ControlMaster, so new panes skip
+#   the handshake and auth prompts. Disable with: set -g @ssh_multiplex off
+# - When the connection drops (ssh exits 255), offers to reconnect in the
+#   remote dir the pane was last in, instead of closing the pane.
+
+script_dir=$(dirname "$(readlink -f "$0")")
+
+dir=""
+command=""
+while getopts 'd:c:' opt; do
+    case $opt in
+        d) dir=$OPTARG ;;
+        c) command=$OPTARG ;;
+        *) exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
 
 ssh_host=$1
 shift || true
 
-if [[ -z "$ssh_host" ]]; then
-    echo "usage: $(basename "$0") <ssh-host> [ssh args...]" >&2
+# A leading "-" would reach ssh as an option (e.g. -oProxyCommand=...).
+if [[ -z $ssh_host || $ssh_host == -* ]]; then
+    echo "usage: $(basename "$0") [-d remote-dir] [-c remote-command] <ssh-host> [ssh args...]" >&2
     exit 1
 fi
 
-snippet=$(cat <<'RCEOF'
+rc_snippet=$(cat <<'RCEOF'
 [ -r ~/.bashrc ] && . ~/.bashrc
 _osc7_cwd() { printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(hostname)}" "$PWD"; }
 case "$PROMPT_COMMAND" in
@@ -24,6 +46,54 @@ case "$PROMPT_COMMAND" in
 esac
 RCEOF
 )
-b64=$(printf '%s' "$snippet" | base64 -w0)
 
-exec ssh -t "$@" "$ssh_host" "bash --rcfile <(echo $b64 | base64 -d) -i"
+# Runs under `sh -c '...'` on the remote so it works whatever the login shell
+# is; it must not contain single quotes. Values are spliced in base64 encoded.
+remote_template=$(cat <<'EOF'
+d=$(echo @DIR@ | base64 -d 2>/dev/null)
+case $d in "~") d=$HOME ;; "~/"*) d=$HOME/${d#"~/"} ;; esac
+if [ -n "$d" ]; then cd "$d" 2>/dev/null || echo "tmux-ssh-connect: cannot cd to $d" >&2; fi
+c=$(echo @CMD@ | base64 -d 2>/dev/null)
+if [ -n "$c" ]; then
+    if command -v bash >/dev/null 2>&1; then exec bash -lc "$c"; fi
+    exec sh -c "$c"
+fi
+if command -v bash >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
+    exec bash -c "exec bash --rcfile <(echo @RC@ | base64 -d) -i"
+fi
+exec "${SHELL:-/bin/sh}" -l
+EOF
+)
+
+ssh_opts=(-t -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+if [[ $(tmux show-option -gqv @ssh_multiplex 2>/dev/null) != off ]]; then
+    mkdir -p "$HOME/.ssh/cm" 2>/dev/null && chmod 700 "$HOME/.ssh/cm"
+    ssh_opts+=(-o ControlMaster=auto -o "ControlPath=$HOME/.ssh/cm/%C" -o ControlPersist=10m)
+fi
+
+b64() {
+    printf '%s' "$1" | base64 -w0
+}
+
+while true; do
+    remote=${remote_template//@DIR@/$(b64 "$dir")}
+    remote=${remote//@CMD@/$(b64 "$command")}
+    remote=${remote//@RC@/$(b64 "$rc_snippet")}
+    ssh "${ssh_opts[@]}" "$@" -- "$ssh_host" "sh -c '$remote'"
+    status=$?
+    if ((status != 255)) || [[ ! -t 0 ]]; then
+        exit "$status"
+    fi
+
+    if [[ -n $TMUX_PANE ]] && last_dir=$("$script_dir/tmux-ssh-cwd" "$TMUX_PANE"); then
+        dir=$last_dir
+    fi
+    printf '\n\e[33mConnection to %s lost.\e[0m [r]econnect%s  [s]hell (local)  [q]uit ' "$ssh_host" "${dir:+ in $dir}"
+    read -rsn1 key
+    echo
+    case $key in
+        r | R | "") ;;
+        s | S) cd ~ && exec "${SHELL:-bash}" ;;
+        *) exit "$status" ;;
+    esac
+done

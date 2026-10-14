@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Prints the remote cwd a pane last reported through OSC 7 (injected by
+# tmux-ssh-connect), which tmux keeps in #{pane_path} as
+# "file://<host><path>". Exits 1 when the pane isn't reporting a remote
+# cwd, e.g. a local shell (whose OSC 7 names this machine) or no OSC 7 at all.
+
+raw=$(tmux display-message -p -t "$1" '#{pane_path}' 2>/dev/null)
+[[ $raw == file://*/* ]] || exit 1
+
+rest=${raw#file://}
+host=${rest%%/*}
+if [[ -z $host || $host == localhost || $host == "$(uname -n)" ]]; then
+    exit 1
+fi
+printf '/%s\n' "${rest#*/}"

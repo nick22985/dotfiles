@@ -8,6 +8,7 @@ SESSIONIZER_TEST_TMUX="$(command -v tmux)"
 export SESSIONIZER_TEST_TMUX
 export SESSIONIZER_TEST_SOCKET="$test_dir/tmux.sock"
 export SESSIONIZER_TEST_TARGET="$test_dir/target"
+export XDG_DATA_HOME="$test_dir/data" XDG_STATE_HOME="$test_dir/state"
 
 cleanup() {
     "$SESSIONIZER_TEST_TMUX" -S "$SESSIONIZER_TEST_SOCKET" kill-server 2>/dev/null || true
@@ -80,3 +81,39 @@ ssh_session="$(test_tmux display-message -p -t '=ssh-example:' '#{session_id}')"
 [[ "$(select_path ssh/example)" == "$ssh_session" ]]
 [[ "$(select_path "$test_dir/ssh-directory")" != "$ssh_session" ]]
 printf 'PASS: SSH sessions stay separate from local directory sessions\n'
+
+cat > "$test_dir/bin/tmux-ssh-connect" <<'EOF2'
+#!/usr/bin/env bash
+exec sleep 600
+EOF2
+chmod +x "$test_dir/bin/tmux-ssh-connect"
+remote_app="$(select_path ssh/remote:/srv/app/)"
+[[ "$(select_path ssh/remote:/srv/app)" == "$remote_app" ]]
+remote_home="$(select_path ssh/remote)"
+[[ "$remote_home" != "$remote_app" ]]
+[[ "$(select_path ssh/remote)" == "$remote_home" ]]
+[[ "$(test_tmux show-environment -t "$remote_app" TMUX_SSH_DIR)" == TMUX_SSH_DIR=/srv/app ]]
+[[ "$(test_tmux display-message -p -t "$remote_app:" '#{pane_start_command}')" == "tmux-ssh-connect -d /srv/app -- remote" ]]
+uri_session="$(select_path ssh/ssh://user@host:2222)"
+[[ "$(test_tmux show-environment -t "$uri_session" TMUX_SSH_HOST)" == TMUX_SSH_HOST=ssh://user@host:2222 ]]
+[[ "$(test_tmux show-environment -t "$uri_session" TMUX_SSH_DIR 2>&1)" != TMUX_SSH_DIR=* ]]
+printf 'PASS: SSH targets with a remote dir get their own session\n'
+
+mkdir -p "$test_dir/home/.ssh/conf.d"
+cat > "$test_dir/home/.ssh/config" <<'EOF2'
+Include conf.d/*
+Host *
+    ServerAliveInterval 30
+  host web1 !bad *.corp
+    HostName 10.0.0.5
+    User deploy
+Host=box
+EOF2
+printf 'Host db\n    HostName 192.168.1.9\n' > "$test_dir/home/.ssh/conf.d/db"
+: > "$test_dir/cache"
+touch "$test_dir/cache.done"
+hosts="$(env HOME="$test_dir/home" PATH="$test_dir/bin:$PATH" TMUX=test \
+    bash "$repo_dir/env/.local/bin/tmux-sessionizer" --rank "$test_dir/cache" "" |
+    awk -F'\t' '$1 == "ssh" { gsub(/\033\[[0-9;]*m/, "", $3); print $3 }')"
+[[ "$hosts" == "$(printf '%s\n' 'ssh/web1 deploy@10.0.0.5' 'ssh/box' 'ssh/db 192.168.1.9')" ]]
+printf 'PASS: SSH hosts come from the config and its Includes, skipping patterns and open hosts\n'

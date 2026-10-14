@@ -5,8 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_DIR="$(dirname "$SCRIPT_DIR")"
 
 SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
-SRC="$SBX_SRC/examples/flavors"
-DST="$DOTFILES_DIR/env/.config/sbx"
+SRC="$SBX_SRC/examples/config/flavors"
+# Older sbx checkouts kept the flavors directly under examples/.
+[[ -d "$SRC" ]] || SRC="$SBX_SRC/examples/flavors"
+DST="$DOTFILES_DIR/env/.config/sbx/flavors"
 
 DRY_RUN=0
 for arg in "$@"; do
@@ -25,7 +27,7 @@ log_warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$1"; }
 log_err()  { printf '%b[ERR ]%b %s\n' "$RED"    "$NC" "$1"; }
 
 if [[ ! -d "$SRC" ]]; then
-    log_err "examples/flavors not found at $SRC"
+    log_err "sbx flavors not found at $SBX_SRC/examples/config/flavors"
     log "set SBX_SRC=/path/to/sbx if your checkout is elsewhere"
     exit 1
 fi
@@ -43,7 +45,8 @@ run() {
 log "syncing $SRC → $DST"
 
 if command -v rsync >/dev/null 2>&1; then
-    rsync_opts=(-av --delete --exclude=README.md)
+    # No --delete: keep local-only flavors (e.g. tauri) that sbx doesn't ship.
+    rsync_opts=(-av --exclude=README.md)
     [[ $DRY_RUN == 1 ]] && rsync_opts+=(--dry-run)
     rsync "${rsync_opts[@]}" "$SRC/" "$DST/"
 else
@@ -55,24 +58,15 @@ else
         run mkdir -p "$DST/$(dirname "$rel")"
         run cp -p "$SRC/$rel" "$DST/$rel"
     done < <(cd "$SRC" && find . -type f -print0)
-
-    while IFS= read -r -d '' rel; do
-        rel="${rel#./}"
-        if [[ ! -f "$SRC/$rel" ]]; then
-            run rm -f "$DST/$rel"
-        fi
-    done < <(cd "$DST" && find . -type f -print0)
-
-    run find "$DST" -type d -empty -delete 2>/dev/null || true
 fi
 
 log "done"
 
 if command -v git >/dev/null 2>&1 && [[ -d "$DOTFILES_DIR/.git" ]]; then
     cd "$DOTFILES_DIR"
-    if [[ -n "$(git status --porcelain -- env/.config/sbx 2>/dev/null)" ]]; then
+    if [[ -n "$(git status --porcelain -- env/.config/sbx/flavors 2>/dev/null)" ]]; then
         log "dotfiles changes under env/.config/sbx:"
-        git status --short -- env/.config/sbx
+        git status --short -- env/.config/sbx/flavors
     else
         log "no changes — dotfiles already in sync"
     fi

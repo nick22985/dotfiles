@@ -61,6 +61,8 @@ status=0
 processed=0
 cloned=0
 skipped=0
+repo_jobs=()
+org_jobs=()
 while read -r repo_spec target option extra; do
     [[ -n "${repo_spec:-}" && "$repo_spec" != \#* ]] || continue
     processed=$((processed + 1))
@@ -131,30 +133,8 @@ while read -r repo_spec target option extra; do
         continue
     fi
 
-    parent="$(dirname "$destination")"
-    mkdir -p "$parent" || { status=1; continue; }
-    clone_tmp="$(mktemp -d "$parent/.dotfiles-clone.XXXXXX")" || {
-        log_error "Could not create a clone directory below $parent"
-        status=1
-        continue
-    }
-    ensure_ssh_agent
-    clone_args=(git clone)
-    ((bare == 0)) || clone_args+=(--bare)
-    if "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
-        && mv -T -- "$clone_tmp" "$destination"; then
-        cloned=$((cloned + 1))
-        if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
-            git -C "$destination" submodule update --init --recursive || status=1
-        fi
-    else
-        log_error "Failed to clone $repo_spec"
-        [[ "$clone_tmp" == "$parent"/.dotfiles-clone.* ]] && rm -rf -- "$clone_tmp"
-        status=1
-    fi
+    repo_jobs+=("$repo_spec|$destination|$bare")
 done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$repos_file")
-
-log_info "Repositories: $processed declared, $cloned cloned, $skipped already present"
 
 # Clone or update every repository in each declared GitHub organization.
 if [[ -f "$orgs_file" ]]; then
@@ -228,16 +208,68 @@ if [[ -f "$orgs_file" ]]; then
             continue
         fi
         ((gh_ready == 1)) || continue
-        ensure_ssh_agent
-        log "→ Syncing organization $org to $destination..."
-        if ! "$DOTFILES_DIR/scripts/clone-org.sh" -d "$destination" "${org_args[@]}" "$org"; then
-            log_error "Failed to sync organization $org"
-            status=1
-        fi
+        org_jobs+=("$org|$destination|${org_args[*]}")
     done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$orgs_file")
 else
     log_warn "Organization manifest is unavailable: $orgs_file (run: git submodule update --init)"
 fi
 
+clone_repo() {
+    local repo_spec="$1" destination="$2" bare="$3" parent clone_tmp
+    parent="$(dirname "$destination")"
+    mkdir -p "$parent" || return 1
+    clone_tmp="$(mktemp -d "$parent/.dotfiles-clone.XXXXXX")" || {
+        log_error "Could not create a clone directory below $parent"
+        return 1
+    }
+    local clone_args=(git clone --quiet)
+    ((bare == 0)) || clone_args+=(--bare)
+    if "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
+        && mv -T -- "$clone_tmp" "$destination"; then
+        log "Cloned $repo_spec to $destination"
+        if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
+            git -C "$destination" submodule update --quiet --init --recursive || return 1
+        fi
+        return 0
+    fi
+    log_error "Failed to clone $repo_spec"
+    [[ "$clone_tmp" == "$parent"/.dotfiles-clone.* ]] && rm -rf -- "$clone_tmp"
+    return 1
+}
+
+sync_org() {
+    local org="$1" destination="$2" org_args
+    read -r -a org_args <<< "$3"
+    log "→ Syncing organization $org to $destination..."
+    # Prefix each line so the concurrent organization logs stay readable.
+    if ! "$DOTFILES_DIR/scripts/clone-org.sh" -d "$destination" "${org_args[@]}" "$org" 2>&1 | sed -u "s/^/[$org] /"; then
+        log_error "Failed to sync organization $org"
+        return 1
+    fi
+}
+
+if ((${#repo_jobs[@]} + ${#org_jobs[@]} > 0)); then
+    ensure_ssh_agent
+    pids=()
+    for job in "${repo_jobs[@]}"; do
+        IFS='|' read -r repo_spec destination bare <<< "$job"
+        clone_repo "$repo_spec" "$destination" "$bare" &
+        pids+=("$!")
+    done
+    repo_pid_count=${#pids[@]}
+    for job in "${org_jobs[@]}"; do
+        IFS='|' read -r org destination org_args <<< "$job"
+        sync_org "$org" "$destination" "$org_args" &
+        pids+=("$!")
+    done
+    for ((i = 0; i < ${#pids[@]}; i++)); do
+        if wait "${pids[i]}"; then
+            ((i >= repo_pid_count)) || cloned=$((cloned + 1))
+        else
+            status=1
+        fi
+    done
+fi
+log_info "Repositories: $processed declared, $cloned cloned, $skipped already present"
 ((status == 0)) && log_success "Repository sync is complete"
 exit "$status"

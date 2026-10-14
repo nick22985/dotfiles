@@ -1,31 +1,37 @@
 #!/usr/bin/env bash
 # Open a new local tmux window running nvim against the SSH host bound to
-# the current session (via TMUX_SSH_HOST, set by tmux-ssh-window/pane).
+# the session of pane $1 (via TMUX_SSH_HOST, set by tmux-sessionizer), at
+# that pane's remote cwd (see tmux-ssh-cwd), falling back to the session's
+# remote dir (TMUX_SSH_DIR) and then remote ~.
 #
-# If the remote shell emits OSC 7 (see _osc7_cwd injection in
-# tmux-ssh-connect), tmux stores the value in #{pane_path} as
-# "file://<host><path>", which the tmux binding passes in as $1.
+# nvim starts in local ~ rather than wherever the session was created, so
+# cwd based tools (Neogit, ...) don't pick up an unrelated local repo.
 #
 # Note on URL form: in oil-ssh, "oil-ssh://host/path" is *relative* to the
 # remote shell's start cwd (~). To pass an absolute path you need a double
 # slash: "oil-ssh://host//abs/path/". Trailing slash marks a directory.
-# When we have no cwd we fall back to "oil-ssh://host/" (empty path, lists
-# remote $HOME) to keep the prior behavior.
 
-session_name=$(tmux display-message -p '#{session_name}')
-ssh_host=$(tmux show-environment -t "$session_name" 2>/dev/null | grep '^TMUX_SSH_HOST=' | cut -d= -f2-)
+script_dir=$(dirname "$(readlink -f "$0")")
+pane=${1:-$TMUX_PANE}
 
-if [[ -z "$ssh_host" ]]; then
+session=$(tmux display-message -p -t "$pane" '#{session_id}')
+session_name=$(tmux display-message -p -t "$pane" '#{session_name}')
+ssh_host=$(tmux show-environment -t "$session" TMUX_SSH_HOST 2>/dev/null)
+ssh_host=${ssh_host#TMUX_SSH_HOST=}
+
+if [[ -z $ssh_host || $ssh_host == -* ]]; then
     tmux display-message "tmux-ssh-nvim: no TMUX_SSH_HOST set for session '$session_name'"
     exit 0
 fi
 
-url="oil-ssh://${ssh_host}/"
-raw="${1:-}"
-if [[ "$raw" == file://* ]]; then
-    abs=/${raw#file://*/}
-    [[ "$abs" != */ ]] && abs="${abs}/"
-    url="oil-ssh://${ssh_host}/${abs}"
+if ! dir=$("$script_dir/tmux-ssh-cwd" "$pane"); then
+    dir=$(tmux show-environment -t "$session" TMUX_SSH_DIR 2>/dev/null)
+    dir=${dir#TMUX_SSH_DIR=}
+    [[ $dir == -* ]] && dir=""
 fi
+[[ $dir == "~" ]] && dir=""
+dir=${dir#"~/"}
+[[ -n $dir && $dir != */ ]] && dir="$dir/"
 
-tmux new-window -n "nvim@${ssh_host}" "nvim ${url}"
+url="oil-ssh://${ssh_host}/${dir}"
+tmux new-window -t "$session:" -c "$HOME" -n "nvim@${ssh_host}" nvim "$url"

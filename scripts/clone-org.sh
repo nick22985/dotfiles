@@ -106,6 +106,20 @@ clone_or_update_normal() {
         local branch
         branch=$(git -C "$container" symbolic-ref --short HEAD 2>/dev/null || echo "main")
         git -C "$container" fetch origin 2>/dev/null || true
+
+        if ! git -C "$container" rev-parse -q --verify HEAD >/dev/null; then
+            branch=$(resolve_default_branch "$container")
+            if git -C "$container" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null &&
+                git -C "$container" checkout -q -B "$branch" "origin/$branch" 2>/dev/null; then
+                echo "Updated: $name"
+                echo "updated $name $url" >> "$STATS_FILE"
+            else
+                echo "Up to date: $name (empty repo)"
+                echo "up_to_date $name $url" >> "$STATS_FILE"
+            fi
+            return
+        fi
+
         local local_head
         local_head=$(git -C "$container" rev-parse HEAD)
         if git -C "$container" pull --ff-only origin "$branch" >/dev/null 2>&1; then
@@ -119,8 +133,8 @@ clone_or_update_normal() {
                 echo "updated $name $url" >> "$STATS_FILE"
             fi
         else
-            echo "Up to date: $name (can't fast-forward)"
-            echo "up_to_date $name $url" >> "$STATS_FILE"
+            echo "Skipping $name (can't fast-forward: diverged from origin/$branch or branch missing upstream)"
+            echo "skipped $name $url" >> "$STATS_FILE"
         fi
         return
     fi
@@ -365,7 +379,7 @@ fi
 echo "  Updated:                 $updated"
 [ "$updated" -gt 0 ] && print_repos "updated"
 echo "  Already up to date:      $up_to_date"
-echo "  Skipped (local changes): $skipped"
+echo "  Skipped:                 $skipped"
 [ "$skipped" -gt 0 ] && print_repos "skipped"
 if [ "$failed" -gt 0 ]; then
     echo "  Failed:                  $failed"

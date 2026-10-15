@@ -49,14 +49,15 @@ dotfile_deploy_paths() {
             printf '%s\n' "$path"
             continue
         fi
-        [[ -d "$source" ]] || {
-            printf '%s\n' "$path"
-            continue
-        }
         # Nested repositories (submodules) are linked whole: their .git files hold
         # relative gitdir paths that only resolve from inside the repository.
         # Docker build contexts are linked whole too: BuildKit refuses symlinks
         # that point outside the context, so a per-file link to the Dockerfile fails.
+        # This covers a declared path that is itself one (e.g. .config/nvim).
+        if [[ ! -d "$source" || -e "$source/.git" || -e "$source/Dockerfile" ]]; then
+            printf '%s\n' "$path"
+            continue
+        fi
         while IFS= read -r -d '' source_file; do
             relative="${source_file#"$source"/}"
             [[ "$relative" == .git || "$relative" == .git/* ]] && continue

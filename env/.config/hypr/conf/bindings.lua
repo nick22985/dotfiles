@@ -93,3 +93,10 @@ hl.bind(mainMod .. " + ALT + A",         hl.dsp.exec_cmd("~/.local/bin/audio-wal
 hl.bind(mainMod .. " + SHIFT + p",
     hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/click.sh $HOME/.config/hypr/scripts/click.txt --run"),
     { repeating = true })
+
+-- Passthrough: every key, Super combos included, goes to the focused window (a VNC viewer
+-- showing another machine's desktop) until the same chord is pressed again.
+hl.bind(mainMod .. " + F12", hl.dsp.submap("passthrough"))
+hl.define_submap("passthrough", function()
+    hl.bind(mainMod .. " + F12", hl.dsp.submap("reset"))
+end)

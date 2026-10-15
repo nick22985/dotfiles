@@ -7,12 +7,43 @@ source "$DOTFILES_DIR/lib/utils.sh"
 parse_args "$@"
 set_context "Tailscale"
 
+apply_stage_system_files tailscale || exit 1
 apply_stage_services tailscale || exit 1
+
+# Without resolved, tailscaled writes /etc/resolv.conf itself and NetworkManager keeps overwriting
+# it, so MagicDNS and split DNS drop out whenever the network changes.
+stub=/run/systemd/resolve/stub-resolv.conf
+if [[ "$(readlink /etc/resolv.conf)" != "$stub" && "$(readlink /etc/resolv.conf)" != "..$stub" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would point /etc/resolv.conf at systemd-resolved and restart NetworkManager and tailscaled"
+    else
+        if [[ -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+            backup="$DOTFILES_RECEIPT_DIR/backups/system/etc/resolv.conf"
+            mkdir -p "$(dirname "$backup")"
+            sudo cp -a -- /etc/resolv.conf "$backup" \
+                && printf 'sudo rm -f -- /etc/resolv.conf\nsudo cp -a -- %q /etc/resolv.conf\n' "$backup" \
+                    >> "$DOTFILES_RECEIPT_DIR/restore-system.sh" \
+                && chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+        fi
+        # A running tailscaled still manages the file itself and would put it back.
+        sudo systemctl stop tailscaled.service || exit 1
+        sudo ln -sfn -- "$stub" /etc/resolv.conf || exit 1
+        sudo systemctl reload-or-restart NetworkManager.service || exit 1
+        sudo systemctl start tailscaled.service || exit 1
+        log_success "/etc/resolv.conf now goes through systemd-resolved"
+    fi
+fi
+
+# Laptops accept subnet routes so the home network (and the split DNS names that resolve into
+# it) is reachable away from home. Machines that never leave home don't: on Linux an accepted
+# route for the LAN they sit on sends their LAN traffic through the subnet router.
+accept_routes=false
+[[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" laptop "* ]] && accept_routes=true
 if [[ "$DRY_RUN" == "1" ]]; then
-    log_info "Would make $USER the Tailscale operator"
+    log_info "Would make $USER the Tailscale operator (accept subnet routes: $accept_routes)"
 else
     # The operator can run tailscale commands without sudo once the node is logged in.
-    if ! sudo tailscale set --operator="$USER"; then
+    if ! sudo tailscale set --operator="$USER" --accept-routes="$accept_routes"; then
         log_error "Failed to make $USER the Tailscale operator"
         exit 1
     fi

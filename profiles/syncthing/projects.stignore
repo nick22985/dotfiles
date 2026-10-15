@@ -23,6 +23,16 @@
 (?d).cache
 (?d).direnv
 (?d).DS_Store
+(?d)test-results
+(?d).off-cache
+(?d).android-sdk
+(?d)example-repos
+// Staging copies left behind by interrupted runs/sync-repos clones.
+(?d).*_stage_[0-9]*
+
+// Log files (server logs grow to tens of GB) stay on the machine that wrote them.
+(?d)*.log
+(?d)*.log.gz
 
 // Database volumes of per-project docker compose setups, owned by the container's user.
 **/.docker/db

@@ -1,0 +1,3 @@
+# Laptop hardware quirks.
+# kirito's Intel AX211 Bluetooth stalls headset mic audio with mSBC; WirePlumber falls back to CVSD.
+.config/wireplumber/wireplumber.conf.d/51-bluez-no-msbc.conf

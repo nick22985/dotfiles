@@ -16,6 +16,7 @@ script_filter=""
 host_name=""
 sudo_keepalive_pid=""
 run_state_dir=""
+tty_state=""
 state_root=""
 receipt_dir=""
 apply_lock_fd=""
@@ -320,6 +321,9 @@ cleanup_run() {
     if [[ -n "$run_state_dir" && "$run_state_dir" == "${TMPDIR:-/tmp}"/dotfiles-run.* && -d "$run_state_dir" ]]; then
         rm -rf -- "$run_state_dir"
     fi
+    if [[ -n "$tty_state" ]]; then
+        stty "$tty_state" 2>/dev/null || true
+    fi
     if [[ -n "$receipt_dir" && -d "$receipt_dir" && ! -f "$receipt_dir/exit-status" ]]; then
         printf '%s\n' "$status" > "$receipt_dir/exit-status"
     fi
@@ -610,6 +614,11 @@ export DOTFILES_ERRORS_FILE="$DOTFILES_TEMP_DIR/errors.log"
 export DOTFILES_WARNINGS_FILE="$DOTFILES_TEMP_DIR/warnings.log"
 export DOTFILES_BACKUP_CREATED="$run_state_dir/backup-created"
 export DOTFILES_BACKUP_CREATOR="$run_state_dir/backup-creator"
+# A stage interrupted while it had the terminal in raw mode (ssh, paru, a passphrase prompt)
+# would leave Enter sending a bare ^M; cleanup_run puts the original modes back.
+if [[ -t 0 ]]; then
+    tty_state="$(stty -g 2>/dev/null)" || tty_state=""
+fi
 trap cleanup_run EXIT
 trap 'exit 130' INT TERM
 init_error_tracking

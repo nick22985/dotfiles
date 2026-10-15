@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/NetworkManager/conf.d/dns-systemd-resolved.conf /etc/NetworkManager/conf.d/dns-systemd-resolved.conf

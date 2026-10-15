@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# vnc <machine>: open that machine's desktop (served by wayvnc-session over Tailscale), logging in
+# with the shared password from ~/.secrets/vnc-password so there is nothing to type.
+set -u -o pipefail
+
+[[ $# -eq 1 ]] || { echo "usage: vnc <machine>" >&2; exit 1; }
+VNC_USERNAME="$USER" VNC_PASSWORD="$(head -n 1 "$HOME/.secrets/vnc-password")" exec vncviewer "$1:0"

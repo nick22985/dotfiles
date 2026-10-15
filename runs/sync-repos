@@ -69,7 +69,12 @@ ensure_ssh_agent() {
             return 0
         fi
     fi
-    ssh-add || log_warn "Could not load an SSH key into the agent; each clone may prompt for the passphrase"
+    if ! ssh-add; then
+        # The clones run in parallel: passphrase prompts from all of them at once fight over the
+        # terminal and can leave it in raw mode, so they fail instead of prompting.
+        log_warn "Could not load an SSH key into the agent; clones that need it will fail"
+        export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" GIT_TERMINAL_PROMPT=0
+    fi
 }
 
 declared_repos=()

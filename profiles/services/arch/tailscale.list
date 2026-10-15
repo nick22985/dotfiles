@@ -1,2 +1,4 @@
 # scope action requirement unit
+# resolved first: tailscaled picks how to manage DNS when it starts.
+system enable-now required systemd-resolved.service
 system enable-now required tailscaled.service

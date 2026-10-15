@@ -1,0 +1,7 @@
+[Unit]
+Description=VNC server for the Hyprland session, reachable over Tailscale
+
+[Service]
+ExecStart=%h/.local/bin/wayvnc-session
+Restart=on-failure
+RestartSec=5

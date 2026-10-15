@@ -44,7 +44,7 @@ export GIT_SSH_COMMAND="ssh ${ssh_options[*]}"
 repositories=()
 while IFS= read -r -d '' git_dir; do
     repositories+=("$(dirname "$git_dir")")
-done < <(find "$projects_dir" \( -name node_modules -o -name target -o -name .stversions \) -prune -o \
+done < <(find "$projects_dir" \( -name node_modules -o -name target -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
     \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
 
 # Fast-forward each local branch that is strictly behind its copy from machine $2. Other branches

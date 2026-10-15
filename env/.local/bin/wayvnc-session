@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run wayvnc for the Hyprland session (wayvnc.service, started from hypr/conf/autostart.lua). It
+# listens on every address, but the firewall stage only admits incoming connections on tailscale0,
+# so the desktop is reachable from the tailnet only. Clients log in as $USER with the password in
+# ~/.secrets/vnc-password (synced, so every machine shares it; created on first run) over RSA-AES,
+# which TigerVNC's vncviewer speaks: vncviewer <machine>:0
+set -u -o pipefail
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/wayvnc"
+password_file="$HOME/.secrets/vnc-password"
+key_file="$config_dir/rsa_key.pem"
+
+umask 077
+mkdir -p "$config_dir" "$(dirname "$password_file")"
+if [[ ! -s "$password_file" ]]; then
+    head -c 18 /dev/urandom | base64 > "$password_file" || exit 1
+fi
+if [[ ! -f "$key_file" ]]; then
+    ssh-keygen -q -m pem -t rsa -b 4096 -N "" -C "wayvnc@$(uname -n)" -f "$key_file" || exit 1
+fi
+
+cat > "$config_dir/config.tmp" <<CONFIG || exit 1
+address=0.0.0.0
+port=5900
+enable_auth=true
+username=$USER
+password=$(head -n 1 "$password_file")
+rsa_private_key_file=$key_file
+CONFIG
+mv -- "$config_dir/config.tmp" "$config_dir/config" || exit 1
+
+exec wayvnc --config "$config_dir/config"

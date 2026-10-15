@@ -4,3 +4,4 @@ ssh|.ssh|ssh.stignore
 gnupg|.gnupg|gnupg.stignore
 age|.config/sops/age|-
 secrets|.secrets|-
+dbgate|.dbgate|dbgate.stignore

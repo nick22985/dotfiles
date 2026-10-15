@@ -49,9 +49,9 @@ hl.bind("SUPER + SHIFT + k",     hl.dsp.window.resize({ x = 0,   y = -20, relati
 hl.bind("SUPER + SHIFT + j",     hl.dsp.window.resize({ x = 0,   y = 20,  relative = true }), { repeating = true })
 
 -- Screenshots (scrnly) / recording (unified capture script)
-hl.bind(mainMod .. " + S",         hl.dsp.exec_cmd("shot capture -m region -i"))
-hl.bind(mainMod .. " + W",         hl.dsp.exec_cmd("shot capture -m window -i"))
-hl.bind(mainMod .. " + M",         hl.dsp.exec_cmd("shot capture -m current-monitor -i"))
+hl.bind(mainMod .. " + S",         hl.dsp.exec_cmd("~/.local/bin/shot capture -m region -i"))
+hl.bind(mainMod .. " + W",         hl.dsp.exec_cmd("~/.local/bin/shot capture -m window -i"))
+hl.bind(mainMod .. " + M",         hl.dsp.exec_cmd("~/.local/bin/shot capture -m current-monitor -i"))
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("~/.local/bin/capture -r -g"))
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd("~/.local/bin/capture -r -w"))
 hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exec_cmd("~/.local/bin/capture -r -m"))

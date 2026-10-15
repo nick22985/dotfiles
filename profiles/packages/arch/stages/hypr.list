@@ -19,6 +19,13 @@ repo qt6-wayland
 repo xorg-xwayland
 repo xorg-xhost
 repo zenity
+repo thunar
+repo thunar-volman
+repo thunar-archive-plugin
+repo tumbler
+repo ffmpegthumbnailer
+repo gvfs
+repo file-roller
 repo libnotify
 repo hyprpolkitagent
 repo adw-gtk-theme

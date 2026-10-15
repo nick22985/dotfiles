@@ -1,0 +1,9 @@
+[Unit]
+Description=Fetch unpushed branches and stashes from the other machines every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

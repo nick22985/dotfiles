@@ -32,7 +32,7 @@ HEADs, pulls with `--ff-only`, updates pinned submodules, and exits.
 Profiles are additive. `core` is always included.
 
 - `core`: shell, Git, user dotfiles, tmux, periodic TRIM, and package cache cleanup
-- `development`: Java, pinned mise tools (Node, Bun, Rust), Docker, repositories, private home files, sbx, and snd
+- `development`: Java, pinned mise tools (Node, Bun, Rust), Docker, repositories, private home files, sbx, snd, shot, Syncthing project sync, and git peer fetches
 - `desktop`: Flatpaks, defaults, clipboard tools, Bluetooth, and a desktop selection
 - `system`: GRUB, multiboot, Timeshift snapshot boot entries, weekly mirror refresh, and system monitors
 - `virtualization`: QEMU, libvirt, and VM tools

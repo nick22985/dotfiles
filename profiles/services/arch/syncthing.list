@@ -1,0 +1,3 @@
+# scope action requirement unit
+user enable-now required syncthing.service
+user enable-now required secrets-sync.timer

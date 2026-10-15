@@ -1,0 +1,15 @@
+#!/bin/bash
+# Called by the client-attached, session-created and client-session-changed hooks.
+# A session attached over SSH (tmux copies the client's SSH_CONNECTION into the
+# session environment on attach) uses C-b as its prefix, so it doesn't clash with
+# the C-a prefix of the local tmux it is nested in. Local attaches get C-a back.
+
+SESSION="$1"
+
+[[ -z "$SESSION" ]] && exit 0
+
+if tmux show-environment -t "$SESSION" SSH_CONNECTION 2>/dev/null | grep -q '^SSH_CONNECTION='; then
+    tmux set-option -t "$SESSION" prefix C-b
+else
+    tmux set-option -t "$SESSION" -u prefix
+fi

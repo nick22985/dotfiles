@@ -1,0 +1,8 @@
+[Unit]
+Description=Fetch unpushed branches and stashes from the other machines
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/git-peer-sync
+Nice=10
+IOSchedulingClass=idle

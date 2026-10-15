@@ -25,6 +25,10 @@ if [[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" virtualization "* ]]; then
     # libvirt's NAT network needs DHCP/DNS from the host and forwarding through virbr0.
     rules+=("allow in on virbr0" "route allow in on virbr0" "route allow out on virbr0")
 fi
+if command_exists syncthing; then
+    # Syncthing sync (22000) and LAN discovery (21027/udp), from the profile ufw-syncthing ships.
+    rules+=("allow syncthing")
+fi
 if command_exists tailscale; then
     rules+=("allow in on tailscale0")
 fi

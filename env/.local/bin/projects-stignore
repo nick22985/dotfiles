@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Build ~/projects/.stignore from profiles/syncthing/projects.stignore plus patterns for the
+# bare-layout repositories, which keep git internals beside their worktrees where the .git pattern
+# doesn't reach. Organizations cloned with --bare and repos.txt entries marked --bare
+# (runs/sync-repos) have that layout on every machine, so only their internals are ignored and the
+# worktrees sync; the repos.txt ones are known up front and get their patterns before they exist.
+# A repository converted to that layout by hand (sbx does this) is a normal checkout elsewhere; the
+# two layouts can't be merged, so it is skipped entirely and its committed work moves through
+# git-peer-sync.
+#
+#   projects-stignore           rewrite ~/projects/.stignore when it changed (run by git-peer-sync
+#                               and runs/sync-repos so new repositories are covered quickly)
+#   projects-stignore --print   print it instead (runs/syncthing installs it with a backup)
+
+set -u -o pipefail
+
+dotfiles_dir="${DOTFILES_DIR:-$HOME/dotfiles}"
+private_dir="$dotfiles_dir/env/.config/.nickInstall/install/configs/private"
+orgs_file="$private_dir/orgs.txt"
+repos_file="$private_dir/repos.txt"
+base_file="$dotfiles_dir/profiles/syncthing/projects.stignore"
+path="$HOME/projects"
+
+[[ -f "$base_file" ]] || { echo "projects-stignore: missing $base_file" >&2; exit 1; }
+
+bare_roots=()
+if [[ -f "$orgs_file" ]]; then
+    while read -r org target options; do
+        [[ " ${options:-} " == *" --bare "* && "${target:-}" == "~/projects/"* ]] && bare_roots+=("$HOME/${target#"~/"}")
+    done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$orgs_file")
+fi
+declared_bare=()
+if [[ -f "$repos_file" ]]; then
+    while read -r repo_spec target option; do
+        [[ "${option:-}" == "--bare" && "${target:-}" == "~/projects/"* ]] && declared_bare+=("$(realpath -m -- "$HOME/${target#"~/"}")")
+    done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$repos_file")
+fi
+
+bare_internals() {
+    printf '\n// Bare repository %s\n' "$1"
+    for name in HEAD FETCH_HEAD ORIG_HEAD MERGE_RR COMMIT_EDITMSG config description hooks info logs objects refs packed-refs worktrees modules lfs rr-cache shallow branches index; do
+        printf '%s/%s\n' "$1" "$name"
+    done
+}
+
+generate() {
+    cat -- "$base_file"
+    [[ -d "$path" ]] || return 0
+    for root in "${declared_bare[@]}"; do
+        bare_internals "${root#"$path"}"
+    done
+    while IFS= read -r -d '' objects_dir; do
+        root="${objects_dir%/objects}"
+        relative="${root#"$path"}"
+        if [[ " ${declared_bare[*]} " == *" $root "* || " ${declared_bare[*]/%//modules/} " == *" ${root%%/modules/*}/modules/ "* ]]; then
+            continue
+        elif [[ " ${bare_roots[*]} " == *" ${root%/*} "* ]]; then
+            bare_internals "$relative"
+        else
+            printf '\n// Repository converted to bare layout on this machine only\n%s\n' "$relative"
+        fi
+    done < <(find "$path" \( -name node_modules -o -name target -o -name .git -o -name .bare -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
+        \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \) 2>/dev/null | sort -z)
+}
+
+if [[ "${1:-}" == "--print" ]]; then
+    generate
+    exit
+fi
+
+[[ -d "$path" ]] || exit 0
+content="$(generate)" || exit 1
+target="$path/.stignore"
+if [[ -L "$target" || "$content" != "$(cat -- "$target" 2>/dev/null)" ]]; then
+    # Syncthing skips its own .syncthing.*.tmp names, so the partial file is never shared.
+    printf '%s\n' "$content" > "$path/.syncthing.stignore.tmp" && mv -- "$path/.syncthing.stignore.tmp" "$target"
+fi

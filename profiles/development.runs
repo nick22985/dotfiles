@@ -5,3 +5,6 @@ sync-repos
 private-files
 sbx
 snd
+shot
+syncthing
+git-peer-sync

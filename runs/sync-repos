@@ -22,6 +22,35 @@ if [[ ! -f "$repos_file" ]]; then
     exit 1
 fi
 
+agent_dir=""
+syncthing_paused=0
+regenerate_ignores=0
+cleanup() {
+    if [[ -n "$agent_dir" ]]; then
+        ssh-agent -k >/dev/null 2>&1
+        rm -f -- "$agent_dir/agent.sock"
+        rmdir -- "$agent_dir"
+    fi
+    if ((syncthing_paused == 1 || regenerate_ignores == 1)); then
+        "$DOTFILES_DIR/env/.local/bin/projects-stignore" || log_error "Could not update ~/projects/.stignore"
+    fi
+    if ((syncthing_paused == 1)); then
+        syncthing cli config folders projects paused set false \
+            || log_error "Could not resume the Syncthing projects folder (run: syncthing cli config folders projects paused set false)"
+    fi
+}
+trap cleanup EXIT
+
+# New clones and conversions show up in ~/projects before their bare-layout ignore patterns exist.
+# Pause the Syncthing projects folder until projects-stignore has added them, so their git
+# internals are never shared. A folder that is already paused is left as it is.
+pause_syncthing() {
+    regenerate_ignores=1
+    ((syncthing_paused == 0)) && command_exists syncthing || return 0
+    [[ "$(syncthing cli config folders projects paused get 2>/dev/null)" == "false" ]] || return 0
+    syncthing cli config folders projects paused set true && syncthing_paused=1
+}
+
 # Load the SSH key once so each clone doesn't prompt for its passphrase again.
 ssh_agent_ready=0
 ensure_ssh_agent() {
@@ -33,13 +62,12 @@ ensure_ssh_agent() {
     # Exit status 2 means no agent is reachable; start one for this stage only.
     if ((agent_status == 2)); then
         # Use a private socket dir: OpenSSH 10.1+ defaults to ~/.ssh/agent, which may be unwritable.
-        local agent_dir
         agent_dir="$(mktemp -d)" || return 0
         if ! eval "$(ssh-agent -s -a "$agent_dir/agent.sock")" >/dev/null; then
             rmdir -- "$agent_dir"
+            agent_dir=""
             return 0
         fi
-        trap 'ssh-agent -k >/dev/null 2>&1; rm -f -- "'"$agent_dir"'/agent.sock"; rmdir -- "'"$agent_dir"'"' EXIT
     fi
     ssh-add || log_warn "Could not load an SSH key into the agent; each clone may prompt for the passphrase"
 }
@@ -117,10 +145,23 @@ while read -r repo_spec target option extra; do
     fi
 
     if git -C "$destination" rev-parse --git-dir >/dev/null 2>&1; then
+        # A normal checkout declared --bare moves to the flat bare layout; its files are kept.
+        if ((bare == 1)) && [[ -d "$destination/.git" && ! -L "$destination/.git" ]]; then
+            if [[ "$DRY_RUN" == "1" ]]; then
+                log_info "Would convert $destination to the bare layout"
+            elif pause_syncthing; "$DOTFILES_DIR/scripts/convert-to-bare.sh" "$destination"; then
+                log "Converted $destination to the bare layout"
+            else
+                log_error "Could not convert $destination to the bare layout"
+                status=1
+            fi
+        fi
         skipped=$((skipped + 1))
         continue
     fi
-    if [[ -e "$destination" || -L "$destination" ]]; then
+    # Syncthing shares working trees without .git (runs/syncthing), so a repository cloned on
+    # another machine can arrive as a plain directory; clone_repo adopts it in place.
+    if [[ -L "$destination" ]] || { [[ -e "$destination" ]] && { ((bare == 1)) || [[ ! -d "$destination" ]]; }; }; then
         log_error "Repository target exists but is not a Git repository: $destination"
         status=1
         continue
@@ -224,7 +265,15 @@ clone_repo() {
     }
     local clone_args=(git clone --quiet)
     ((bare == 0)) || clone_args+=(--bare)
-    if "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
+    if ((bare == 0)) && [[ -d "$destination" ]]; then
+        # Keep the synced files: take only .git from the clone and reset the index to HEAD.
+        if git clone --quiet --no-checkout "git@github.com:$repo_spec.git" "$clone_tmp" \
+            && mv -- "$clone_tmp/.git" "$destination/.git" && rmdir -- "$clone_tmp" \
+            && git -C "$destination" reset --quiet; then
+            log "Adopted $destination as a checkout of $repo_spec"
+            return 0
+        fi
+    elif "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
         && mv -T -- "$clone_tmp" "$destination"; then
         log "Cloned $repo_spec to $destination"
         if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
@@ -249,6 +298,7 @@ sync_org() {
 }
 
 if ((${#repo_jobs[@]} + ${#org_jobs[@]} > 0)); then
+    pause_syncthing
     ensure_ssh_agent
     pids=()
     for job in "${repo_jobs[@]}"; do

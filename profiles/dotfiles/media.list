@@ -1,0 +1,4 @@
+# Audio and media configuration.
+# EasyEffects presets only: its db/*rc files name this machine's audio devices and are rewritten on every change.
+.local/share/easyeffects/input
+.config/autostart/com.github.wwmm.easyeffects.desktop

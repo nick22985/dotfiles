@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+set_context "shot"
+
+log "Setting up shot..."
+
+SHOT_SRC="${SHOT_SRC:-$HOME/projects/personal/shot/master/shot}"
+
+# The Tauri app embeds the built frontend, so it must exist before cargo builds.
+frontend="$SHOT_SRC/crates/app/frontend"
+if [[ -f "$frontend/package.json" ]]; then
+    bun_cmd=(bun)
+    command_exists mise && bun_cmd=(mise exec -- bun)
+    log "→ Building frontend in $frontend..."
+    if [[ $DRY_RUN == "1" ]]; then
+        log "Would run: bun install && bun run build in $frontend"
+    elif ! (cd "$frontend" && "${bun_cmd[@]}" install && "${bun_cmd[@]}" run build); then
+        log_error "frontend build failed for shot"
+        exit 1
+    fi
+fi
+
+install_cargo_binary shot "$SHOT_SRC" || exit 1

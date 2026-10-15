@@ -16,6 +16,9 @@ sync-repos|0|git|arch|normal|Clone declared development repositories
 private-files|0|git|arch|normal|Copy private home files such as ijfmt styles
 sbx|0|packages,mise,sync-repos|arch|normal|Build and install sbx
 snd|0|packages,mise,sync-repos|arch|normal|Build and install snd
+shot|0|packages,mise,sync-repos|arch|normal|Build and install shot
+syncthing|0|packages,dotfiles,sync-repos|arch|normal|Sync project working trees, keys and VPN profiles between machines with Syncthing
+git-peer-sync|0|dotfiles,git|arch|normal|Fetch unpushed branches and stashes from the other machines
 flatpak|0|packages|arch|normal|Install declared Flatpak applications
 snap|1|packages|arch|normal|Install declared Snap applications
 grub-multiboot|1|packages|arch|high|Configure GRUB multiboot

@@ -139,6 +139,25 @@ clone_or_update_normal() {
         return
     fi
 
+    # A plain directory without .git is a working tree synced from another machine by
+    # Syncthing: keep its files, take .git from a fresh clone and reset the index to HEAD.
+    if [ -d "$container" ] && [ ! -L "$container" ] && [ ! -e "$container/.git" ] && [ ! -d "$container/.bare" ] && ! is_flat_bare "$container"; then
+        echo "Adopting: $repo"
+        local clone_tmp
+        clone_tmp=$(mktemp -d "$BACKUP_DIR/.clone-org.XXXXXX")
+        if git clone --quiet --no-checkout "git@github.com:${repo}.git" "$clone_tmp" &&
+            mv "$clone_tmp/.git" "$container/.git" && rmdir "$clone_tmp" &&
+            git -C "$container" reset --quiet; then
+            normalize_remote_to_ssh "$container"
+            echo "cloned $name $url" >> "$STATS_FILE"
+        else
+            rm -rf "$clone_tmp"
+            echo "Failed to adopt: $repo"
+            echo "failed $name $url" >> "$STATS_FILE"
+        fi
+        return
+    fi
+
     if [ -e "$container" ]; then
         echo "Skipping $name (exists but not a normal checkout; re-run with --bare?)"
         echo "skipped $name $url" >> "$STATS_FILE"
@@ -243,9 +262,15 @@ clone_or_update_bare() {
     fi
 
     if [ -d "$container/.git" ]; then
-        if [ "$is_fresh" -ne 1 ] && [ -n "$(git -C "$container" status --porcelain 2>/dev/null)" ]; then
-            echo "Skipping $name (local changes, not converting)"
-            echo "skipped $name $url" >> "$STATS_FILE"
+        # An existing checkout converts on its current branch and keeps every file, including local changes.
+        if [ "$is_fresh" -ne 1 ]; then
+            normalize_remote_to_ssh "$container"
+            if "$CONVERT_TO_BARE" "$container"; then
+                echo "converted $name $url" >> "$STATS_FILE"
+            else
+                echo "Conversion failed for $name"
+                echo "failed $name $url" >> "$STATS_FILE"
+            fi
             return
         fi
 
@@ -337,6 +362,7 @@ if [ -n "$EXCLUDE_REPOS" ]; then
 fi
 
 STATS_FILE="$(mktemp)"
+CONVERT_TO_BARE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/convert-to-bare.sh"
 
 export -f clone_or_update_repo
 export -f clone_or_update_normal
@@ -348,6 +374,7 @@ export -f is_flat_bare
 export -f migrate_dotbare_to_flat
 export BACKUP_DIR
 export STATS_FILE
+export CONVERT_TO_BARE
 export BARE_MODE
 
 echo "$repos" | xargs -P "$PARALLEL_JOBS" -I {} bash -c 'clone_or_update_repo "$@"' _ {}

@@ -30,40 +30,12 @@ syncthing_read_folders || status=1
 ignore_file="$(mktemp)"
 trap 'rm -f -- "$ignore_file"' EXIT
 
-# The ignore file must be in place before the folder exists, or the first scan shares everything.
 for folder in "${folders[@]}"; do
-    IFS='|' read -r folder_id relative ignore_name <<< "$folder"
+    IFS='|' read -r folder_id relative ignore_name _ <<< "$folder"
     path="$HOME/$relative"
     [[ "$ignore_name" != "-" ]] || continue
-    if [[ "$folder_id" == "projects" ]]; then
-        # Adds the bare-layout repository patterns; git-peer-sync and modules/sync-repos keep them current.
-        "$DOTFILES_DIR/env/.local/bin/projects-stignore" --print > "$ignore_file" || exit 1
-    elif [[ "$folder_id" == "dotfiles" ]]; then
-        # Adds the repository's gitignore rules; git-peer-sync keeps them current.
-        "$DOTFILES_DIR/env/.local/bin/dotfiles-stignore" --print > "$ignore_file" || exit 1
-    else
-        cp -- "$syncthing_dir/$ignore_name" "$ignore_file" || exit 1
-    fi
-
-    ignore_target="$path/.stignore"
-    if [[ -f "$ignore_target" && ! -L "$ignore_target" ]] && cmp -s -- "$ignore_file" "$ignore_target"; then
-        continue
-    fi
-    if [[ "$DRY_RUN" == "1" ]]; then
-        log_info "Would write $ignore_target from $ignore_name"
-        continue
-    fi
-    mkdir -p -m 700 "$path"
-    backup="$DOTFILES_RECEIPT_DIR/backups/user/${ignore_target#"$HOME"/}"
-    if [[ -e "$ignore_target" || -L "$ignore_target" ]]; then
-        mkdir -p "$(dirname "$backup")"
-        mv -- "$ignore_target" "$backup" || exit 1
-        receipt_add_restore user "$(printf 'rm -f -- %q\nmv -- %q %q' "$ignore_target" "$backup" "$ignore_target")"
-    else
-        receipt_add_restore user "$(printf 'rm -f -- %q' "$ignore_target")"
-    fi
-    cp -- "$ignore_file" "$ignore_target" || exit 1
-    log_success "Installed $ignore_target"
+    syncthing_print_ignores "$folder_id" "$ignore_name" > "$ignore_file" || exit 1
+    syncthing_install_ignores "$path" "$ignore_name" "$ignore_file" || exit 1
 done
 
 # The secrets-sync timer is linked by the dotfiles module; load it before enabling.
@@ -113,8 +85,12 @@ if ((${#relay_peers[@]} > 0)); then
         log_info "Create it on one machine and let the secrets folder carry it: (umask 077; openssl rand -base64 32 > $relay_password_file)"
         status=1
     else
+        # Syncthing refuses an unencrypted folder for an untrusted device, so with a plain folder
+        # only the passwords below keep the other folders unreadable there.
+        relay_trust=untrusted
+        syncthing_has_plain_folders && relay_trust=""
         for peer in "${relay_peers[@]}"; do
-            syncthing_add_device "$peer" untrusted || { status=1; continue; }
+            syncthing_add_device "$peer" "$relay_trust" || { status=1; continue; }
             relays+=("${peer%%|*}")
         done
     fi
@@ -126,7 +102,7 @@ default_settings=(fswatcher-enabled rescan-intervals max-conflicts auto-normaliz
 
 existing_folders="$(syncthing cli config folders list)"
 for folder in "${folders[@]}"; do
-    IFS='|' read -r folder_id relative _ <<< "$folder"
+    IFS='|' read -r folder_id relative _ relay_mode <<< "$folder"
     path="$HOME/$relative"
     if ! grep -Fxq -- "$folder_id" <<< "$existing_folders"; then
         mkdir -p -m 700 "$path"
@@ -160,7 +136,15 @@ for folder in "${folders[@]}"; do
         fi
     done
     for device_id in "${relays[@]}"; do
-        if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
+        if [[ "$relay_mode" == "plain" ]]; then
+            if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
+                syncthing cli config folders "$folder_id" devices add --device-id "$device_id" || status=1
+            elif [[ -n "$(syncthing cli config folders "$folder_id" devices "$device_id" encryption-password get)" ]]; then
+                # The relay replaces its encrypted copy with a readable one when modules/syncthing-relay runs there.
+                syncthing cli config folders "$folder_id" devices "$device_id" encryption-password set "" || status=1
+                log_success "Folder '$folder_id' now goes to the relays unencrypted"
+            fi
+        elif ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
             syncthing cli config folders "$folder_id" devices add --device-id "$device_id" --encryption-password "$relay_password" || status=1
         elif [[ "$(syncthing cli config folders "$folder_id" devices "$device_id" encryption-password get)" != "$relay_password" ]]; then
             # A relay that already holds data under the old password rejects the new one until it

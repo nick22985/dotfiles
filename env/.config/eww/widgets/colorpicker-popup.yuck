@@ -5,7 +5,7 @@
 
 (defwidget colorpicker_popup_content []
   (eventbox :onhover "eww update colorpicker_hover=true"
-            :onhoverlost "eww update colorpicker_hover=false && ~/.config/eww/scripts/close-colorpicker-popup.sh"
+            :onhoverlost "eww update colorpicker_hover=false; setsid -f ~/.config/eww/scripts/close-colorpicker-popup.sh"
     (box :class "colorpicker-popup"
          :orientation "v"
          :spacing 2

@@ -13,12 +13,16 @@ dotfiles_platform_activate() {
 platform_read_apt_repository() {
     local wanted="$1"
     local manifest="$DOTFILES_BOOTSTRAP_DIR/apt-repositories.list"
-    local name fingerprint key_url url suite component extra
+    local name fingerprint key_url url suite component extra codename
 
     [[ -f "$manifest" ]] || return 1
     while read -r name fingerprint key_url url suite component extra; do
         [[ -n "${name:-}" && "$name" != \#* ]] || continue
         [[ "$name" == "$wanted" ]] || continue
+        # Repositories built per release name it with {codename} (noble, ...).
+        codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+        key_url="${key_url//\{codename\}/$codename}"
+        suite="${suite//\{codename\}/$codename}"
         apt_repository_fingerprint="$fingerprint"
         apt_repository_key_url="$key_url"
         apt_repository_url="$url"

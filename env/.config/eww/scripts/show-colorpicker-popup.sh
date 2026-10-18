@@ -31,7 +31,6 @@ if [[ -z "$index" ]]; then
     exit 0
 fi
 
-eww update colorpicker_hover=true
 eww open "colorpicker-popup${index}" 2>/dev/null
 
-~/.config/eww/scripts/auto-close-colorpicker.sh &
+setsid -f ~/.config/eww/scripts/auto-close-colorpicker.sh >/dev/null 2>&1

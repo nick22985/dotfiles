@@ -8,14 +8,18 @@ parse_args "$@"
 set_context "Syncthing relay"
 
 # An always-on machine (marked "relay" in the private machine list) receives every folder in
-# modules/syncthing/folders.tsv encrypted, so the other machines sync through it while they are not
-# online together. It holds no password: names and contents stay unreadable here, and nothing is
-# written to the real paths (~/projects, ~/.ssh, ...), which keep their own use on this machine.
+# modules/syncthing/folders.tsv, so the other machines sync through it while they are not online
+# together. Folders marked encrypted there arrive below ~/.local/share/syncthing-relay without the
+# password: names and contents stay unreadable, and the real paths (~/projects, ~/.ssh, ...) keep
+# their own use on this machine. Folders marked plain arrive readable at their real path, receive-
+# only, so whatever changes here is never sent back to the other machines.
 source "$DOTFILES_DIR/modules/syncthing/common.sh"
 relay_dir="$HOME/.local/share/syncthing-relay"
+old_dir="$HOME/.local/share/syncthing-relay.old"
+local_ignores="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
 user="$(id -un)"
 
-if ! command_exists syncthing; then
+if [[ "$DRY_RUN" != "1" ]] && ! command_exists syncthing; then
     log_error "syncthing is unavailable after package installation"
     exit 1
 fi
@@ -43,7 +47,7 @@ fi
 apply_module_services syncthing-relay || exit 1
 
 if [[ "$DRY_RUN" == "1" ]]; then
-    log_info "Would keep ${#folders[@]} encrypted folders in $relay_dir for the machines in $machines_file"
+    log_info "Would relay ${#folders[@]} folders for the machines in $machines_file"
     exit "$status"
 fi
 
@@ -70,18 +74,64 @@ for peer in "${trusted_peers[@]}"; do
 done
 
 mkdir -p -m 700 "$relay_dir" && chmod 700 "$relay_dir" || exit 1
+folder_defaults="$(syncthing cli config defaults folder dump-json)" || exit 1
+ignore_file="$(mktemp)"
+trap 'rm -f -- "$ignore_file"' EXIT
 existing_folders="$(syncthing cli config folders list)"
 for folder in "${folders[@]}"; do
-    IFS='|' read -r folder_id _ _ <<< "$folder"
-    path="$relay_dir/$folder_id"
-    if ! grep -Fxq -- "$folder_id" <<< "$existing_folders"; then
-        mkdir -p -m 700 "$path"
-        syncthing cli config folders add --id "$folder_id" --label "$folder_id" --path "$path" --type receiveencrypted || { status=1; continue; }
-        log_success "Created encrypted folder '$folder_id' in $path"
-    elif [[ "$(syncthing cli config folders "$folder_id" type get)" != "receiveencrypted" ]]; then
-        log_error "Folder '$folder_id' already exists here and is not encrypted; remove it before this machine relays it"
+    IFS='|' read -r folder_id relative ignore_name relay_mode <<< "$folder"
+    if [[ "$relay_mode" == "plain" ]]; then
+        path="$HOME/$relative"
+        type=receiveonly
+    else
+        path="$relay_dir/$folder_id"
+        type=receiveencrypted
+    fi
+    current_type=""
+    grep -Fxq -- "$folder_id" <<< "$existing_folders" && current_type="$(syncthing cli config folders "$folder_id" type get)"
+    if [[ "$current_type" == "receiveencrypted" && "$type" == "receiveonly" ]]; then
+        # Became plain: the encrypted copy is unreadable anyway but kept until removed by hand.
+        stamp="$(date +%Y%m%d-%H%M%S)"
+        encrypted_path="$(syncthing cli config folders "$folder_id" path get)" || { status=1; continue; }
+        syncthing cli config folders "$folder_id" delete || { status=1; continue; }
+        if ! (umask 077 && mkdir -p "$old_dir/$stamp") || ! mv -- "$encrypted_path" "$old_dir/$stamp/$folder_id"; then
+            status=1
+            continue
+        fi
+        log_success "Moved the encrypted copy of '$folder_id' to $old_dir/$stamp/$folder_id"
+        current_type=""
+    fi
+    if [[ -n "$current_type" && "$current_type" != "$type" ]]; then
+        log_error "Folder '$folder_id' already exists here as $current_type, not $type; remove it before this machine relays it"
         status=1
         continue
+    fi
+
+    if [[ "$type" == "receiveonly" && "$ignore_name" != "-" ]]; then
+        if [[ -f "$DOTFILES_DIR/modules/syncthing-relay/$folder_id.stignore" ]]; then
+            # dotfiles-stignore puts these first whenever it rewrites the file.
+            [[ -e "$local_ignores/$folder_id.stignore" ]] || receipt_add_restore user "$(printf 'rm -f -- %q' "$local_ignores/$folder_id.stignore")"
+            mkdir -p "$local_ignores" && cp -- "$DOTFILES_DIR/modules/syncthing-relay/$folder_id.stignore" "$local_ignores/$folder_id.stignore" || exit 1
+        fi
+        syncthing_print_ignores "$folder_id" "$ignore_name" > "$ignore_file" || exit 1
+        syncthing_install_ignores "$path" "$ignore_name" "$ignore_file" || exit 1
+    fi
+
+    if [[ -z "$current_type" ]]; then
+        mkdir -p -m 700 "$path"
+        if [[ "$type" == "receiveonly" ]]; then
+            # Files replaced from the other machines stay in .stversions for 30 days.
+            if ! folder_json="$(jq -c --arg id "$folder_id" --arg path "$path" \
+                '. + {id: $id, label: $id, path: $path, type: "receiveonly"} | .versioning += {type: "trashcan", params: {cleanoutDays: "30"}}' \
+                <<< "$folder_defaults")" || ! syncthing cli config folders add-json "$folder_json"; then
+                status=1
+                continue
+            fi
+            log_success "Created receive-only folder '$folder_id' for $path"
+        else
+            syncthing cli config folders add --id "$folder_id" --label "$folder_id" --path "$path" --type receiveencrypted || { status=1; continue; }
+            log_success "Created encrypted folder '$folder_id' in $path"
+        fi
     fi
     for device_id in "${peers[@]}"; do
         if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
@@ -90,5 +140,5 @@ for folder in "${folders[@]}"; do
     done
 done
 
-((status == 0)) && log_success "${#folders[@]} encrypted folders are relayed for ${#peers[@]} machine(s)"
+((status == 0)) && log_success "${#folders[@]} folders are relayed for ${#peers[@]} machine(s)"
 exit "$status"

@@ -42,14 +42,16 @@ fingerprint() {
 
 # Switch this machine's folders to the password in the file and print its fingerprint.
 apply_password() {
-    local password folder device relays
+    local password folder device relays current
     password="$(cat -- "$password_file" 2>/dev/null)"
     [[ -n "$password" ]] || fail "$password_file is missing or empty"
     mapfile -t relays < <(machines relay | cut -d' ' -f1)
     while IFS= read -r folder; do
         for device in "${relays[@]}"; do
             syncthing cli config folders "$folder" devices list | grep -Fxq -- "$device" || continue
-            [[ "$(syncthing cli config folders "$folder" devices "$device" encryption-password get)" == "$password" ]] && continue
+            current="$(syncthing cli config folders "$folder" devices "$device" encryption-password get)"
+            # A folder the relays get readable (plain in folders.tsv) has none.
+            [[ -z "$current" || "$current" == "$password" ]] && continue
             syncthing cli config folders "$folder" devices "$device" encryption-password set "$password" || exit 1
         done
     done < <(syncthing cli config folders list)
@@ -59,13 +61,14 @@ apply_password() {
 # Whether some folder here still encrypts for a relay with another password than the file's, which
 # means an earlier run stopped after writing the new password.
 interrupted() {
-    local password folder device relays
+    local password folder device relays current
     password="$(cat -- "$password_file" 2>/dev/null)"
     mapfile -t relays < <(machines relay | cut -d' ' -f1)
     while IFS= read -r folder; do
         for device in "${relays[@]}"; do
             syncthing cli config folders "$folder" devices list | grep -Fxq -- "$device" || continue
-            [[ "$(syncthing cli config folders "$folder" devices "$device" encryption-password get)" != "$password" ]] && return 0
+            current="$(syncthing cli config folders "$folder" devices "$device" encryption-password get)"
+            [[ -n "$current" && "$current" != "$password" ]] && return 0
         done
     done < <(syncthing cli config folders list)
     return 1

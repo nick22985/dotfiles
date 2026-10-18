@@ -43,10 +43,10 @@
                      brightness <= 95 ? '' : '󰽢'}")))))
 
 (defwidget colorpicker_widget []
-  (eventbox :onhover "~/.config/eww/scripts/show-colorpicker-popup.sh"
-            :onhoverlost "eww update colorpicker_hover=false && ~/.config/eww/scripts/close-colorpicker-popup.sh"
+  (eventbox :onhover "eww update colorpicker_hover=true; setsid -f ~/.config/eww/scripts/show-colorpicker-popup.sh"
+            :onhoverlost "eww update colorpicker_hover=false; setsid -f ~/.config/eww/scripts/close-colorpicker-popup.sh"
     (button :class "colorpicker"
-            :onclick "~/.config/eww/scripts/colorpicker.sh"
+            :onclick "setsid -f ~/.config/eww/scripts/colorpicker.sh"
             :tooltip "Color picker"
             :style "color: ${colorpicker_recent != '' ? colorpicker_recent : '#ffffff'};"
       (label :text ""))))

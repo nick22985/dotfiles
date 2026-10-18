@@ -1,0 +1,3 @@
+// Patterns a relay puts before ~/dotfiles/.stignore: the private submodule (credentials, work
+// config) stays off it, and its own copy there (the machine list, sbx keys) is left alone.
+/env/.config/.nickInstall/install/configs/private

@@ -158,9 +158,12 @@ uncommitted changes appear here, `self-update` refuses to pull while they are pr
 
 A machine marked `relay` in the private `machines.txt` (`name device-id ssh-host relay`) keeps an
 always-on copy so the others can sync while they are not online together. `./run apply --host
-kube-01` sets it up with `modules/syncthing-relay`: every folder is received encrypted below
-`~/.local/share/syncthing-relay/`, the relay never has the password, and its own `~/projects` and
-keys are left alone. The other machines encrypt with `~/.secrets/syncthing-relay-password`, created
+kube-01` sets it up with `modules/syncthing-relay`: the folders marked `encrypted` in
+`modules/syncthing/folders.tsv` are received below `~/.local/share/syncthing-relay/`, the relay
+never has the password, and its own `~/projects` and keys are left alone. Those marked `plain`
+(the dotfiles) arrive readable at their real path but receive-only, so nothing changed on the relay
+goes back to the others; the relay leaves the private submodule out (`modules/syncthing-relay/dotfiles.stignore`).
+The other machines encrypt with `~/.secrets/syncthing-relay-password`, created
 once on one machine and carried by the secrets folder. `syncthing-relay-rotate` changes it: with
 every machine online and up to date it writes a new one, waits until the others have it, switches
 them and has each relay start over (the old encrypted copy is moved to

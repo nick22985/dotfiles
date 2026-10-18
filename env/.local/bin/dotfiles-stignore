@@ -5,7 +5,8 @@
 # superproject and its synced submodules. Git lets the last matching rule win and Syncthing the
 # first, so the rules are written in reverse. Tracked files below an ignored directory (sbx's
 # config.toml and Dockerfiles) are listed first as rooted "!" patterns: those still let Syncthing
-# skip the ignored directories.
+# skip the ignored directories. Patterns only this machine ignores (a relay keeps the private
+# submodule out) come first, from ~/.local/state/dotfiles/dotfiles.stignore.
 #
 #   dotfiles-stignore           rewrite ~/dotfiles/.stignore when it changed (run by git-peer-sync,
 #                               once modules/syncthing has installed it)
@@ -17,6 +18,7 @@ set -u -o pipefail
 
 path="${DOTFILES_DIR:-$HOME/dotfiles}"
 base_file="$path/modules/syncthing/dotfiles.stignore"
+local_file="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/dotfiles.stignore"
 
 [[ -f "$base_file" ]] || { echo "dotfiles-stignore: missing $base_file" >&2; exit 1; }
 
@@ -80,6 +82,10 @@ synced_submodules() {
 
 generate() {
     local submodules=() rules relative excludes
+    if [[ -f "$local_file" ]]; then
+        cat -- "$local_file"
+        printf '\n'
+    fi
     cat -- "$base_file"
     [[ -d "$path/.git" || -f "$path/.git" ]] || return 0
     mapfile -t submodules < <(synced_submodules)

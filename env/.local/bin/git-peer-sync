@@ -166,9 +166,13 @@ adopt_repositories() {
         elif [[ ! -f "$source" ]] || ! git bundle list-heads "$source" "refs/heads/$branch" >/dev/null 2>&1; then
             continue
         fi
-        staging="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/git-peer-sync.XXXXXX")" || continue
+        # On disk next to ~/projects: the history can be large (a tmpfs fills up), and moving .git in is a rename.
+        if ! mkdir -p -- "$state_dir/staging" || ! staging="$(mktemp -d "$state_dir/staging/repo.XXXXXX")"; then
+            continue
+        fi
+        # A shallow clone over there gives a shallow repository here.
         if git init --quiet --initial-branch="$branch" "$staging/repo" \
-            && git -C "$staging/repo" fetch --quiet --no-auto-maintenance --no-write-fetch-head "$source" "+refs/heads/*:refs/remotes/$name/*" \
+            && git -C "$staging/repo" fetch --quiet --update-shallow --no-auto-maintenance --no-write-fetch-head "$source" "+refs/heads/*:refs/remotes/$name/*" \
             && git -C "$staging/repo" update-ref "refs/heads/$branch" "refs/remotes/$name/$branch" \
             && [[ ! -e "$folder/.git" ]] && mv -- "$staging/repo/.git" "$folder/.git" \
             && git -C "$folder" reset --quiet; then
@@ -176,7 +180,9 @@ adopt_repositories() {
             echo "git-peer-sync: created repository $relative on $branch from $name"
             rmdir -- "$staging/repo" "$staging"
         else
-            echo "git-peer-sync: failed to create repository $relative from $name (partial copy left in $staging)" >&2
+            echo "git-peer-sync: failed to create repository $relative from $name" >&2
+            # Only fetched history is in there (the folder keeps its files); the next run fetches again.
+            rm -rf -- "$staging"
         fi
     done < "$manifest_dir/$name.repos"
 }

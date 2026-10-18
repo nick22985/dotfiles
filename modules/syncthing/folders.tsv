@@ -1,9 +1,10 @@
-# id|path below $HOME|ignore file in modules/syncthing, or - for none
-projects|projects|projects.stignore
-ssh|.ssh|ssh.stignore
-gnupg|.gnupg|gnupg.stignore
-age|.config/sops/age|-
-secrets|.secrets|-
-dbgate|.dbgate|dbgate.stignore
-dotfiles|dotfiles|dotfiles.stignore
-git-exchange|.local/share/git-peer-sync/exchange|-
+# id|path below $HOME|ignore file in modules/syncthing, or - for none|what relay machines receive:
+# encrypted (unreadable there) or plain (readable, receive-only, so nothing a relay changes comes back)
+projects|projects|projects.stignore|encrypted
+ssh|.ssh|ssh.stignore|encrypted
+gnupg|.gnupg|gnupg.stignore|encrypted
+age|.config/sops/age|-|encrypted
+secrets|.secrets|-|encrypted
+dbgate|.dbgate|dbgate.stignore|encrypted
+dotfiles|dotfiles|dotfiles.stignore|plain
+git-exchange|.local/share/git-peer-sync/exchange|-|encrypted

@@ -26,7 +26,9 @@ if [[ "$(readlink /etc/resolv.conf)" != "$stub" && "$(readlink /etc/resolv.conf)
         # A running tailscaled still manages the file itself and would put it back.
         sudo systemctl stop tailscaled.service || exit 1
         sudo ln -sfn -- "$stub" /etc/resolv.conf || exit 1
-        sudo systemctl reload-or-restart NetworkManager.service || exit 1
+        if systemctl is-active --quiet NetworkManager.service; then
+            sudo systemctl reload-or-restart NetworkManager.service || exit 1
+        fi
         sudo systemctl start tailscaled.service || exit 1
         log_success "/etc/resolv.conf now goes through systemd-resolved"
     fi

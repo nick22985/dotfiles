@@ -1,0 +1,2 @@
+# scope action requirement unit
+user enable-now required syncthing.service

@@ -1,2 +1,3 @@
 # name key-fingerprint key-url repository-url suite component
 mise 24853EC9F655CE80B48E6C3A8B81C9D17413A06D https://mise.jdx.dev/gpg-key.pub https://mise.jdx.dev/deb stable main
+syncthing FBA2E162F2F44657B38F0309E5665F9BD5970C47 https://syncthing.net/release-key.gpg https://apt.syncthing.net/ syncthing stable-v2

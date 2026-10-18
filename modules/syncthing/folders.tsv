@@ -5,3 +5,5 @@ gnupg|.gnupg|gnupg.stignore
 age|.config/sops/age|-
 secrets|.secrets|-
 dbgate|.dbgate|dbgate.stignore
+dotfiles|dotfiles|dotfiles.stignore
+git-exchange|.local/share/git-peer-sync/exchange|-

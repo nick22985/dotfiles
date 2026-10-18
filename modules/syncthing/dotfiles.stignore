@@ -1,0 +1,12 @@
+// Start of ~/dotfiles/.stignore; env/.local/bin/dotfiles-stignore appends the repository's gitignore rules. The first matching pattern wins.
+// The working tree syncs between machines, so uncommitted changes travel; history, branches and
+// the index move through git (git-peer-sync fetches them and moves a lagging branch).
+.git
+
+// Third-party submodules stay at the commit the superproject pins and are updated with
+// `git submodule update`. The submodules not listed here (nvim, docker-compose, private) sync
+// like the rest of the tree, and git-peer-sync moves their branches.
+/env/.config/entr
+/env/.config/treesitterCustom/tree-sitter-vue
+/env/.config/tmux/plugins
+/env/.oh-my-zsh/custom/plugins

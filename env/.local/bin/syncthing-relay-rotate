@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# Change the password the relay machines (marked "relay" in the private machine list) encrypt the
+# Syncthing folders with. The new password reaches the other machines through the secrets folder,
+# which the relay can't carry while it still has the old one, so every machine must be online.
+#
+#   syncthing-relay-rotate           on one machine: check that nothing is held only by the relay,
+#                                    write a new password, wait until the other machines have it,
+#                                    switch every machine to it and have each relay start over
+#   syncthing-relay-rotate --apply   switch this machine's folders to the password in the file
+#   syncthing-relay-rotate --reset   on a relay: move its encrypted copies aside and start over
+
+set -u -o pipefail
+
+machines_file="$HOME/dotfiles/env/.config/.nickInstall/install/configs/private/machines.txt"
+password_file="$HOME/.secrets/syncthing-relay-password"
+# The modules/syncthing folder that carries ~/.secrets.
+secrets_folder="secrets"
+old_dir="$HOME/.local/share/syncthing-relay.old"
+backup_dir="${XDG_STATE_HOME:-$HOME/.local/state}/syncthing-relay"
+
+fail() {
+    echo "syncthing-relay-rotate: $*" >&2
+    exit 1
+}
+
+command -v syncthing >/dev/null || fail "syncthing is not installed"
+syncthing cli show system >/dev/null 2>&1 || fail "Syncthing is not running (check: systemctl --user status syncthing)"
+[[ -f "$machines_file" ]] || fail "machine list is unavailable: $machines_file"
+my_id="$(syncthing device-id)" || exit 1
+
+# "device-id name ssh-host" of every listed machine with role $1 (trusted or relay), without this one.
+machines() {
+    awk -v role="$1" -v me="$my_id" '!/^#/ && NF >= 3 && $2 != me && ($4 == "relay") == (role == "relay") { print $2, $1, $3 }' "$machines_file"
+}
+
+this_role="$(awk -v me="$my_id" '$2 == me { print ($4 == "relay" ? "relay" : "trusted") }' "$machines_file")"
+
+# Short fingerprint of the password, to compare machines without showing it.
+fingerprint() {
+    sha256sum <<< "$1" | cut -c1-12
+}
+
+# Switch this machine's folders to the password in the file and print its fingerprint.
+apply_password() {
+    local password folder device relays
+    password="$(cat -- "$password_file" 2>/dev/null)"
+    [[ -n "$password" ]] || fail "$password_file is missing or empty"
+    mapfile -t relays < <(machines relay | cut -d' ' -f1)
+    while IFS= read -r folder; do
+        for device in "${relays[@]}"; do
+            syncthing cli config folders "$folder" devices list | grep -Fxq -- "$device" || continue
+            [[ "$(syncthing cli config folders "$folder" devices "$device" encryption-password get)" == "$password" ]] && continue
+            syncthing cli config folders "$folder" devices "$device" encryption-password set "$password" || exit 1
+        done
+    done < <(syncthing cli config folders list)
+    echo "password $(fingerprint "$password")"
+}
+
+# Whether some folder here still encrypts for a relay with another password than the file's, which
+# means an earlier run stopped after writing the new password.
+interrupted() {
+    local password folder device relays
+    password="$(cat -- "$password_file" 2>/dev/null)"
+    mapfile -t relays < <(machines relay | cut -d' ' -f1)
+    while IFS= read -r folder; do
+        for device in "${relays[@]}"; do
+            syncthing cli config folders "$folder" devices list | grep -Fxq -- "$device" || continue
+            [[ "$(syncthing cli config folders "$folder" devices "$device" encryption-password get)" != "$password" ]] && return 0
+        done
+    done < <(syncthing cli config folders list)
+    return 1
+}
+
+case "${1:-}" in
+    --apply)
+        [[ "$this_role" == "trusted" ]] || fail "--apply runs on the machines that are not relays"
+        apply_password
+        exit 0
+        ;;
+    --reset)
+        [[ "$this_role" == "relay" ]] || fail "--reset runs on a relay machine"
+        stamp="$(date +%Y%m%d-%H%M%S)"
+        while IFS= read -r folder; do
+            [[ "$(syncthing cli config folders "$folder" type get)" == "receiveencrypted" ]] || continue
+            folder_json="$(syncthing cli config folders "$folder" dump-json)" || exit 1
+            path="$(syncthing cli config folders "$folder" path get)" || exit 1
+            syncthing cli config folders "$folder" delete || exit 1
+            # The old copy is unreadable without the old password but is kept until removed by hand.
+            (umask 077 && mkdir -p "$old_dir/$stamp") && mv -- "$path" "$old_dir/$stamp/$folder" || exit 1
+            (umask 077 && mkdir -p "$path") && syncthing cli config folders add-json "$folder_json" || exit 1
+            echo "syncthing-relay-rotate: restarted '$folder'; the old copy is in $old_dir/$stamp/$folder"
+        done < <(syncthing cli config folders list)
+        exit 0
+        ;;
+    "") ;;
+    *) fail "unknown option: $1" ;;
+esac
+
+[[ "$this_role" == "trusted" ]] || fail "run this on a machine that is not a relay"
+command -v jq >/dev/null || fail "jq is required"
+command -v openssl >/dev/null || fail "openssl is required"
+
+api_key="$(syncthing cli config gui apikey get)" || exit 1
+address="$(syncthing cli config gui raw-address get)" || exit 1
+scheme=http
+[[ "$(syncthing cli config gui raw-use-tls get)" == "true" ]] && scheme=https
+api() {
+    curl -fsSk -X "$1" -H "X-API-Key: $api_key" "$scheme://$address$2"
+}
+
+mapfile -t trusted < <(machines trusted)
+mapfile -t relays < <(machines relay)
+((${#relays[@]} > 0)) || fail "no relay machine is listed in $machines_file"
+
+connections="$(api GET /rest/system/connections)" || exit 1
+for machine in "${trusted[@]}" "${relays[@]}"; do
+    read -r device name _ <<< "$machine"
+    [[ "$(jq -r --arg id "$device" '.connections[$id].connected' <<< "$connections")" == "true" ]] \
+        || fail "$name is not connected; every machine must be online to change the password"
+done
+
+# Whether device $2 has everything in folder $1.
+complete() {
+    api GET "/rest/db/completion?folder=$1&device=$2" | jq -e '.completion == 100 and .needItems == 0 and .needDeletes == 0' >/dev/null
+}
+
+if interrupted; then
+    # The relays already hold everything under the old password, and the new one is written.
+    password="$(< "$password_file")"
+    echo "syncthing-relay-rotate: continuing the change to password $(fingerprint "$password")"
+else
+    # Nothing may be held only by a relay: every machine, relays included, has everything.
+    mapfile -t folders < <(syncthing cli config folders list)
+    for folder in "${folders[@]}"; do
+        for machine in "${trusted[@]}" "${relays[@]}"; do
+            read -r device name _ <<< "$machine"
+            syncthing cli config folders "$folder" devices list | grep -Fxq -- "$device" || continue
+            complete "$folder" "$device" || fail "$name is still syncing folder '$folder'; try again once it is up to date"
+        done
+    done
+
+    if [[ -f "$password_file" ]]; then
+        (umask 077 && mkdir -p "$backup_dir") && cp -p -- "$password_file" "$backup_dir/password.$(date +%Y%m%d-%H%M%S)" || exit 1
+    fi
+    # Syncthing skips .syncthing.*.tmp names, so only the finished file is sent.
+    tmp_file="$(dirname -- "$password_file")/.syncthing.$(basename -- "$password_file").tmp"
+    (umask 077 && openssl rand -base64 32 > "$tmp_file" && mv -- "$tmp_file" "$password_file") || exit 1
+    password="$(< "$password_file")"
+    echo "syncthing-relay-rotate: wrote a new password ($(fingerprint "$password")); the old one is kept in $backup_dir"
+fi
+
+api POST "/rest/db/scan?folder=$secrets_folder" >/dev/null || exit 1
+for machine in "${trusted[@]}"; do
+    read -r device name _ <<< "$machine"
+    for _ in {1..120}; do
+        complete "$secrets_folder" "$device" && break
+        sleep 1
+    done
+    complete "$secrets_folder" "$device" || fail "$name did not receive the new password; run this again once it is online"
+done
+
+apply_password >/dev/null
+for machine in "${trusted[@]}"; do
+    read -r _ name ssh_host <<< "$machine"
+    result="$(ssh -o BatchMode=yes "$ssh_host" '$HOME/.local/bin/syncthing-relay-rotate --apply')" || fail "could not switch $name; run syncthing-relay-rotate --apply there"
+    [[ "$result" == "password $(fingerprint "$password")" ]] || fail "$name has a different password ($result); check its $password_file"
+    echo "syncthing-relay-rotate: switched $name"
+done
+for machine in "${relays[@]}"; do
+    read -r _ name ssh_host <<< "$machine"
+    ssh -o BatchMode=yes "$ssh_host" '$HOME/.local/bin/syncthing-relay-rotate --reset' || fail "could not restart $name; run syncthing-relay-rotate --reset there"
+done
+echo "syncthing-relay-rotate: done; the relays receive everything again under the new password"

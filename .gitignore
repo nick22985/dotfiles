@@ -22,3 +22,8 @@ env/.config/sbx/config.fleet.toml
 .audit/
 env/.config/sbx/
 
+
+# Syncthing folder markers (modules/syncthing shares the working tree)
+/.stfolder/
+/.stignore
+/.stversions/

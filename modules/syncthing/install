@@ -8,11 +8,12 @@ parse_args "$@"
 set_context "Syncthing"
 
 # Every folder in modules/syncthing/folders.tsv syncs with every other machine in the private
-# machine list: project working trees (git history stays local) plus keys and VPN profiles.
-private_dir="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private"
-machines_file="$private_dir/machines.txt"
-syncthing_dir="$DOTFILES_DIR/modules/syncthing"
-folders_file="$syncthing_dir/folders.tsv"
+# machine list: project and dotfiles working trees, keys and VPN profiles, and git-peer-sync's
+# exchange of git history for machines that are not online together.
+# Machines marked "relay" there (modules/syncthing-relay) get them encrypted with the password in
+# ~/.secrets/syncthing-relay-password and never see the contents.
+source "$DOTFILES_DIR/modules/syncthing/common.sh"
+relay_password_file="$HOME/.secrets/syncthing-relay-password"
 
 if ! command_exists syncthing; then
     log_error "syncthing is unavailable after package installation"
@@ -24,28 +25,22 @@ if [[ "$DRY_RUN" != "1" && -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
 fi
 
 status=0
-folders=()
-while IFS='|' read -r folder_id relative ignore_name extra; do
-    [[ -n "${folder_id:-}" && "$folder_id" != \#* ]] || continue
-    if [[ -n "${extra:-}" || ! "$folder_id" =~ ^[a-z0-9-]+$ || -z "${relative:-}" || "$relative" == /* || "$relative" == *..* \
-        || ( "$ignore_name" != "-" && ! -f "$syncthing_dir/$ignore_name" ) ]]; then
-        log_error "Invalid entry in $folders_file: $folder_id|${relative:-}|${ignore_name:-}"
-        status=1
-        continue
-    fi
-    folders+=("$folder_id|$HOME/$relative|$ignore_name")
-done < "$folders_file"
+syncthing_read_folders || status=1
 
 ignore_file="$(mktemp)"
 trap 'rm -f -- "$ignore_file"' EXIT
 
 # The ignore file must be in place before the folder exists, or the first scan shares everything.
 for folder in "${folders[@]}"; do
-    IFS='|' read -r folder_id path ignore_name <<< "$folder"
+    IFS='|' read -r folder_id relative ignore_name <<< "$folder"
+    path="$HOME/$relative"
     [[ "$ignore_name" != "-" ]] || continue
     if [[ "$folder_id" == "projects" ]]; then
         # Adds the bare-layout repository patterns; git-peer-sync and modules/sync-repos keep them current.
         "$DOTFILES_DIR/env/.local/bin/projects-stignore" --print > "$ignore_file" || exit 1
+    elif [[ "$folder_id" == "dotfiles" ]]; then
+        # Adds the repository's gitignore rules; git-peer-sync keeps them current.
+        "$DOTFILES_DIR/env/.local/bin/dotfiles-stignore" --print > "$ignore_file" || exit 1
     else
         cp -- "$syncthing_dir/$ignore_name" "$ignore_file" || exit 1
     fi
@@ -82,57 +77,47 @@ if [[ "$DRY_RUN" == "1" ]]; then
     exit "$status"
 fi
 
-# The CLI talks to the running instance; give a freshly started service time to open its API.
-for _ in {1..30}; do
-    syncthing cli show system >/dev/null 2>&1 && break
-    sleep 1
-done
-if ! syncthing cli show system >/dev/null 2>&1; then
-    log_error "Syncthing is not responding (check: systemctl --user status syncthing)"
-    exit 1
-fi
-
+syncthing_wait_for_api || exit 1
 my_id="$(syncthing device-id)" || exit 1
-
-# Machines reach each other at their SSH host (Tailscale) or through LAN discovery at home; relays,
-# global discovery and NAT traversal would only tell third-party servers about this machine.
-for option in relays-enabled global-ann-enabled natenabled; do
-    if [[ "$(syncthing cli config options "$option" get)" != "false" ]]; then
-        syncthing cli config options "$option" set false || status=1
-    fi
-done
+syncthing_disable_public_services || status=1
 
 if [[ ! -f "$machines_file" ]]; then
     log_warn "Machine list is unavailable: $machines_file (run: git submodule update --init)"
     exit 0
 fi
 
-peers=()
-listed=0
-while read -r name device_id ssh_host extra; do
-    [[ -n "${name:-}" && "$name" != \#* ]] || continue
-    if [[ -n "${extra:-}" || -z "${ssh_host:-}" || ! "${device_id:-}" =~ ^[A-Z0-9]{7}(-[A-Z0-9]{7}){7}$ ]]; then
-        log_error "Invalid entry in $machines_file: $name ${device_id:-} ${ssh_host:-} ${extra:-}"
-        status=1
-        continue
-    fi
-    if [[ "$device_id" == "$my_id" ]]; then
-        listed=1
-        continue
-    fi
-    peers+=("$device_id")
-    if ! syncthing cli config devices list | grep -Fxq -- "$device_id"; then
-        # Dial the SSH host (a Tailscale name works anywhere) first, then fall back to discovery.
-        syncthing cli config devices add-json \
-            "$(printf '{"deviceID":"%s","name":"%s","addresses":["tcp://%s:22000","dynamic"]}' "$device_id" "$name" "$ssh_host")" \
-            || status=1
-        log_success "Added device $name"
-    fi
-done < "$machines_file"
-
-if ((listed == 0)); then
+syncthing_read_machines "$my_id" || status=1
+if [[ "$this_role" == "relay" ]]; then
+    log_error "This machine is marked relay in $machines_file; apply modules/syncthing-relay here instead"
+    exit 1
+fi
+if [[ -z "$this_role" ]]; then
     log_warn "This machine is not in the machine list; add it (with its SSH host) so the others share with it:"
     log_info "echo '$(uname -n) $my_id <ssh-host>' >> $machines_file"
+fi
+
+peers=()
+for peer in "${trusted_peers[@]}"; do
+    syncthing_add_device "$peer" || { status=1; continue; }
+    peers+=("${peer%%|*}")
+done
+
+# The password reaches the other machines through the secrets folder; it is never generated here,
+# so two machines cannot pick different ones.
+relay_password=""
+relays=()
+if ((${#relay_peers[@]} > 0)); then
+    [[ -f "$relay_password_file" ]] && relay_password="$(< "$relay_password_file")"
+    if [[ -z "$relay_password" ]]; then
+        log_error "Relay machines are listed but $relay_password_file is missing or empty; folders are not shared with them"
+        log_info "Create it on one machine and let the secrets folder carry it: (umask 077; openssl rand -base64 32 > $relay_password_file)"
+        status=1
+    else
+        for peer in "${relay_peers[@]}"; do
+            syncthing_add_device "$peer" untrusted || { status=1; continue; }
+            relays+=("${peer%%|*}")
+        done
+    fi
 fi
 
 folder_defaults="$(syncthing cli config defaults folder dump-json)" || exit 1
@@ -141,12 +126,16 @@ default_settings=(fswatcher-enabled rescan-intervals max-conflicts auto-normaliz
 
 existing_folders="$(syncthing cli config folders list)"
 for folder in "${folders[@]}"; do
-    IFS='|' read -r folder_id path _ <<< "$folder"
+    IFS='|' read -r folder_id relative _ <<< "$folder"
+    path="$HOME/$relative"
     if ! grep -Fxq -- "$folder_id" <<< "$existing_folders"; then
         mkdir -p -m 700 "$path"
-        # Deleted and replaced files stay in .stversions for 30 days on the receiving machine.
+        # Deleted and replaced files stay in .stversions for 30 days on the receiving machine, except
+        # git-peer-sync's bundles: they are replaced on every change and rebuilt from the repositories.
+        versioning='.versioning += {type: "trashcan", params: {cleanoutDays: "30"}}'
+        [[ "$folder_id" == "git-exchange" ]] && versioning='.'
         if ! folder_json="$(jq -c --arg id "$folder_id" --arg path "$path" \
-            '. + {id: $id, label: $id, path: $path, type: "sendreceive"} | .versioning += {type: "trashcan", params: {cleanoutDays: "30"}}' \
+            ". + {id: \$id, label: \$id, path: \$path, type: \"sendreceive\"} | $versioning" \
             <<< "$folder_defaults")" || ! syncthing cli config folders add-json "$folder_json"; then
             status=1
             continue
@@ -170,9 +159,19 @@ for folder in "${folders[@]}"; do
             syncthing cli config folders "$folder_id" devices add --device-id "$device_id" || status=1
         fi
     done
-    # Every folder but the projects holds keys or secrets: owner only. Syncthing carries the
-    # permission bits, so this also tightens files that arrive from other machines.
-    if [[ "$folder_id" != "projects" && -d "$path" ]]; then
+    for device_id in "${relays[@]}"; do
+        if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
+            syncthing cli config folders "$folder_id" devices add --device-id "$device_id" --encryption-password "$relay_password" || status=1
+        elif [[ "$(syncthing cli config folders "$folder_id" devices "$device_id" encryption-password get)" != "$relay_password" ]]; then
+            # A relay that already holds data under the old password rejects the new one until it
+            # starts over; syncthing-relay-rotate does both in order.
+            syncthing cli config folders "$folder_id" devices "$device_id" encryption-password set "$relay_password" || status=1
+            log_warn "Changed the relay password for folder '$folder_id'; the relays reject it until syncthing-relay-rotate restarts them"
+        fi
+    done
+    # Every folder but the projects and dotfiles holds keys or secrets: owner only. Syncthing
+    # carries the permission bits, so this also tightens files that arrive from other machines.
+    if [[ "$folder_id" != "projects" && "$folder_id" != "dotfiles" && -d "$path" ]]; then
         chmod -R go-rwx -- "$path" || status=1
     fi
 done
@@ -180,5 +179,5 @@ done
 # Import what has already arrived now, from this session, which NetworkManager trusts to add VPNs.
 "$HOME/.local/bin/secrets-sync" || status=1
 
-((status == 0)) && log_success "${#folders[@]} folders are shared with ${#peers[@]} other machine(s)"
+((status == 0)) && log_success "${#folders[@]} folders are shared with ${#peers[@]} other machine(s) and ${#relays[@]} relay(s)"
 exit "$status"

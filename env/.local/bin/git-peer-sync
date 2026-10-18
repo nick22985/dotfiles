@@ -7,7 +7,13 @@
 # folders that Syncthing brought over from the other machine are registered as worktrees here
 # (each machine publishes its worktree list in ~/projects/.git-peer-sync/<machine>.tsv). Normal
 # checkouts that only exist on the other machine get their repository created around the files
-# Syncthing delivered (the list is in ~/projects/.git-peer-sync/<machine>.repos).
+# Syncthing delivered (the list is in ~/projects/.git-peer-sync/<machine>.repos). ~/dotfiles and the
+# submodules Syncthing carries with it get the same fetches and fast-forwards.
+#
+# Machines that are not online together still exchange history through Syncthing (and the relay):
+# each machine publishes its refs, the commits it has and, for every other machine, a bundle of the
+# commits that one is missing (see publish_exchange). Refs from there are taken when they are newer
+# than the last SSH fetch from that machine.
 #
 #   git-peer-sync            fetch from every other machine (run by git-peer-sync.timer)
 #   git-peer-sync --serve    SSH forced command on the serving side: read-only git access
@@ -16,12 +22,15 @@ set -u -o pipefail
 
 machines_file="$HOME/dotfiles/env/.config/.nickInstall/install/configs/private/machines.txt"
 projects_dir="$HOME/projects"
+dotfiles_dir="$HOME/dotfiles"
 key_file="$HOME/.ssh/git_peer_sync"
+exchange_dir="$HOME/.local/share/git-peer-sync/exchange"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/git-peer-sync"
 
 if [[ "${1:-}" == "--serve" ]]; then
-    # Allow only git-upload-pack (fetch) for a path below ~/projects.
+    # Allow only git-upload-pack (fetch) for ~/dotfiles or a path below it or ~/projects.
     command="${SSH_ORIGINAL_COMMAND:-}"
-    if [[ "$command" =~ ^git-upload-pack\ \'(projects/[^\']+)\'$ && "${BASH_REMATCH[1]}" != *..* ]]; then
+    if [[ "$command" =~ ^git-upload-pack\ \'((projects|dotfiles)/[^\']+|dotfiles)\'$ && "${BASH_REMATCH[1]}" != *..* ]]; then
         exec git-shell -c "$command"
     fi
     echo "git-peer-sync: refused: $command" >&2
@@ -49,10 +58,30 @@ while IFS= read -r -d '' git_dir; do
 done < <(find "$projects_dir" \( -name node_modules -o -name target -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
     \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
 
+# Whether Syncthing delivered the files that commits $2..$3 change to worktree $1: none of them
+# still has its $2 content (a submodule counts by its checked-out commit). One that differs from
+# both is uncommitted work, from either machine, and stays as it is when only the branch moves.
+delivered() {
+    local worktree="$1" from="$2" to="$3" path old current
+    while IFS= read -r -d '' path; do
+        old="$(git -C "$worktree" rev-parse -q --verify "$from:$path")" || old=""
+        if [[ -L "$worktree/$path" ]]; then
+            current="$(readlink -n -- "$worktree/$path" | git -C "$worktree" hash-object --stdin)"
+        elif [[ -f "$worktree/$path" ]]; then
+            current="$(git -C "$worktree" hash-object --path="$path" -- "$path")"
+        elif [[ -e "$worktree/$path/.git" ]]; then
+            current="$(git -C "$worktree/$path" rev-parse -q --verify HEAD)"
+        else
+            current=""
+        fi
+        [[ "$current" != "$old" ]] || return 1
+    done < <(git -C "$worktree" diff -z --no-renames --name-only "$from" "$to")
+}
+
 # Fast-forward each local branch that is strictly behind its copy from machine $2. Other branches
-# just move. A checked-out branch moves only when its worktree has no changes of its own and no
-# merge or rebase is in progress: if the files still match the old commit they are updated, and if
-# Syncthing already delivered the other machine's files only the branch and index move.
+# just move. A checked-out branch moves only when no merge or rebase is in progress: if the files
+# still match the old commit they are updated, and if Syncthing already delivered the files the
+# new commits change (and nothing is staged) only the branch and index move.
 fast_forward() {
     local repository="$1" name="$2" key value worktree="" branch commit peer state
     local -A checked_out=()
@@ -76,7 +105,8 @@ fast_forward() {
             done
             if git -C "$worktree" diff --quiet HEAD; then
                 git -C "$worktree" merge --quiet --ff-only "$peer" >/dev/null 2>&1 || continue
-            elif git -C "$worktree" diff --quiet "$peer"; then
+            elif git -C "$worktree" diff --quiet "$peer" \
+                || { git -C "$worktree" diff --cached --quiet && delivered "$worktree" "$commit" "$peer"; }; then
                 git -C "$worktree" reset --quiet "$peer" || continue
             else
                 continue
@@ -118,22 +148,27 @@ adopt_worktrees() {
     done < "$manifest_dir/$name.tsv"
 }
 
-# Create the repositories of normal checkouts that machine $1 (reached at $2) has and this machine
-# only has as files Syncthing delivered without .git. The repository is built outside ~/projects,
-# gets the other machine's branches and checks out its branch, then .git is moved into the folder
-# and the index is reset: the files stay as Syncthing left them. A repository without commits is
-# skipped until it has some.
+# Create the repositories of normal checkouts that machine $1 (reached at $2 when $3 is 1) has and
+# this machine only has as files Syncthing delivered without .git. The repository is built outside
+# ~/projects, gets the other machine's branches (over SSH, or from the bundle it published for this
+# machine) and checks out its branch, then .git is moved into the folder and the index is reset:
+# the files stay as Syncthing left them. A repository without commits is skipped until it has some.
 adopt_repositories() {
-    local name="$1" ssh_host="$2" relative branch folder staging
+    local name="$1" ssh_host="$2" reachable="$3" relative branch folder staging source
     [[ -f "$manifest_dir/$name.repos" ]] || return 0
     while IFS=$'\t' read -r relative branch; do
         [[ "$relative" == projects/* && "$relative" != *..* && -n "$branch" ]] || continue
         folder="$HOME/$relative"
         [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" ]] || continue
-        git ls-remote --exit-code "$ssh_host:$relative" "refs/heads/$branch" >/dev/null 2>&1 || continue
+        source="$exchange_dir/$name/to/$this_host/$relative.bundle"
+        if ((reachable)) && git ls-remote --exit-code "$ssh_host:$relative" "refs/heads/$branch" >/dev/null 2>&1; then
+            source="$ssh_host:$relative"
+        elif [[ ! -f "$source" ]] || ! git bundle list-heads "$source" "refs/heads/$branch" >/dev/null 2>&1; then
+            continue
+        fi
         staging="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/git-peer-sync.XXXXXX")" || continue
         if git init --quiet --initial-branch="$branch" "$staging/repo" \
-            && git -C "$staging/repo" fetch --quiet --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "+refs/heads/*:refs/remotes/$name/*" \
+            && git -C "$staging/repo" fetch --quiet --no-auto-maintenance --no-write-fetch-head "$source" "+refs/heads/*:refs/remotes/$name/*" \
             && git -C "$staging/repo" update-ref "refs/heads/$branch" "refs/remotes/$name/$branch" \
             && [[ ! -e "$folder/.git" ]] && mv -- "$staging/repo/.git" "$folder/.git" \
             && git -C "$folder" reset --quiet; then
@@ -146,12 +181,123 @@ adopt_repositories() {
     done < "$manifest_dir/$name.repos"
 }
 
+# Write stdin to $1 through a temporary name Syncthing skips, so a partial file is never shared.
+publish_file() {
+    local target="$1" temporary
+    temporary="$(dirname -- "$target")/.syncthing.${target##*/}.tmp"
+    mkdir -p -- "$(dirname -- "$target")" && cat > "$temporary" && mv -- "$temporary" "$target"
+}
+
+# The refs other machines get from repository $1: its branches and latest stash, "<id> <ref>".
+shared_refs() {
+    git -C "$1" for-each-ref --format='%(objectname) %(refname)' refs/heads/ refs/stash | sort
+}
+
+# When the refs of machine $2 for repository $1 were last brought here (nanoseconds since the
+# epoch; machine clocks are assumed to agree, as NTP keeps them).
+stamp_file() {
+    git -C "$1" rev-parse --path-format=absolute --git-path "peer-sync/$2.stamp"
+}
+
+record_stamp() {
+    local file
+    file="$(stamp_file "$1" "$2")" && mkdir -p -- "$(dirname -- "$file")" && printf '%s\n' "$3" > "$file"
+}
+
+# Take machine $2's refs for repository $1 from what it published through Syncthing when they
+# changed after the last SSH fetch or exchange from it. The objects come from the bundle it made for
+# this machine or are already here; until both have arrived nothing changes.
+apply_exchange() {
+    local repository="$1" name="$2" relative="${1#"$HOME"/}" refs_file bundle stamp last refs
+    refs_file="$exchange_dir/$name/refs/$relative.refs"
+    bundle="$exchange_dir/$name/to/$this_host/$relative.bundle"
+    [[ -f "$refs_file" ]] || return 1
+    read -r _ stamp < "$refs_file"
+    last="$(cat -- "$(stamp_file "$repository" "$name")" 2>/dev/null)"
+    [[ "$stamp" =~ ^[0-9]+$ ]] && ((stamp > ${last:-0})) || return 1
+    refs="$(tail -n +2 -- "$refs_file")"
+    if cut -d' ' -f1 <<< "$refs" | git -C "$repository" cat-file --batch-check | grep -q ' missing$'; then
+        [[ -f "$bundle" ]] && git -C "$repository" bundle unbundle "$bundle" >/dev/null 2>&1 || return 1
+        cut -d' ' -f1 <<< "$refs" | git -C "$repository" cat-file --batch-check | grep -q ' missing$' && return 1
+    fi
+    {
+        git -C "$repository" for-each-ref --format='%(refname)' "refs/remotes/$name/" "refs/stashes/$name" \
+            | grep -Fxv -f <(awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); print $2 }' <<< "$refs") \
+            | sed 's/^/delete /'
+        awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); print "update " $2 " " $1 }' <<< "$refs"
+    } | git -C "$repository" update-ref --stdin || return 1
+    record_stamp "$repository" "$name" "$stamp"
+}
+
+# Write for machine $3 a bundle of the commits of repository $1 (below $HOME at $2, shared refs $4)
+# that it doesn't have, going by the object ids it published. A machine that published none for
+# the repository doesn't get one; an empty list asks for everything (see publish_exchange).
+publish_bundle() {
+    local repository="$1" relative="$2" peer="$3" refs="$4" have_file bundle key key_file revisions
+    have_file="$exchange_dir/$peer/have/$relative.have"
+    bundle="$exchange_dir/$this_host/to/$peer/$relative.bundle"
+    key_file="$state_dir/$peer/$relative.bundle-key"
+    [[ -f "$have_file" ]] || return 0
+    key="$({ printf '%s\n' "$refs"; cat -- "$have_file"; } | git hash-object --stdin)"
+    [[ "$key" == "$(cat -- "$key_file" 2>/dev/null)" ]] && return 0
+    revisions="$(
+        cut -d' ' -f2 <<< "$refs"
+        git -C "$repository" cat-file --batch-check='%(objectname) %(objecttype)' < "$have_file" | awk '$2 == "commit" || $2 == "tag" { print "^" $1 }'
+    )"
+    if [[ "$(git -C "$repository" rev-list --count --stdin <<< "$revisions")" == "0" ]]; then
+        rm -f -- "$bundle"
+    else
+        mkdir -p -- "$(dirname -- "$bundle")" || return 1
+        git -C "$repository" bundle create --quiet "$(dirname -- "$bundle")/.syncthing.${bundle##*/}.tmp" --stdin <<< "$revisions" \
+            && mv -- "$(dirname -- "$bundle")/.syncthing.${bundle##*/}.tmp" "$bundle" || return 1
+    fi
+    mkdir -p -- "$(dirname -- "$key_file")" && printf '%s\n' "$key" > "$key_file"
+}
+
+# Publish through Syncthing what the other machines need while this one is off: per repository
+# its shared refs with the time they last changed, the object ids it has (so the others leave them
+# out of their bundles) and a bundle for each other machine. Checkouts another machine has and this
+# one only has as files get an empty id list, which asks that machine for the whole repository.
+publish_exchange() {
+    local repository relative refs refs_file have have_file peer branch folder
+    for repository in "${repositories[@]}"; do
+        relative="${repository#"$HOME"/}"
+        refs="$(shared_refs "$repository")"
+        [[ -n "$refs" ]] || continue
+        refs_file="$exchange_dir/$this_host/refs/$relative.refs"
+        if [[ "$refs" != "$(tail -n +2 -- "$refs_file" 2>/dev/null)" ]]; then
+            { printf 'stamp %s\n' "$(date +%s%N)"; printf '%s\n' "$refs"; } | publish_file "$refs_file" || status=1
+        fi
+        have_file="$exchange_dir/$this_host/have/$relative.have"
+        have="$(git -C "$repository" for-each-ref --format='%(objectname)' | sort -u)"
+        if [[ "$have" != "$(cat -- "$have_file" 2>/dev/null)" ]]; then
+            printf '%s\n' "$have" | publish_file "$have_file" || status=1
+        fi
+        for peer in "${peers[@]}"; do
+            publish_bundle "$repository" "$relative" "$peer" "$refs" \
+                || { echo "git-peer-sync: could not write the bundle of $relative for $peer" >&2; status=1; }
+        done
+    done
+    for peer in "${peers[@]}"; do
+        [[ -f "$manifest_dir/$peer.repos" ]] || continue
+        while IFS=$'\t' read -r relative branch; do
+            [[ "$relative" == projects/* && "$relative" != *..* && -n "$branch" ]] || continue
+            folder="$HOME/$relative"
+            have_file="$exchange_dir/$this_host/have/$relative.have"
+            [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" && ! -f "$have_file" ]] || continue
+            publish_file "$have_file" < /dev/null || status=1
+        done < "$manifest_dir/$peer.repos"
+    done
+}
+
 status=0
 this_host="$(uname -n)"
 
 # Pick up bare-layout repositories created since the last run (by hand or by sbx) so Syncthing
 # leaves their git internals alone.
 "$HOME/.local/bin/projects-stignore" || echo "git-peer-sync: could not update $projects_dir/.stignore" >&2
+# Follow changes to the dotfiles' gitignore rules.
+"$HOME/.local/bin/dotfiles-stignore" || echo "git-peer-sync: could not update $dotfiles_dir/.stignore" >&2
 
 # Publish this machine's linked worktrees (repository, worktree, branch) for the others; Syncthing
 # carries the file. It is only rewritten when it changes so it doesn't cause a sync every run.
@@ -173,42 +319,66 @@ done)"
 if [[ "$repository_manifest" != "$(cat -- "$manifest_dir/$this_host.repos" 2>/dev/null)" ]]; then
     mkdir -p "$manifest_dir" && printf '%s\n' "$repository_manifest" > "$manifest_dir/$this_host.repos"
 fi
+# The dotfiles go after the manifests, which only describe ~/projects. Submodules come before the
+# superproject: its branch only moves once their commits match the files Syncthing delivered.
+if [[ -d "$dotfiles_dir/.git" ]]; then
+    while IFS= read -r relative; do
+        git -C "$dotfiles_dir/$relative" symbolic-ref -q HEAD >/dev/null && repositories+=("$dotfiles_dir/$relative")
+    done < <(DOTFILES_DIR="$dotfiles_dir" "$HOME/.local/bin/dotfiles-stignore" --submodules)
+    repositories+=("$dotfiles_dir")
+fi
+# Relay machines ("name device-id ssh-host relay") hold only encrypted Syncthing copies and no git.
+peers=()
+peer_hosts=()
 while read -r name _ ssh_host extra; do
     [[ -n "${name:-}" && "$name" != \#* && "$name" != "$this_host" && -n "${ssh_host:-}" && -z "${extra:-}" ]] || continue
+    peers+=("$name")
+    peer_hosts+=("$ssh_host")
+done < "$machines_file"
+
+for index in "${!peers[@]}"; do
+    name="${peers[index]}"
+    ssh_host="${peer_hosts[index]}"
+    reachable=1
     if ! ssh "${ssh_options[@]}" -O check "$ssh_host" 2>/dev/null && ! ssh "${ssh_options[@]}" -fN "$ssh_host" 2>/dev/null; then
-        echo "git-peer-sync: $name ($ssh_host) is unreachable" >&2
-        continue
+        echo "git-peer-sync: $name ($ssh_host) is unreachable; using what it published through Syncthing"
+        reachable=0
     fi
 
-    adopt_repositories "$name" "$ssh_host"
+    adopt_repositories "$name" "$ssh_host" "$reachable"
     fetched=0
+    exchanged=0
     for repository in "${repositories[@]}"; do
         relative="${repository#"$HOME"/}"
-        remote_refs="$(git -C "$repository" ls-remote "$ssh_host:$relative" 'refs/heads/*' refs/stash 2>/dev/null)" || continue
-        # Skip the fetch when every ref already matches what the last run stored.
-        local_refs="$(git -C "$repository" for-each-ref --format='%(objectname) %(refname)' "refs/remotes/$name/" "refs/stashes/$name" \
-            | sed "s#refs/remotes/$name/#refs/heads/#; s#refs/stashes/$name\$#refs/stash#" | sort)"
-        if [[ "$(printf '%s\n' "$remote_refs" | tr '\t' ' ' | sed '/^$/d' | sort)" == "$local_refs" ]]; then
-            adopt_worktrees "$repository" "$name"
-            fast_forward "$repository" "$name"
-            continue
+        if ((reachable)) && remote_refs="$(git -C "$repository" ls-remote "$ssh_host:$relative" 'refs/heads/*' refs/stash 2>/dev/null)"; then
+            # Skip the fetch when every ref already matches what the last run stored.
+            local_refs="$(git -C "$repository" for-each-ref --format='%(objectname) %(refname)' "refs/remotes/$name/" "refs/stashes/$name" \
+                | sed "s#refs/remotes/$name/#refs/heads/#; s#refs/stashes/$name\$#refs/stash#" | sort)"
+            if [[ "$(printf '%s\n' "$remote_refs" | tr '\t' ' ' | sed '/^$/d' | sort)" == "$local_refs" ]]; then
+                record_stamp "$repository" "$name" "$(date +%s%N)"
+            else
+                refspecs=("+refs/heads/*:refs/remotes/$name/*")
+                if grep -q $'\trefs/stash$' <<< "$remote_refs"; then
+                    refspecs+=("+refs/stash:refs/stashes/$name")
+                else
+                    git -C "$repository" update-ref -d "refs/stashes/$name" 2>/dev/null
+                fi
+                if git -C "$repository" fetch --quiet --prune --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "${refspecs[@]}"; then
+                    record_stamp "$repository" "$name" "$(date +%s%N)"
+                    fetched=$((fetched + 1))
+                else
+                    echo "git-peer-sync: failed to fetch $relative from $name" >&2
+                    status=1
+                fi
+            fi
         fi
-
-        refspecs=("+refs/heads/*:refs/remotes/$name/*")
-        if grep -q $'\trefs/stash$' <<< "$remote_refs"; then
-            refspecs+=("+refs/stash:refs/stashes/$name")
-        else
-            git -C "$repository" update-ref -d "refs/stashes/$name" 2>/dev/null
-        fi
-        if git -C "$repository" fetch --quiet --prune --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "${refspecs[@]}"; then
-            fetched=$((fetched + 1))
-            adopt_worktrees "$repository" "$name"
-            fast_forward "$repository" "$name"
-        else
-            echo "git-peer-sync: failed to fetch $relative from $name" >&2
-            status=1
-        fi
+        # Refs it published after the SSH fetch above (or while it was unreachable) still apply.
+        apply_exchange "$repository" "$name" && exchanged=$((exchanged + 1))
+        adopt_worktrees "$repository" "$name"
+        fast_forward "$repository" "$name"
     done
-    echo "git-peer-sync: $name: updated $fetched of ${#repositories[@]} repositories"
-done < "$machines_file"
+    echo "git-peer-sync: $name: updated $fetched over SSH and $exchanged through Syncthing of ${#repositories[@]} repositories"
+done
+
+[[ -d "$exchange_dir" ]] && publish_exchange
 exit "$status"

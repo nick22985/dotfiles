@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Syncthing relay"
+
+# An always-on machine (marked "relay" in the private machine list) receives every folder in
+# modules/syncthing/folders.tsv encrypted, so the other machines sync through it while they are not
+# online together. It holds no password: names and contents stay unreadable here, and nothing is
+# written to the real paths (~/projects, ~/.ssh, ...), which keep their own use on this machine.
+source "$DOTFILES_DIR/modules/syncthing/common.sh"
+relay_dir="$HOME/.local/share/syncthing-relay"
+user="$(id -un)"
+
+if ! command_exists syncthing; then
+    log_error "syncthing is unavailable after package installation"
+    exit 1
+fi
+if [[ "$DRY_RUN" != "1" && -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+    log_error "Configuring the Syncthing relay requires the top-level runner and its recovery receipt"
+    exit 1
+fi
+
+status=0
+syncthing_read_folders || status=1
+
+# User services stop at logout unless the user lingers.
+if [[ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null)" != "yes" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would enable lingering for $user so Syncthing keeps running after logout"
+    elif sudo loginctl enable-linger "$user"; then
+        receipt_add_restore system "$(printf 'sudo loginctl disable-linger %q' "$user")"
+        log_success "Enabled lingering for $user"
+    else
+        log_error "Could not enable lingering for $user; Syncthing stops at logout"
+        status=1
+    fi
+fi
+
+apply_module_services syncthing-relay || exit 1
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would keep ${#folders[@]} encrypted folders in $relay_dir for the machines in $machines_file"
+    exit "$status"
+fi
+
+syncthing_wait_for_api || exit 1
+my_id="$(syncthing device-id)" || exit 1
+syncthing_disable_public_services || status=1
+
+if [[ ! -f "$machines_file" ]]; then
+    log_error "Machine list is unavailable: $machines_file (run: git submodule update --init)"
+    exit 1
+fi
+syncthing_read_machines "$my_id" || status=1
+# Unmarked, the other machines would share the folders unencrypted.
+if [[ "$this_role" != "relay" ]]; then
+    log_error "This machine must be marked relay in $machines_file before folders are shared with it:"
+    log_info "echo '$(uname -n) $my_id <ssh-host> relay' >> $machines_file"
+    exit 1
+fi
+
+peers=()
+for peer in "${trusted_peers[@]}"; do
+    syncthing_add_device "$peer" || { status=1; continue; }
+    peers+=("${peer%%|*}")
+done
+
+mkdir -p -m 700 "$relay_dir" && chmod 700 "$relay_dir" || exit 1
+existing_folders="$(syncthing cli config folders list)"
+for folder in "${folders[@]}"; do
+    IFS='|' read -r folder_id _ _ <<< "$folder"
+    path="$relay_dir/$folder_id"
+    if ! grep -Fxq -- "$folder_id" <<< "$existing_folders"; then
+        mkdir -p -m 700 "$path"
+        syncthing cli config folders add --id "$folder_id" --label "$folder_id" --path "$path" --type receiveencrypted || { status=1; continue; }
+        log_success "Created encrypted folder '$folder_id' in $path"
+    elif [[ "$(syncthing cli config folders "$folder_id" type get)" != "receiveencrypted" ]]; then
+        log_error "Folder '$folder_id' already exists here and is not encrypted; remove it before this machine relays it"
+        status=1
+        continue
+    fi
+    for device_id in "${peers[@]}"; do
+        if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
+            syncthing cli config folders "$folder_id" devices add --device-id "$device_id" || status=1
+        fi
+    done
+done
+
+((status == 0)) && log_success "${#folders[@]} encrypted folders are relayed for ${#peers[@]} machine(s)"
+exit "$status"

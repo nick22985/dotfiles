@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Build ~/dotfiles/.stignore from modules/syncthing/dotfiles.stignore plus the repository's own
+# ignore rules, so Syncthing leaves alone what git leaves alone (sbx credentials, logs, per-machine
+# state). Rules come from the global excludes file, .git/info/exclude and every .gitignore in the
+# superproject and its synced submodules. Git lets the last matching rule win and Syncthing the
+# first, so the rules are written in reverse. Tracked files below an ignored directory (sbx's
+# config.toml and Dockerfiles) are listed first as rooted "!" patterns: those still let Syncthing
+# skip the ignored directories.
+#
+#   dotfiles-stignore           rewrite ~/dotfiles/.stignore when it changed (run by git-peer-sync,
+#                               once modules/syncthing has installed it)
+#   dotfiles-stignore --print   print it instead (modules/syncthing installs it with a backup)
+#   dotfiles-stignore --submodules
+#                               list the submodules Syncthing carries (git-peer-sync moves their branches)
+
+set -u -o pipefail
+
+path="${DOTFILES_DIR:-$HOME/dotfiles}"
+base_file="$path/modules/syncthing/dotfiles.stignore"
+
+[[ -f "$base_file" ]] || { echo "dotfiles-stignore: missing $base_file" >&2; exit 1; }
+
+# Glob characters in a file name are escaped so the pattern matches only that name.
+escape() {
+    sed 's/[][*?{}\\]/\\&/g'
+}
+
+# Print the Syncthing form of each rule in gitignore file $1, whose rules apply below $2 ("" for
+# the repository root): rules containing a slash are rooted there, others match at any depth.
+translate() {
+    local file="$1" prefix="$2" line negate pattern
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" && "$line" != \#* ]] || continue
+        negate=""
+        if [[ "$line" == !* ]]; then
+            negate="!"
+            line="${line#!}"
+        fi
+        line="${line#./}"
+        line="${line%/}"
+        [[ -n "$line" ]] || continue
+        if [[ "$line" == */* ]]; then
+            printf '%s%s/%s\n' "$negate" "$prefix" "${line#/}"
+        elif [[ -z "$prefix" ]]; then
+            printf '%s%s\n' "$negate" "$line"
+        else
+            printf '%s%s/%s\n%s%s/**/%s\n' "$negate" "$prefix" "$line" "$negate" "$prefix" "$line"
+        fi
+    done < "$file"
+}
+
+# The rules of repository $1 (its path below the superproject is $2), lowest precedence first.
+repository_rules() {
+    local repository="$1" prefix="$2" file
+    file="$(git -C "$repository" rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null)"
+    [[ -n "$file" && -f "$file" ]] && translate "$file" "$prefix"
+    while IFS= read -r file; do
+        [[ -f "$repository/$file" ]] || continue
+        file="${file%.gitignore}"
+        translate "$repository/$file.gitignore" "$prefix${file:+/${file%/}}"
+    done < <(git -C "$repository" ls-files -- .gitignore '**/.gitignore' | awk -F/ '{ print NF "\t" $0 }' | sort -n | cut -f2-)
+}
+
+# Initialized submodules that Syncthing carries (not below a rooted path of the base file), as
+# their path below the superproject.
+synced_submodules() {
+    local relative ignored skipped pattern
+    mapfile -t ignored < <(grep '^/' "$base_file")
+    while IFS= read -r relative; do
+        [[ -e "$path/$relative/.git" ]] || continue
+        skipped=0
+        for pattern in "${ignored[@]}"; do
+            [[ "/$relative" == "$pattern" || "/$relative" == "$pattern"/* ]] && skipped=1
+        done
+        ((skipped)) || printf '%s\n' "$relative"
+    done < <(git -C "$path" config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null | cut -d' ' -f2-)
+}
+
+generate() {
+    local submodules=() rules relative excludes
+    cat -- "$base_file"
+    [[ -d "$path/.git" || -f "$path/.git" ]] || return 0
+    mapfile -t submodules < <(synced_submodules)
+
+    printf '\n// Tracked files below ignored directories\n'
+    git -C "$path" ls-files -ci --exclude-standard | escape | sed 's#^#!/#'
+    # Git applies only a submodule's own rules inside it; Syncthing applies all of them.
+    for relative in "${submodules[@]}"; do
+        {
+            git -C "$path/$relative" ls-files -ci --exclude-standard | sed "s#^#$relative/#"
+            git -C "$path/$relative" ls-files | sed "s#^#$relative/#" | git -C "$path" check-ignore --no-index --stdin
+        } | sort -u | escape | sed 's#^#!/#'
+    done
+
+    rules="$(
+        excludes="$(git -C "$path" config --path core.excludesFile)"
+        [[ -n "$excludes" && -f "$excludes" ]] && translate "$excludes" ""
+        repository_rules "$path" ""
+        for relative in "${submodules[@]}"; do
+            repository_rules "$path/$relative" "/$relative"
+        done
+    )"
+    printf '\n// Ignored by git, newest rule first\n'
+    [[ -n "$rules" ]] && tac <<< "$rules" | awk '!seen[$0]++'
+}
+
+case "${1:-}" in
+    --print) generate; exit ;;
+    --submodules) synced_submodules; exit ;;
+esac
+
+# Only a folder modules/syncthing has set up is kept current.
+target="$path/.stignore"
+[[ -f "$target" ]] || exit 0
+content="$(generate)" || exit 1
+if [[ -L "$target" || "$content" != "$(cat -- "$target" 2>/dev/null)" ]]; then
+    # Syncthing skips its own .syncthing.*.tmp names, so the partial file is never shared.
+    printf '%s\n' "$content" > "$path/.syncthing.stignore.tmp" && mv -- "$path/.syncthing.stignore.tmp" "$target"
+fi

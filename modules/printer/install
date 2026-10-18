@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Printing"
+
+status=0
+install_module_packages printer || status=1
+apply_module_services printer || status=1
+((status == 0)) && log_success "Printing is configured"
+exit "$status"

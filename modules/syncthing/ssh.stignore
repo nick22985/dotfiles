@@ -1,0 +1,8 @@
+// Written to ~/.ssh/.stignore by modules/syncthing. Keys, config and known_hosts sync; each machine
+// keeps its own authorized_keys, git-peer-sync key and agent/control sockets.
+/authorized_keys
+/git_peer_sync
+/git_peer_sync.pub
+/agent
+/cm
+*.sock

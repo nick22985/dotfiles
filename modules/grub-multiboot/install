@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "GRUB multiboot"
+
+if ! command_exists grub-mkconfig; then
+    log_error "grub-mkconfig is unavailable after the system package profile"
+    exit 1
+fi
+if ! command_exists os-prober; then
+    log_error "os-prober is unavailable after the system package profile"
+    exit 1
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would back up /etc/default/grub and /boot/grub/grub.cfg to the run receipt"
+    log_info "Would enable os-prober, use a 10-second timeout, and regenerate GRUB atomically"
+    exit 0
+fi
+if [[ -z "${DOTFILES_RECEIPT_DIR:-}" || -z "${DOTFILES_RUN_DIR:-}" ]]; then
+    log_error "GRUB changes require the top-level runner and its recovery receipt"
+    exit 1
+fi
+
+backup_system_file() {
+    local target="$1" backup="$DOTFILES_RECEIPT_DIR/backups/system$1"
+    if sudo test -e "$target"; then
+        mkdir -p "$(dirname "$backup")"
+        sudo cp -a -- "$target" "$backup" || return 1
+        receipt_add_restore system "$(printf 'sudo cp -a -- %q %q' "$backup" "$target")"
+    else
+        receipt_add_restore system "$(printf 'sudo rm -f -- %q' "$target")"
+    fi
+}
+
+set_grub_value() {
+    local file="$1" key="$2" value="$3"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+grub_defaults=/etc/default/grub
+sudo test -f "$grub_defaults" || {
+    log_error "$grub_defaults does not exist"
+    exit 1
+}
+backup_system_file "$grub_defaults" || {
+    log_error "Failed to back up $grub_defaults"
+    exit 1
+}
+
+defaults_tmp="$(mktemp "$DOTFILES_RUN_DIR/grub-default.XXXXXX")" || exit 1
+sudo cat -- "$grub_defaults" > "$defaults_tmp" || exit 1
+set_grub_value "$defaults_tmp" GRUB_DISABLE_OS_PROBER false
+set_grub_value "$defaults_tmp" GRUB_TIMEOUT 10
+set_grub_value "$defaults_tmp" GRUB_SAVEDEFAULT true
+set_grub_value "$defaults_tmp" GRUB_DEFAULT saved
+if ! sudo install -o root -g root -m "$(sudo stat -c %a "$grub_defaults")" \
+    "$defaults_tmp" "$grub_defaults"; then
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    exit 1
+fi
+
+grub_output=/boot/grub/grub.cfg
+if ! grub_output_tmp="$(sudo mktemp /boot/grub/.grub.cfg.dotfiles.XXXXXX)"; then
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "Could not create a temporary GRUB configuration"
+    exit 1
+fi
+if ! sudo grub-mkconfig -o "$grub_output_tmp"; then
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "GRUB configuration generation failed"
+    exit 1
+fi
+backup_system_file "$grub_output" || {
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    log_error "Failed to back up $grub_output"
+    exit 1
+}
+if ! sudo install -o root -g root -m 600 "$grub_output_tmp" "$grub_output"; then
+    sudo rm -f -- "$grub_output_tmp"
+    sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"
+    exit 1
+fi
+sudo rm -f -- "$grub_output_tmp"
+
+log_success "GRUB multiboot configuration is installed; no remote theme code was executed"

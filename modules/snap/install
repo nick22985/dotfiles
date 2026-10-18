@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Snap"
+
+if ! command_exists snap && [[ "$DRY_RUN" != "1" ]]; then
+    log_error "snap is unavailable after package installation"
+    exit 1
+fi
+apply_module_services snap || exit 1
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would ensure /snap points to /var/lib/snapd/snap"
+elif [[ ! -e /snap && ! -L /snap ]]; then
+    if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+        log_error "Creating /snap requires the top-level runner and its recovery receipt"
+        exit 1
+    fi
+    sudo ln -s /var/lib/snapd/snap /snap || exit 1
+    receipt_add_restore system 'sudo rm -f -- /snap'
+elif [[ "$(readlink -f /snap 2>/dev/null)" != /var/lib/snapd/snap ]]; then
+    log_error "/snap exists but does not point to /var/lib/snapd/snap"
+    exit 1
+fi
+
+log_success "Snap is configured"

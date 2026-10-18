@@ -1,0 +1,10 @@
+# expect arch: repo curl
+# expect arch: aur paru
+# expect ubuntu: apt curl
+# expect ubuntu: apt build-essential
+# expect windows: winget cURL.cURL
+# expect windows: msstore 9NBLGGH4NNS1
+package      arch       ubuntu            windows
+curl         =          =                 cURL.cURL
+paru         aur:paru   -                 -
+base-devel   -          build-essential   msstore:9NBLGGH4NNS1

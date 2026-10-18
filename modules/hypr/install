@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Hyprland"
+
+status=0
+install_module_packages hypr || status=1
+apply_module_services hypr || status=1
+
+# Open folders in Thunar (SUPER+E); otherwise xdg-open picks whichever app claims inode/directory.
+if [[ "$(xdg-mime query default inode/directory 2>/dev/null)" != "thunar.desktop" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would set Thunar as the default file manager"
+    else
+        xdg-mime default thunar.desktop inode/directory || status=1
+    fi
+fi
+
+((status == 0)) && log_success "Hyprland is configured"
+exit "$status"

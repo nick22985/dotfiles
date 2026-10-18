@@ -1,0 +1,7 @@
+# id|path below $HOME|ignore file in modules/syncthing, or - for none
+projects|projects|projects.stignore
+ssh|.ssh|ssh.stignore
+gnupg|.gnupg|gnupg.stignore
+age|.config/sops/age|-
+secrets|.secrets|-
+dbgate|.dbgate|dbgate.stignore

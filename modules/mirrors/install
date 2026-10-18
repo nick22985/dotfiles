@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Mirrors"
+
+install_module_packages mirrors || exit 1
+apply_module_system_files mirrors || exit 1
+apply_module_services mirrors || exit 1
+log_success "The mirror list refreshes weekly"

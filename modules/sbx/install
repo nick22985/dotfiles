@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+
+source "$DOTFILES_DIR/lib/utils.sh"
+
+parse_args "$@"
+
+set_context "sbx"
+
+log "Setting up sbx (sandboxed Docker dev environments)..."
+
+SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
+
+if [[ ! -f "$SBX_SRC/Cargo.toml" ]]; then
+    log_warn "sbx source not found at $SBX_SRC, skipping"
+    log_info "clone the repo (or add it to repos.txt) and re-run this script"
+    log_info "override the path with SBX_SRC=/path/to/sbx"
+    exit 0
+fi
+
+SYNC_SCRIPT="$DOTFILES_DIR/scripts/sync-sbx-flavors"
+if [[ -x "$SYNC_SCRIPT" ]]; then
+    log "→ Syncing flavor definitions from $SBX_SRC..."
+    sync_args=()
+    [[ $DRY_RUN == "1" ]] && sync_args+=(--dry-run)
+    if ! SBX_SRC="$SBX_SRC" "$SYNC_SCRIPT" "${sync_args[@]}"; then
+        log_warn "flavor sync failed; continuing with build"
+    fi
+else
+    log_warn "$SYNC_SCRIPT not found or not executable; skipping flavor sync"
+fi
+
+install_cargo_binary sbx "$SBX_SRC" || exit 1

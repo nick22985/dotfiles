@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Compatibility entry point for deploying user dotfiles.
-# Privileged files are handled separately by runs/system-files.
+# Privileged files are handled separately by modules/*/files.*.list.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
 
-exec "$script_dir/runs/dotfiles" "$@"
+exec "$script_dir/modules/dotfiles/install" "$@"

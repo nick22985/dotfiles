@@ -4,11 +4,11 @@
 # Source this file in other scripts: source "$DOTFILES_DIR/lib/utils.sh"
 
 caller_script="$(realpath -m -- "${BASH_SOURCE[1]:-}")"
-if [[ "$caller_script" == "${DOTFILES_DIR:?DOTFILES_DIR must be set}"/runs/* ]]; then
+if [[ "$caller_script" == "${DOTFILES_DIR:?DOTFILES_DIR must be set}"/modules/*/install ]]; then
     if [[ "${DOTFILES_RUNNER_ACTIVE:-0}" != "1" \
         || "${DOTFILES_RUNNER_PID:-}" != "$PPID" \
         || -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-        printf 'Internal stage scripts must be executed through ./run apply.\n' >&2
+        printf 'Internal module scripts must be executed through ./run apply.\n' >&2
         exit 2
     fi
 fi
@@ -210,6 +210,19 @@ command_exists() {
 # Build a Rust binary from a local checkout and install it to ~/.local/bin,
 # recording a restore step in the run receipt when it replaces a file.
 # Usage: install_cargo_binary <name> <source dir>
+# Records the commands that undo one change, for restore-user.sh or restore-system.sh in the run
+# receipt. The restore scripts run records newest first, so a path changed twice in one run is
+# put back as it was before the run.
+receipt_add_restore() {
+    local kind="$1" dir count
+    shift
+    [[ -n "${DOTFILES_RECEIPT_DIR:-}" ]] || return 0
+    dir="$DOTFILES_RECEIPT_DIR/restore.d/$kind"
+    mkdir -p "$dir" || return 1
+    count="$(find "$dir" -mindepth 1 -maxdepth 1 -type f | wc -l)"
+    printf '%s\n' "$@" > "$(printf '%s/%06d.sh' "$dir" "$count")"
+}
+
 install_cargo_binary() {
     local name="$1" src="$2"
     local dest="$HOME/.local/bin/$name"
@@ -225,7 +238,7 @@ install_cargo_binary() {
     command_exists mise && cargo_cmd=(mise exec -- cargo)
     if ! "${cargo_cmd[@]}" --version >/dev/null 2>&1; then
         log_error "cargo not found — install Rust before this script runs"
-        log_info "add rust to profiles/tools/development.list and run the mise stage"
+        log_info "add rust to profiles/development/tools.list and run the mise module"
         return 1
     fi
 
@@ -254,13 +267,11 @@ install_cargo_binary() {
         local backup="$DOTFILES_RECEIPT_DIR/backups/user/.local/bin/$name"
         mkdir -p "$(dirname "$backup")"
         mv -- "$dest" "$backup" || return 1
-        printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q\n' \
-            "$dest" "$(dirname "$dest")" "$backup" "$dest" \
-            >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+        receipt_add_restore user "$(printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q' \
+            "$dest" "$(dirname "$dest")" "$backup" "$dest")"
     else
-        printf 'rm -f -- %q\n' "$dest" >> "$DOTFILES_RECEIPT_DIR/restore-user.sh"
+        receipt_add_restore user "$(printf 'rm -f -- %q' "$dest")"
     fi
-    chmod 700 "$DOTFILES_RECEIPT_DIR/restore-user.sh"
     install -m 755 "$src/target/release/$name" "$dest" || return 1
     log_success "$name installed to $dest"
 }
@@ -626,22 +637,19 @@ install_packages_aur() {
     return "$status"
 }
 
-install_stage_packages() {
-    local stage="$1"
-    local manifest="${DOTFILES_STAGE_PACKAGE_DIR:?Platform backend is not active}/$stage.list"
-
-    platform_install_package_manifest "$manifest"
+install_module_packages() {
+    install_package_list "$DOTFILES_DIR/modules/$1"
 }
 
-apply_stage_services() {
+apply_module_services() {
     platform_apply_service_manifest "$1"
 }
 
-apply_stage_groups() {
+apply_module_groups() {
     platform_apply_group_manifest "$1"
 }
 
-apply_stage_system_files() {
+apply_module_system_files() {
     platform_apply_system_file_manifest "$1"
 }
 
@@ -900,9 +908,7 @@ setup_timeshift_btrfs() {
         log_error "Failed to write $config"
         return 1
     fi
-    if [[ -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-        printf 'sudo rm -f -- %q\n' "$config" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-    fi
+    receipt_add_restore system "$(printf 'sudo rm -f -- %q' "$config")"
 
     log_success "Configured Timeshift btrfs snapshots on $device"
 }
@@ -920,7 +926,7 @@ create_dotfiles_backup() {
     # Check if Timeshift is available and configured
     if ! check_timeshift_available && ! { setup_timeshift_btrfs && check_timeshift_available; }; then
         if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
-            log_error "A high-risk stage requires a configured Timeshift backup"
+            log_error "A high-risk module requires a configured Timeshift backup"
             return 1
         fi
         log_warn "Timeshift not available or not configured; continuing without a system backup"
@@ -951,7 +957,7 @@ create_dotfiles_backup() {
 
             if [[ "${REPLY:-}" =~ ^[Nn]$ ]]; then
                 if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
-                    log_error "A high-risk stage cannot continue without a backup"
+                    log_error "A high-risk module cannot continue without a backup"
                     pop_context
                     return 1
                 fi
@@ -1022,4 +1028,4 @@ export -f log log_error log_warn log_success log_info parse_args command_exists 
 export -f init_error_tracking cleanup_error_tracking set_context push_context pop_context get_context show_summary clear_tracking get_error_count get_warning_count
 export -f check_timeshift_available setup_timeshift_btrfs create_dotfiles_backup cleanup_backup_tracking cleanup_backup_tracking_if_owner
 export -f check_ssh_keys check_gpg_keys reload_hyprland reload_tmux
-export -f install_packages_pacman install_packages_aur install_packages_flatpak install_packages_snap install_stage_packages apply_stage_services apply_stage_groups apply_stage_system_files
+export -f install_packages_pacman install_packages_aur install_packages_flatpak install_packages_snap install_module_packages apply_module_services apply_module_groups apply_module_system_files

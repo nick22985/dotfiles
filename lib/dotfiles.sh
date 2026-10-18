@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-dotfile_bundle_dir="${DOTFILES_DIR:?DOTFILES_DIR must be set}/profiles/dotfiles"
+dotfile_profile_dir="${DOTFILES_DIR:?DOTFILES_DIR must be set}/profiles"
 dotfile_source_dir="${DOTFILES_ENV_DIR:-$DOTFILES_DIR/env}"
 
 dotfile_bundle_names() {
@@ -9,28 +9,21 @@ dotfile_bundle_names() {
     local -a profiles=(core)
 
     if [[ -n "${DOTFILES_ACTIVE_PROFILES:-}" ]]; then
-        read -r -a profiles <<< "$DOTFILES_ACTIVE_PROFILES"
+        read -r -a profiles <<< "$DOTFILES_ACTIVE_PROFILES ${DOTFILES_DESKTOP_PROFILES:-}"
     fi
     for profile in "${profiles[@]}"; do
-        [[ -f "$dotfile_bundle_dir/$profile.list" ]] || continue
+        [[ -f "$dotfile_profile_dir/$profile/dotfiles.list" ]] || continue
         [[ -n "${emitted[$profile]+set}" ]] && continue
         emitted["$profile"]=1
         printf '%s\n' "$profile"
     done
-    if [[ " ${profiles[*]} " == *" desktop "* ]]; then
-        case "${DOTFILES_DESKTOP:-hyprland}" in
-            hyprland) printf 'desktop-hyprland\n' ;;
-            plasma) printf 'desktop-plasma\n' ;;
-            both) printf 'desktop-hyprland\ndesktop-plasma\n' ;;
-        esac
-    fi
 }
 
 dotfile_manifest_paths() {
     local bundle manifest path
 
     while IFS= read -r bundle; do
-        manifest="$dotfile_bundle_dir/$bundle.list"
+        manifest="$dotfile_profile_dir/$bundle/dotfiles.list"
         while IFS= read -r path || [[ -n "$path" ]]; do
             path="${path%%#*}"
             path="${path#"${path%%[![:space:]]*}"}"
@@ -139,16 +132,12 @@ deploy_dotfile_bundles() {
             fi
             status=1
         elif [[ -n "$backup" ]]; then
-            printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q\n' \
-                "$target" "$(dirname "$target")" "$backup" "$target" \
-                >> "$receipt_dir/restore-user.sh"
-        elif [[ -n "$receipt_dir" ]]; then
-            printf 'rm -f -- %q\n' "$target" >> "$receipt_dir/restore-user.sh"
+            receipt_add_restore user "$(printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q' \
+                "$target" "$(dirname "$target")" "$backup" "$target")"
+        else
+            receipt_add_restore user "$(printf 'rm -f -- %q' "$target")"
         fi
     done < <(dotfile_deploy_paths | sort -u)
 
-    if [[ -n "$receipt_dir" && -f "$receipt_dir/restore-user.sh" ]]; then
-        chmod 700 "$receipt_dir/restore-user.sh"
-    fi
     return "$status"
 }

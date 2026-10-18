@@ -1,0 +1,13 @@
+package                  arch
+ttf-fira-code            =
+ttf-jetbrains-mono       =
+noto-fonts               =
+noto-fonts-emoji         =
+noto-fonts-cjk           =
+ttf-liberation           =
+ttf-dejavu               =
+ttf-opensans             =
+ttf-roboto               =
+ttf-jetbrains-mono-nerd  =
+ttf-meslo-nerd           =
+fontconfig               =

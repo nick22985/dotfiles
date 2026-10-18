@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Firewall"
+
+if ! command_exists ufw; then
+    log_error "ufw is unavailable after package installation"
+    exit 1
+fi
+
+# Rules go in before ufw is enabled so an SSH session running this module keeps its access.
+rules=(
+    "default deny incoming"
+    "default allow outgoing"
+)
+if [[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" ssh-server "* ]] \
+    || systemctl is-enabled --quiet sshd.service 2>/dev/null; then
+    rules+=("allow 22/tcp")
+fi
+if [[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" virtualization "* ]]; then
+    # libvirt's NAT network needs DHCP/DNS from the host and forwarding through virbr0.
+    rules+=("allow in on virbr0" "route allow in on virbr0" "route allow out on virbr0")
+fi
+if command_exists syncthing; then
+    # Syncthing sync (22000) and LAN discovery (21027/udp), from the profile ufw-syncthing ships.
+    rules+=("allow syncthing")
+fi
+if command_exists tailscale; then
+    rules+=("allow in on tailscale0")
+fi
+
+status=0
+for rule in "${rules[@]}"; do
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would run: ufw $rule"
+    else
+        read -r -a rule_args <<< "$rule"
+        sudo ufw "${rule_args[@]}" >/dev/null || {
+            log_error "Failed to apply firewall rule: $rule"
+            status=1
+        }
+    fi
+done
+((status == 0)) || exit 1
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would enable ufw"
+else
+    sudo ufw --force enable >/dev/null || exit 1
+fi
+apply_module_services firewall || exit 1
+log_success "Firewall is enabled"

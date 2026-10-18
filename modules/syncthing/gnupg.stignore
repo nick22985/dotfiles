@@ -1,0 +1,7 @@
+// Written to ~/.gnupg/.stignore by modules/syncthing. Only the per-key files sync: the public keyring
+// and trust database are live databases, so secrets-sync exchanges those through ~/.secrets/gnupg.
+!/private-keys-v1.d
+!/private-keys-v1.d/**
+!/openpgp-revocs.d
+!/openpgp-revocs.d/**
+*

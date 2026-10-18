@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 
+source "${DOTFILES_DIR:?DOTFILES_DIR must be set}/lib/platforms/common.sh"
+
 dotfiles_platform_activate() {
     export DOTFILES_PLATFORM="arch"
-    export DOTFILES_PACKAGE_DIR="$DOTFILES_DIR/profiles/packages/arch"
-    export DOTFILES_STAGE_PACKAGE_DIR="$DOTFILES_PACKAGE_DIR/stages"
-    export DOTFILES_SERVICE_DIR="$DOTFILES_DIR/profiles/services/arch"
-    export DOTFILES_GROUP_DIR="$DOTFILES_DIR/profiles/groups/arch"
-    export DOTFILES_SYSTEM_FILE_DIR="$DOTFILES_DIR/profiles/files/arch"
-    export DOTFILES_BOOTSTRAP_DIR="$DOTFILES_DIR/profiles/bootstrap/arch"
+    export DOTFILES_DEFAULT_PACKAGE_SOURCE="repo"
+    export DOTFILES_BOOTSTRAP_DIR="$DOTFILES_DIR/modules/packages"
 }
 
 platform_validate_package_source() {
@@ -159,10 +157,7 @@ platform_install_aur_helper() {
             log_error "Failed to remove rustup; run 'rustup default stable' or remove it manually"
             return 1
         fi
-        if [[ -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-            printf 'sudo pacman -S --needed --noconfirm rustup\n' >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-            chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-        fi
+        receipt_add_restore system 'sudo pacman -S --needed --noconfirm rustup'
     fi
     # pacman steps run through our sudo so the runner's cached credentials apply;
     # makepkg's own sudo calls prompt for the password again.
@@ -231,7 +226,7 @@ platform_enable_multilib() {
         log_error "Failed to back up $pacman_conf"
         return 1
     fi
-    printf 'sudo cp -a -- %q %q\n' "$backup" "$pacman_conf" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
+    receipt_add_restore system "$(printf 'sudo cp -a -- %q %q' "$backup" "$pacman_conf")" || return 1
 
     if ! sudo sed -i -E '/^#[[:space:]]*\[multilib\][[:space:]]*$/{s/^#[[:space:]]*//;n;s/^#[[:space:]]*(Include)/\1/}' "$pacman_conf"; then
         log_error "Failed to enable multilib in $pacman_conf"
@@ -349,175 +344,4 @@ platform_list_explicit_repo_packages() {
 
 platform_list_explicit_foreign_packages() {
     pacman -Qqem
-}
-
-platform_enable_service() {
-    local scope="$1"
-    local unit="$2"
-    local now="$3"
-    local -a args=()
-
-    [[ "$scope" == "user" ]] && args+=(--user)
-    args+=(enable)
-    [[ "$now" == "now" ]] && args+=(--now)
-    args+=(-- "$unit")
-
-    if [[ "$DRY_RUN" == "1" ]]; then
-        log_info "Would run: systemctl ${args[*]}"
-    elif [[ "$scope" == "system" ]]; then
-        sudo systemctl "${args[@]}"
-    else
-        systemctl "${args[@]}"
-    fi
-}
-
-platform_apply_service_manifest() {
-    local stage="$1"
-    local manifest="$DOTFILES_SERVICE_DIR/$stage.list"
-    local scope action requirement unit extra service_status
-    local status=0
-
-    [[ -f "$manifest" ]] || return 0
-    while read -r scope action requirement unit extra; do
-        [[ -n "${scope:-}" && "$scope" != \#* ]] || continue
-        if [[ -n "${extra:-}" || ! "$scope" =~ ^(system|user)$ \
-            || ! "$action" =~ ^(enable|enable-now|start|restart)$ \
-            || ! "$requirement" =~ ^(required|optional)$ \
-            || ! "${unit:-}" =~ ^[A-Za-z0-9@_.:-]+\.(service|socket|timer|path)$ ]]; then
-            log_error "Invalid service entry in $manifest"
-            status=1
-            continue
-        fi
-
-        service_status=0
-        case "$action" in
-            enable) platform_enable_service "$scope" "$unit" later || service_status=$? ;;
-            enable-now) platform_enable_service "$scope" "$unit" now || service_status=$? ;;
-            start)
-                if [[ "$DRY_RUN" == "1" ]]; then
-                    log_info "Would start $scope service $unit"
-                elif [[ "$scope" == "system" ]]; then
-                    sudo systemctl start -- "$unit" || service_status=$?
-                else
-                    systemctl --user start -- "$unit" || service_status=$?
-                fi
-                ;;
-            restart)
-                if [[ "$DRY_RUN" == "1" ]]; then
-                    log_info "Would restart $scope service $unit"
-                elif [[ "$scope" == "system" ]]; then
-                    sudo systemctl restart -- "$unit" || service_status=$?
-                else
-                    systemctl --user restart -- "$unit" || service_status=$?
-                fi
-                ;;
-        esac
-        if ((service_status != 0)); then
-            if [[ "$requirement" == "required" ]]; then
-                log_error "Failed to apply required service $unit"
-                status=1
-            else
-                log_warn "Could not apply optional service $unit"
-            fi
-        fi
-    done < "$manifest"
-    return "$status"
-}
-
-platform_add_user_to_group() {
-    local group="$1"
-
-    if id -nG "$USER" | tr ' ' '\n' | grep -Fxq -- "$group"; then
-        log_success "$USER already belongs to $group"
-    elif [[ "$DRY_RUN" == "1" ]]; then
-        log_info "Would add $USER to group $group"
-    else
-        sudo usermod -aG "$group" -- "$USER"
-    fi
-}
-
-platform_apply_group_manifest() {
-    local stage="$1"
-    local manifest="$DOTFILES_GROUP_DIR/$stage.list"
-    local requirement group extra
-    local status=0
-
-    [[ -f "$manifest" ]] || return 0
-    while read -r requirement group extra; do
-        [[ -n "${requirement:-}" && "$requirement" != \#* ]] || continue
-        if [[ -n "${extra:-}" || ! "$requirement" =~ ^(required|optional)$ \
-            || ! "${group:-}" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-            log_error "Invalid group entry in $manifest"
-            status=1
-            continue
-        fi
-        if ! platform_add_user_to_group "$group"; then
-            if [[ "$requirement" == "required" ]]; then
-                log_error "Failed to add $USER to required group $group"
-                status=1
-            else
-                log_warn "Could not add $USER to optional group $group"
-            fi
-        fi
-    done < "$manifest"
-    return "$status"
-}
-
-platform_apply_system_file_manifest() {
-    local stage="$1"
-    local manifest="$DOTFILES_SYSTEM_FILE_DIR/$stage.list"
-    local mode source_path target extra source source_real target_real backup
-    local status=0
-
-    [[ -f "$manifest" ]] || return 0
-    if [[ "$DRY_RUN" != "1" && -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-        log_error "System file installation requires the top-level runner and its recovery receipt"
-        return 1
-    fi
-    while read -r mode source_path target extra; do
-        [[ -n "${mode:-}" && "$mode" != \#* ]] || continue
-        source="$DOTFILES_DIR/$source_path"
-        source_real="$(realpath -m -- "$source")"
-        target_real="$(realpath -m -- "$target")"
-        if [[ -n "${extra:-}" || ! "$mode" =~ ^0?[0-7]{3}$ \
-            || "$source_real" != "$DOTFILES_DIR"/* \
-            || ! -f "$source" \
-            || ( "$target_real" != /etc/* && "$target_real" != /usr/local/* ) ]]; then
-            log_error "Invalid system file entry in $manifest"
-            status=1
-            continue
-        fi
-
-        if [[ -f "$target" ]] && cmp -s "$source" "$target" \
-            && [[ "$(stat -c %a "$target")" == "${mode#0}" ]]; then
-            log_success "$target is current"
-            continue
-        fi
-        if [[ "$DRY_RUN" == "1" ]]; then
-            log_info "Would install $source as $target with mode $mode"
-            continue
-        fi
-
-        if [[ -e "$target" && -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-            backup="$DOTFILES_RECEIPT_DIR/backups/system$target"
-            mkdir -p "$(dirname "$backup")"
-            if ! sudo cp -a -- "$target" "$backup"; then
-                log_error "Failed to back up $target"
-                status=1
-                continue
-            fi
-            printf 'sudo cp -a -- %q %q\n' \
-                "$backup" "$target" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-            chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-        elif [[ ! -e "$target" && -n "${DOTFILES_RECEIPT_DIR:-}" ]]; then
-            printf 'sudo rm -f -- %q\n' "$target" >> "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-            chmod 700 "$DOTFILES_RECEIPT_DIR/restore-system.sh"
-        fi
-
-        if ! sudo install -D -o root -g root -m "$mode" "$source" "$target"; then
-            log_error "Failed to install $target"
-            status=1
-        fi
-    done < "$manifest"
-    return "$status"
 }

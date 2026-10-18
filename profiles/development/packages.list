@@ -1,0 +1,17 @@
+package                  arch                    windows
+docker                   =                       -
+docker-compose           =                       -
+docker-buildx            =                       -
+ansible                  =                       -
+mise                     =                       jdx.mise
+go                       =                       -
+github-cli               =                       -
+lazygit                  =                       -
+lazydocker               =                       -
+act                      =                       -
+webkit2gtk-4.1           =                       -
+libayatana-appindicator  =                       -
+clang                    =                       -
+syncthing                =                       -
+vineflower               aur:vineflower          -
+infisical-bin            aur:infisical-bin       -

@@ -1,0 +1,6 @@
+# A malformed cell makes the table invalid on every platform, not only the one it is in.
+# expect arch: invalid
+# expect ubuntu: invalid
+# expect windows: invalid
+package   arch   ubuntu   windows
+git       =      =        bad!cell

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Private files"
+
+# Files under the private repository's home/ are copied, not linked, to the same path below $HOME.
+private_home="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/home"
+
+if [[ ! -d "$private_home" ]]; then
+    log_warn "Private home files are unavailable: $private_home (run: git submodule update --init)"
+    exit 0
+fi
+
+if [[ "$DRY_RUN" != "1" && -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+    log_error "Copying private files requires the top-level runner and its recovery receipt"
+    exit 1
+fi
+
+status=0
+while IFS= read -r -d '' source; do
+    relative="${source#"$private_home"/}"
+    target="$HOME/$relative"
+    if [[ -f "$target" && ! -L "$target" ]] && cmp -s -- "$source" "$target"; then
+        continue
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would copy $source to $target"
+        continue
+    fi
+    if [[ -e "$target" || -L "$target" ]]; then
+        backup="$DOTFILES_RECEIPT_DIR/backups/user/$relative"
+        mkdir -p "$(dirname "$backup")"
+        if ! mv -- "$target" "$backup"; then
+            log_error "Failed to back up $target"
+            status=1
+            continue
+        fi
+        receipt_add_restore user "$(printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q' \
+            "$target" "$(dirname "$target")" "$backup" "$target")"
+    else
+        receipt_add_restore user "$(printf 'rm -f -- %q' "$target")"
+    fi
+    mkdir -p "$(dirname "$target")"
+    if cp -p -- "$source" "$target"; then
+        log_success "Copied $relative"
+    else
+        log_error "Failed to copy $relative"
+        status=1
+    fi
+done < <(find "$private_home" -type f -print0)
+
+((status == 0)) && log_success "Private files are current"
+exit "$status"

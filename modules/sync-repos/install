@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Repository sync"
+
+repos_file="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/repos.txt"
+orgs_file="$DOTFILES_DIR/env/.config/.nickInstall/install/configs/private/orgs.txt"
+clone_root="$(realpath -m -- "${REPOS_CLONE_DIR:-$HOME/repos}")"
+projects_root="$(realpath -m -- "${REPOS_PROJECTS_DIR:-$HOME/projects}")"
+home_root="$(realpath -m -- "$HOME")"
+
+if [[ "$clone_root" != "$home_root"/* || "$projects_root" != "$home_root"/* ]]; then
+    log_error "Repository roots must stay below $home_root"
+    exit 1
+fi
+if [[ ! -f "$repos_file" ]]; then
+    log_error "Repository manifest is unavailable: $repos_file"
+    exit 1
+fi
+
+agent_dir=""
+syncthing_paused=0
+regenerate_ignores=0
+cleanup() {
+    if [[ -n "$agent_dir" ]]; then
+        ssh-agent -k >/dev/null 2>&1
+        rm -f -- "$agent_dir/agent.sock"
+        rmdir -- "$agent_dir"
+    fi
+    if ((syncthing_paused == 1 || regenerate_ignores == 1)); then
+        "$DOTFILES_DIR/env/.local/bin/projects-stignore" || log_error "Could not update ~/projects/.stignore"
+    fi
+    if ((syncthing_paused == 1)); then
+        syncthing cli config folders projects paused set false \
+            || log_error "Could not resume the Syncthing projects folder (run: syncthing cli config folders projects paused set false)"
+    fi
+}
+trap cleanup EXIT
+
+# New clones and conversions show up in ~/projects before their bare-layout ignore patterns exist.
+# Pause the Syncthing projects folder until projects-stignore has added them, so their git
+# internals are never shared. A folder that is already paused is left as it is.
+pause_syncthing() {
+    regenerate_ignores=1
+    ((syncthing_paused == 0)) && command_exists syncthing || return 0
+    [[ "$(syncthing cli config folders projects paused get 2>/dev/null)" == "false" ]] || return 0
+    syncthing cli config folders projects paused set true && syncthing_paused=1
+}
+
+# Load the SSH key once so each clone doesn't prompt for its passphrase again.
+ssh_agent_ready=0
+ensure_ssh_agent() {
+    ((ssh_agent_ready == 0)) || return 0
+    ssh_agent_ready=1
+    local agent_status=0
+    ssh-add -l >/dev/null 2>&1 || agent_status=$?
+    ((agent_status != 0)) || return 0
+    # Exit status 2 means no agent is reachable; start one for this module only.
+    if ((agent_status == 2)); then
+        # Use a private socket dir: OpenSSH 10.1+ defaults to ~/.ssh/agent, which may be unwritable.
+        agent_dir="$(mktemp -d)" || return 0
+        if ! eval "$(ssh-agent -s -a "$agent_dir/agent.sock")" >/dev/null; then
+            rmdir -- "$agent_dir"
+            agent_dir=""
+            return 0
+        fi
+    fi
+    if ! ssh-add; then
+        # The clones run in parallel: passphrase prompts from all of them at once fight over the
+        # terminal and can leave it in raw mode, so they fail instead of prompting.
+        log_warn "Could not load an SSH key into the agent; clones that need it will fail"
+        export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" GIT_TERMINAL_PROMPT=0
+    fi
+}
+
+declared_repos=()
+while read -r url; do
+    case "$url" in
+        git@github.com:*) url="${url#git@github.com:}" ;;
+        https://github.com/*) url="${url#https://github.com/}" ;;
+        *) continue ;;
+    esac
+    declared_repos+=("${url%.git}")
+done < <(
+    git -C "$DOTFILES_DIR" remote get-url origin 2>/dev/null
+    git config -f "$DOTFILES_DIR/.gitmodules" --get-regexp '\.url$' 2>/dev/null | cut -d' ' -f2
+)
+
+status=0
+processed=0
+cloned=0
+skipped=0
+repo_jobs=()
+org_jobs=()
+while read -r repo_spec target option extra; do
+    [[ -n "${repo_spec:-}" && "$repo_spec" != \#* ]] || continue
+    processed=$((processed + 1))
+    if [[ -n "${extra:-}" ]]; then
+        log_error "Invalid repository entry: $repo_spec ${target:-} ${option:-} ${extra:-}"
+        status=1
+        continue
+    fi
+    case "$repo_spec" in
+        git@github.com:*) repo_spec="${repo_spec#git@github.com:}" ;;
+        https://github.com/*) repo_spec="${repo_spec#https://github.com/}" ;;
+    esac
+    repo_spec="${repo_spec%.git}"
+    if [[ ! "$repo_spec" =~ ^[[:alnum:]_.-]+/[[:alnum:]_.-]+$ ]]; then
+        log_error "Only owner/repository or canonical github.com URLs are allowed"
+        status=1
+        continue
+    fi
+    declared_repos+=("$repo_spec")
+
+    bare=0
+    if [[ "${target:-}" == "--bare" ]]; then
+        bare=1
+        target=""
+    elif [[ -n "${option:-}" ]]; then
+        if [[ "$option" == "--bare" ]]; then
+            bare=1
+        else
+            log_error "Unknown repository option: $option"
+            status=1
+            continue
+        fi
+    fi
+
+    repo_name="${repo_spec#*/}"
+    repo_name="${repo_name%.git}"
+    if [[ -z "${target:-}" ]]; then
+        destination="$(realpath -m -- "$clone_root/$repo_name")"
+    elif [[ "$target" == "~/"* ]]; then
+        destination="$(realpath -m -- "${target/#\~/$HOME}")"
+    elif [[ "$target" == /* || "$target" == *'$'* || "$target" == *'`'* ]]; then
+        log_error "Repository targets cannot be absolute or shell-expanded: $target"
+        status=1
+        continue
+    else
+        destination="$(realpath -m -- "$clone_root/$target")"
+    fi
+    if [[ "$destination" != "$clone_root"/* && "$destination" != "$projects_root"/* ]]; then
+        log_error "Repository target is outside managed roots: $destination"
+        status=1
+        continue
+    fi
+
+    if git -C "$destination" rev-parse --git-dir >/dev/null 2>&1; then
+        # A normal checkout declared --bare moves to the flat bare layout; its files are kept.
+        if ((bare == 1)) && [[ -d "$destination/.git" && ! -L "$destination/.git" ]]; then
+            if [[ "$DRY_RUN" == "1" ]]; then
+                log_info "Would convert $destination to the bare layout"
+            elif pause_syncthing; "$DOTFILES_DIR/scripts/convert-to-bare.sh" "$destination"; then
+                log "Converted $destination to the bare layout"
+            else
+                log_error "Could not convert $destination to the bare layout"
+                status=1
+            fi
+        fi
+        skipped=$((skipped + 1))
+        continue
+    fi
+    # Syncthing shares working trees without .git (modules/syncthing), so a repository cloned on
+    # another machine can arrive as a plain directory; clone_repo adopts it in place.
+    if [[ -L "$destination" ]] || { [[ -e "$destination" ]] && { ((bare == 1)) || [[ ! -d "$destination" ]]; }; }; then
+        log_error "Repository target exists but is not a Git repository: $destination"
+        status=1
+        continue
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        bare_text=""
+        ((bare == 0)) || bare_text=" as bare"
+        log_info "Would clone $repo_spec to $destination$bare_text"
+        cloned=$((cloned + 1))
+        continue
+    fi
+
+    repo_jobs+=("$repo_spec|$destination|$bare")
+done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$repos_file")
+
+# Clone or update every repository in each declared GitHub organization.
+if [[ -f "$orgs_file" ]]; then
+    gh_ready=0
+    if ! command_exists gh; then
+        log_warn "GitHub CLI is not installed; skipping organization sync"
+    elif gh auth token >/dev/null 2>&1; then
+        gh_ready=1
+    elif [[ "$DRY_RUN" == "0" && -t 0 ]]; then
+        log "→ Logging in to GitHub CLI for organization sync..."
+        gh_env=()
+        if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" ]]; then
+            log_info "Open https://github.com/login/device on another device and enter the code below"
+            gh_env=(GH_BROWSER=true)
+        fi
+        if env "${gh_env[@]}" gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web; then
+            gh_ready=1
+        fi
+    fi
+    if ((gh_ready == 0)) && command_exists gh; then
+        log_warn "GitHub CLI is not authenticated; skipping organization sync (run: gh auth login)"
+    fi
+    while read -r org target options; do
+        [[ -n "${org:-}" && "$org" != \#* ]] || continue
+        if [[ ! "$org" =~ ^[[:alnum:]_.-]+$ || "${target:-}" != "~/"* ]]; then
+            log_error "Invalid organization entry: $org ${target:-} ${options:-}"
+            status=1
+            continue
+        fi
+        destination="$(realpath -m -- "${target/#\~/$HOME}")"
+        if [[ "$destination" != "$clone_root"/* && "$destination" != "$projects_root"/* ]]; then
+            log_error "Organization target is outside managed roots: $destination"
+            status=1
+            continue
+        fi
+        read -r -a options_list <<< "${options:-}"
+        org_args=()
+        excludes=()
+        valid=1
+        for ((i = 0; i < ${#options_list[@]}; i++)); do
+            case "${options_list[i]}" in
+                --bare) org_args+=(--bare) ;;
+                -j)
+                    [[ "${options_list[i + 1]:-}" =~ ^[0-9]+$ ]] || valid=0
+                    org_args+=(-j "${options_list[i + 1]:-}")
+                    i=$((i + 1))
+                    ;;
+                -e)
+                    [[ "${options_list[i + 1]:-}" =~ ^[[:alnum:]_.,/-]+$ ]] || valid=0
+                    excludes+=("${options_list[i + 1]:-}")
+                    i=$((i + 1))
+                    ;;
+                *) valid=0 ;;
+            esac
+        done
+        if ((valid == 0)); then
+            log_error "Unknown organization options for $org: $options"
+            status=1
+            continue
+        fi
+        for repo in "${declared_repos[@]}"; do
+            owner="${repo%%/*}"
+            [[ "${owner,,}" == "${org,,}" ]] || continue
+            excludes+=("$repo")
+        done
+        if ((${#excludes[@]} > 0)); then
+            org_args+=(-e "$(IFS=,; printf '%s' "${excludes[*]}")")
+        fi
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Would sync organization $org to $destination ${org_args[*]}"
+            continue
+        fi
+        ((gh_ready == 1)) || continue
+        org_jobs+=("$org|$destination|${org_args[*]}")
+    done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$orgs_file")
+else
+    log_warn "Organization manifest is unavailable: $orgs_file (run: git submodule update --init)"
+fi
+
+clone_repo() {
+    local repo_spec="$1" destination="$2" bare="$3" parent clone_tmp
+    parent="$(dirname "$destination")"
+    mkdir -p "$parent" || return 1
+    clone_tmp="$(mktemp -d "$parent/.dotfiles-clone.XXXXXX")" || {
+        log_error "Could not create a clone directory below $parent"
+        return 1
+    }
+    local clone_args=(git clone --quiet)
+    ((bare == 0)) || clone_args+=(--bare)
+    if ((bare == 0)) && [[ -d "$destination" ]]; then
+        # Keep the synced files: take only .git from the clone and reset the index to HEAD.
+        if git clone --quiet --no-checkout "git@github.com:$repo_spec.git" "$clone_tmp" \
+            && mv -- "$clone_tmp/.git" "$destination/.git" && rmdir -- "$clone_tmp" \
+            && git -C "$destination" reset --quiet; then
+            log "Adopted $destination as a checkout of $repo_spec"
+            return 0
+        fi
+    elif "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
+        && mv -T -- "$clone_tmp" "$destination"; then
+        log "Cloned $repo_spec to $destination"
+        if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
+            git -C "$destination" submodule update --quiet --init --recursive || return 1
+        fi
+        return 0
+    fi
+    log_error "Failed to clone $repo_spec"
+    [[ "$clone_tmp" == "$parent"/.dotfiles-clone.* ]] && rm -rf -- "$clone_tmp"
+    return 1
+}
+
+sync_org() {
+    local org="$1" destination="$2" org_args
+    read -r -a org_args <<< "$3"
+    log "→ Syncing organization $org to $destination..."
+    # Prefix each line so the concurrent organization logs stay readable.
+    if ! "$DOTFILES_DIR/scripts/clone-org.sh" -d "$destination" "${org_args[@]}" "$org" 2>&1 | sed -u "s/^/[$org] /"; then
+        log_error "Failed to sync organization $org"
+        return 1
+    fi
+}
+
+if ((${#repo_jobs[@]} + ${#org_jobs[@]} > 0)); then
+    pause_syncthing
+    ensure_ssh_agent
+    pids=()
+    for job in "${repo_jobs[@]}"; do
+        IFS='|' read -r repo_spec destination bare <<< "$job"
+        clone_repo "$repo_spec" "$destination" "$bare" &
+        pids+=("$!")
+    done
+    repo_pid_count=${#pids[@]}
+    for job in "${org_jobs[@]}"; do
+        IFS='|' read -r org destination org_args <<< "$job"
+        sync_org "$org" "$destination" "$org_args" &
+        pids+=("$!")
+    done
+    for ((i = 0; i < ${#pids[@]}; i++)); do
+        if wait "${pids[i]}"; then
+            ((i >= repo_pid_count)) || cloned=$((cloned + 1))
+        else
+            status=1
+        fi
+    done
+fi
+log_info "Repositories: $processed declared, $cloned cloned, $skipped already present"
+((status == 0)) && log_success "Repository sync is complete"
+exit "$status"

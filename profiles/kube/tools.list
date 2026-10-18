@@ -1,0 +1,8 @@
+# tool version active|installed
+# The cluster runs k3s v1.33. kubectl supports one minor version either side of the API server,
+# and helm supports its client-go minor version and the three before it (helm 4.2 builds against 0.36).
+kubectl 1.33.13 active
+helm 4.2.4 active
+neovim 0.12.5 active
+starship 1.26.0 active
+fd 10.5.0 active

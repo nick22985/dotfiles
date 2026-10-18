@@ -1,0 +1,5 @@
+# expect arch: invalid
+# expect ubuntu: invalid
+# expect windows: invalid
+package   arch   windows
+git       =

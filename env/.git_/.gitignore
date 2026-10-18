@@ -16,3 +16,6 @@ mise.toml
 .claude/
 graphify-out/
 .sbx/
+
+# Syncthing partial downloads
+.syncthing.*.tmp

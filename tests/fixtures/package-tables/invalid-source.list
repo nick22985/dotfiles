@@ -1,0 +1,6 @@
+# Sources are checked by the platform that installs the cell.
+# expect arch: invalid
+# expect ubuntu: apt curl
+# expect windows: invalid
+package   arch       ubuntu   windows
+curl      apt:curl   =        choco:curl

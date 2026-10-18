@@ -1,7 +1,0 @@
-# source package
-repo grub
-repo os-prober
-repo timeshift
-repo btop
-repo nvtop
-aur timeshift-autosnap

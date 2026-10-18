@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Walker"
+
+install_module_packages walker || exit 1
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would generate the Elephant user service"
+elif ! elephant service enable; then
+    log_error "Failed to generate the Elephant user service"
+    exit 1
+fi
+apply_module_services walker || exit 1
+log_success "Walker is configured"

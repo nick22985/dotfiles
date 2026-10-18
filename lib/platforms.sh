@@ -3,6 +3,8 @@
 platform_detect() {
     if command -v pacman >/dev/null 2>&1; then
         printf 'arch\n'
+    elif command -v apt-get >/dev/null 2>&1 && [[ "$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")" == "ubuntu" ]]; then
+        printf 'ubuntu\n'
     else
         printf 'unsupported\n'
     fi

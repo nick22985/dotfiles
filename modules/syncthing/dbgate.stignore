@@ -1,0 +1,8 @@
+// Written to ~/.dbgate/.stignore by modules/syncthing. Connections (encrypted with .key, which syncs
+// with them), saved files, query history and settings sync; logs, result caches and this
+// machine's instance id stay local.
+/logs
+/jsl
+/run
+/cloud-instance.txt
+/promo-widget.json

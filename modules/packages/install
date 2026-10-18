@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Profile packages"
+
+package_profiles=(core)
+if [[ "${DOTFILES_PROFILE_MODE:-0}" == "1" ]]; then
+    read -r -a package_profiles <<< "${DOTFILES_ACTIVE_PROFILES:-core}"
+fi
+
+status=0
+for profile in "${package_profiles[@]}"; do
+    # A profile without package lists (one that only includes others) has nothing to install.
+    package_list_exists "$DOTFILES_DIR/profiles/$profile" || continue
+    log_info "Installing package profile: $profile"
+    install_package_list "$DOTFILES_DIR/profiles/$profile" || status=1
+done
+
+if ((status == 0)); then
+    log_success "Profile packages are installed"
+fi
+exit "$status"

@@ -1,0 +1,37 @@
+// Written to ~/projects/.stignore by modules/syncthing, which appends patterns for the bare-layout repositories it finds. The first matching pattern wins.
+// Working trees sync between machines; history, branches and the index move through git.
+.git
+.bare
+
+// sbx keeps per-machine runtime state in .sbx; only config.toml and Dockerfile travel. The
+// script ignores every other entry it finds there by name: a non-rooted "!" pattern would stop
+// Syncthing skipping ignored directories, so the watcher would walk (and fail on) .docker/db.
+(?d).sbx-worker-backups
+
+// Build output and dependency caches are rebuilt on each machine.
+(?d)node_modules
+(?d)target
+(?d).gradle
+(?d).venv
+(?d)__pycache__
+(?d).next
+(?d).turbo
+(?d).nuxt
+(?d).output
+(?d).svelte-kit
+(?d).cache
+(?d).direnv
+(?d).DS_Store
+(?d)test-results
+(?d).off-cache
+(?d).android-sdk
+(?d)example-repos
+// Staging copies left behind by interrupted modules/sync-repos clones.
+(?d).*_stage_[0-9]*
+
+// Log files (server logs grow to tens of GB) stay on the machine that wrote them.
+(?d)*.log
+(?d)*.log.gz
+
+// Database volumes of per-project docker compose setups, owned by the container's user.
+**/.docker/db

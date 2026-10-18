@@ -1,0 +1,4 @@
+package                arch
+power-profiles-daemon  =
+thermald               =
+fprintd                =

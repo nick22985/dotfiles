@@ -28,6 +28,8 @@ ports = [63343]
 
 gpg = true
 
+gh-login = true
+
 start = 'nvim "${@:-.}"'
 
 allow-bare-repo = true

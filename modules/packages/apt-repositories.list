@@ -1,0 +1,2 @@
+# name key-fingerprint key-url repository-url suite component
+mise 24853EC9F655CE80B48E6C3A8B81C9D17413A06D https://mise.jdx.dev/gpg-key.pub https://mise.jdx.dev/deb stable main

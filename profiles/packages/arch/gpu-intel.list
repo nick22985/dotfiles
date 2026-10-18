@@ -1,4 +1,0 @@
-# source package
-repo intel-media-driver
-repo vulkan-intel
-multilib lib32-vulkan-intel

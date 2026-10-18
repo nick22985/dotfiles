@@ -233,12 +233,15 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 
-SSH_AUTH_SOCK="$HOME/.ssh/ssh-agent.sock"
-export SSH_AUTH_SOCK
+# Keep an agent forwarded over SSH (ForwardAgent to the servers); otherwise use the local one.
+if [[ -z "${SSH_CONNECTION:-}" || ! -S "${SSH_AUTH_SOCK:-}" ]]; then
+  SSH_AUTH_SOCK="$HOME/.ssh/ssh-agent.sock"
+  export SSH_AUTH_SOCK
 
-if ! ssh-add -l >/dev/null 2>&1; then
-  rm -f "$SSH_AUTH_SOCK"
-  eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+  if ! ssh-add -l >/dev/null 2>&1; then
+    rm -f "$SSH_AUTH_SOCK"
+    eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+  fi
 fi
 
 if command -v mise >/dev/null 2>&1; then

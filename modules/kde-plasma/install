@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Plasma"
+
+status=0
+install_module_packages kde-plasma || status=1
+apply_module_services kde-plasma || status=1
+if [[ "$DRY_RUN" == "0" \
+    && ! -f /usr/share/xsessions/plasma.desktop \
+    && ! -f /usr/share/wayland-sessions/plasma.desktop \
+    && ! -f /usr/share/wayland-sessions/plasmawayland.desktop ]]; then
+    log_error "No Plasma session file was installed"
+    status=1
+fi
+((status == 0)) && log_success "Plasma is configured"
+exit "$status"

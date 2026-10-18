@@ -5,7 +5,9 @@
 # or `git stash apply stashes/kirito` away. A local branch that is only behind the other machine's
 # copy is fast-forwarded to it when that can't lose anything (see fast_forward), and worktree
 # folders that Syncthing brought over from the other machine are registered as worktrees here
-# (each machine publishes its worktree list in ~/projects/.git-peer-sync/<machine>.tsv).
+# (each machine publishes its worktree list in ~/projects/.git-peer-sync/<machine>.tsv). Normal
+# checkouts that only exist on the other machine get their repository created around the files
+# Syncthing delivered (the list is in ~/projects/.git-peer-sync/<machine>.repos).
 #
 #   git-peer-sync            fetch from every other machine (run by git-peer-sync.timer)
 #   git-peer-sync --serve    SSH forced command on the serving side: read-only git access
@@ -116,6 +118,34 @@ adopt_worktrees() {
     done < "$manifest_dir/$name.tsv"
 }
 
+# Create the repositories of normal checkouts that machine $1 (reached at $2) has and this machine
+# only has as files Syncthing delivered without .git. The repository is built outside ~/projects,
+# gets the other machine's branches and checks out its branch, then .git is moved into the folder
+# and the index is reset: the files stay as Syncthing left them. A repository without commits is
+# skipped until it has some.
+adopt_repositories() {
+    local name="$1" ssh_host="$2" relative branch folder staging
+    [[ -f "$manifest_dir/$name.repos" ]] || return 0
+    while IFS=$'\t' read -r relative branch; do
+        [[ "$relative" == projects/* && "$relative" != *..* && -n "$branch" ]] || continue
+        folder="$HOME/$relative"
+        [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" ]] || continue
+        git ls-remote --exit-code "$ssh_host:$relative" "refs/heads/$branch" >/dev/null 2>&1 || continue
+        staging="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/git-peer-sync.XXXXXX")" || continue
+        if git init --quiet --initial-branch="$branch" "$staging/repo" \
+            && git -C "$staging/repo" fetch --quiet --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "+refs/heads/*:refs/remotes/$name/*" \
+            && git -C "$staging/repo" update-ref "refs/heads/$branch" "refs/remotes/$name/$branch" \
+            && [[ ! -e "$folder/.git" ]] && mv -- "$staging/repo/.git" "$folder/.git" \
+            && git -C "$folder" reset --quiet; then
+            repositories+=("$folder")
+            echo "git-peer-sync: created repository $relative on $branch from $name"
+            rmdir -- "$staging/repo" "$staging"
+        else
+            echo "git-peer-sync: failed to create repository $relative from $name (partial copy left in $staging)" >&2
+        fi
+    done < "$manifest_dir/$name.repos"
+}
+
 status=0
 this_host="$(uname -n)"
 
@@ -134,6 +164,15 @@ done)"
 if [[ "$manifest" != "$(cat -- "$manifest_dir/$this_host.tsv" 2>/dev/null)" ]]; then
     mkdir -p "$manifest_dir" && printf '%s\n' "$manifest" > "$manifest_dir/$this_host.tsv"
 fi
+# Publish this machine's normal checkouts (repository, checked-out branch) the same way.
+repository_manifest="$(for repository in "${repositories[@]}"; do
+    [[ -d "$repository/.git" ]] || continue
+    branch="$(git -C "$repository" symbolic-ref -q --short HEAD)" || continue
+    printf '%s\t%s\n' "${repository#"$HOME"/}" "$branch"
+done)"
+if [[ "$repository_manifest" != "$(cat -- "$manifest_dir/$this_host.repos" 2>/dev/null)" ]]; then
+    mkdir -p "$manifest_dir" && printf '%s\n' "$repository_manifest" > "$manifest_dir/$this_host.repos"
+fi
 while read -r name _ ssh_host extra; do
     [[ -n "${name:-}" && "$name" != \#* && "$name" != "$this_host" && -n "${ssh_host:-}" && -z "${extra:-}" ]] || continue
     if ! ssh "${ssh_options[@]}" -O check "$ssh_host" 2>/dev/null && ! ssh "${ssh_options[@]}" -fN "$ssh_host" 2>/dev/null; then
@@ -141,6 +180,7 @@ while read -r name _ ssh_host extra; do
         continue
     fi
 
+    adopt_repositories "$name" "$ssh_host"
     fetched=0
     for repository in "${repositories[@]}"; do
         relative="${repository#"$HOME"/}"

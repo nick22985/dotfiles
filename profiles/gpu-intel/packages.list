@@ -1,0 +1,4 @@
+package             arch
+intel-media-driver  =
+vulkan-intel        =
+lib32-vulkan-intel  multilib:lib32-vulkan-intel

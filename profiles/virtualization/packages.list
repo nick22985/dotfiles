@@ -1,0 +1,12 @@
+package       arch
+dnsmasq       =
+edk2-ovmf     =
+libguestfs    =
+libvirt       =
+dmidecode     =
+qemu-full     =
+swtpm         =
+vde2          =
+virt-manager  =
+virt-viewer   =
+virtio-win    aur:virtio-win

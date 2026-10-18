@@ -1,0 +1,13 @@
+package                      arch
+calf                         =
+easyeffects                  =
+gst-plugin-pipewire          =
+lsp-plugins                  =
+mpc                          =
+mpd                          =
+obs-studio                   =
+pipewire-alsa                =
+tesseract                    =
+tesseract-data-eng           =
+easyeffects-bundy01-presets  aur:easyeffects-bundy01-presets
+music-presence-bin           aur:music-presence-bin

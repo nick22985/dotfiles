@@ -1,0 +1,5 @@
+package             arch
+nvidia-open         =
+nvidia-utils        =
+nvidia-prime        =
+lib32-nvidia-utils  multilib:lib32-nvidia-utils

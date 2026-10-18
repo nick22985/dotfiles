@@ -1,0 +1,5 @@
+# expect arch: invalid
+# expect ubuntu: invalid
+# expect windows: invalid
+package   windows   arch   windows
+git       Git.Git   =      Git.Git

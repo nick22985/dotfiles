@@ -1,5 +1,0 @@
-# source package
-repo jdk-openjdk
-repo openjdk-doc
-repo openjdk-src
-repo java-runtime-common

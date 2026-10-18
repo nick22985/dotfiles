@@ -1,0 +1,4 @@
+# A platform without a column installs nothing from the table.
+# expect arch: repo git
+package   arch
+git       =

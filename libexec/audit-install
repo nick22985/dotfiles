@@ -7,7 +7,7 @@ config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 ignore_file="$dotfiles_dir/.audit-install-ignore"
 export DOTFILES_DIR="$dotfiles_dir"
 source "$dotfiles_dir/lib/profiles.sh"
-source "$dotfiles_dir/lib/stages.sh"
+source "$dotfiles_dir/lib/modules.sh"
 source "$dotfiles_dir/lib/dotfiles.sh"
 
 audit_packages=0
@@ -30,7 +30,7 @@ With no section options, runs every audit. The command is read-only.
   --profile NAME  Audit an installer profile
   --desktop NAME  Use hyprland, plasma, or both; implies desktop
   --host NAME     Audit a saved host selection
-  --skip NAME     Exclude a stage from the selected profile
+  --skip NAME     Exclude a module from the selected profile
   --show-hidden   Include entries matched by .audit-install-ignore
   --check         Exit 1 when visible audit differences remain
   -h, --help      Show this help
@@ -82,41 +82,41 @@ profile_resolve
 platform_resolve
 
 for skipped in "${requested_skips[@]}"; do
-    stage_is_registered "$skipped" || {
-        printf 'Unknown stage in --skip: %s\n' "$skipped" >&2
+    module_is_registered "$skipped" || {
+        printf 'Unknown module in --skip: %s\n' "$skipped" >&2
         exit 2
     }
 done
 
 declare -A audit_selection=()
-audit_select_stage() {
+audit_select_module() {
     local wanted="$1" dependency
     if [[ "${audit_selection[$wanted]:-}" == selected ]]; then
         return 0
     fi
     if [[ "${audit_selection[$wanted]:-}" == visiting ]]; then
-        printf 'Dependency cycle contains stage: %s\n' "$wanted" >&2
+        printf 'Dependency cycle contains module: %s\n' "$wanted" >&2
         return 2
     fi
     if profile_skips_run "$wanted"; then
-        printf "Required stage '%s' was excluded with --skip.\n" "$wanted" >&2
+        printf "Required module '%s' was excluded with --skip.\n" "$wanted" >&2
         return 2
     fi
-    if ! stage_supports_platform "$wanted" "$DOTFILES_PLATFORM"; then
-        printf "Stage '%s' does not support platform '%s'.\n" "$wanted" "$DOTFILES_PLATFORM" >&2
+    if ! module_supports_platform "$wanted" "$DOTFILES_PLATFORM"; then
+        printf "Module '%s' does not support platform '%s'.\n" "$wanted" "$DOTFILES_PLATFORM" >&2
         return 2
     fi
     audit_selection["$wanted"]=visiting
     while IFS= read -r dependency; do
         [[ -n "$dependency" ]] || continue
-        audit_select_stage "$dependency" || return $?
-    done < <(stage_dependency_list "$wanted")
+        audit_select_module "$dependency" || return $?
+    done < <(module_dependency_list "$wanted")
     audit_selection["$wanted"]=selected
 }
 
-for stage in "${execution_order[@]}"; do
-    profile_includes_run "$stage" || continue
-    audit_select_stage "$stage" || exit $?
+for module in "${execution_order[@]}"; do
+    profile_includes_run "$module" || continue
+    audit_select_module "$module" || exit $?
 done
 
 if ((audit_packages == 0 && audit_config == 0 && audit_services == 0)); then
@@ -160,7 +160,7 @@ print_file() {
     fi
 }
 
-stage_selected() {
+module_selected() {
     [[ "${audit_selection[$1]:-}" == selected ]]
 }
 
@@ -202,31 +202,26 @@ load_ignored_package_groups() {
     sort -u -o "$ignored_group_packages" "$ignored_group_packages"
 }
 
-selected_package_manifests() {
-    local profile stage manifest
+selected_package_entries() {
+    local profile module
     for profile in "${resolved_profiles[@]}"; do
-        manifest="$DOTFILES_PACKAGE_DIR/$profile.list"
-        [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
+        package_list_entries "$dotfiles_dir/profiles/$profile" || touch "$audit_tmp/check-incomplete"
     done
-    for stage in "${execution_order[@]}"; do
-        stage_selected "$stage" || continue
-        manifest="$DOTFILES_STAGE_PACKAGE_DIR/$stage.list"
-        [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
+    for module in "${execution_order[@]}"; do
+        module_selected "$module" || continue
+        package_list_entries "$dotfiles_dir/modules/$module" || touch "$audit_tmp/check-incomplete"
     done
 }
 
 declared_packages() {
-    local manifest source package extra
-    while IFS= read -r manifest; do
-        while read -r source package extra; do
-            [[ -n "${source:-}" && "$source" != \#* ]] || continue
-            case "$source" in
-                repo|multilib|aur) printf '%s\n' "$package" ;;
-                group) pacman -Sgq "$package" 2>/dev/null \
-                    || touch "$audit_tmp/check-incomplete" ;;
-            esac
-        done < "$manifest"
-    done < <(selected_package_manifests)
+    local source package extra
+    while read -r source package extra; do
+        case "$source" in
+            repo|multilib|aur) printf '%s\n' "$package" ;;
+            group) pacman -Sgq "$package" 2>/dev/null \
+                || touch "$audit_tmp/check-incomplete" ;;
+        esac
+    done < <(selected_package_entries)
 }
 
 find_candidate_package_groups() {
@@ -272,7 +267,7 @@ audit_arch_packages() {
 
 audit_flatpaks() {
     heading "Flatpaks"
-    if ! stage_selected flatpak; then
+    if ! module_selected flatpak; then
         printf 'Flatpak is outside the selected profiles, skipping comparison.\n'
         return
     fi
@@ -282,7 +277,7 @@ audit_flatpaks() {
         return
     fi
     sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' \
-        "$dotfiles_dir/profiles/apps/desktop.flatpak" | sort -u > "$audit_tmp/declared-flatpaks"
+        "$dotfiles_dir/modules/flatpak/apps.list" | sort -u > "$audit_tmp/declared-flatpaks"
     flatpak list --user --app --columns=application | sort -u > "$audit_tmp/installed-flatpaks"
     comm -23 "$audit_tmp/installed-flatpaks" "$audit_tmp/declared-flatpaks" > "$audit_tmp/flatpak-extra.raw"
     comm -23 "$audit_tmp/declared-flatpaks" "$audit_tmp/installed-flatpaks" > "$audit_tmp/flatpak-missing.raw"
@@ -293,11 +288,11 @@ audit_flatpaks() {
 }
 
 audit_tools() {
-    local manifest="$dotfiles_dir/profiles/tools/development.list"
+    local manifest="$dotfiles_dir/profiles/development/tools.list"
     local tool version active extra listing
 
     heading "Managed tools"
-    if ! stage_selected node; then
+    if ! module_selected node; then
         printf 'Pinned development tools are outside the selected profiles, skipping comparison.\n'
         return
     fi
@@ -339,7 +334,7 @@ declared_config_roots() {
         remainder="${path#.config/}"
         printf '%s\n' "${remainder%%/*}"
     done < <(dotfile_manifest_paths)
-    if stage_selected node; then
+    if module_selected node; then
         printf 'mise\n'
     fi
 }
@@ -410,10 +405,10 @@ check_managed_path() {
 }
 
 selected_system_file_manifests() {
-    local stage manifest
-    for stage in "${execution_order[@]}"; do
-        stage_selected "$stage" || continue
-        manifest="$DOTFILES_SYSTEM_FILE_DIR/$stage.list"
+    local module manifest
+    for module in "${execution_order[@]}"; do
+        module_selected "$module" || continue
+        manifest="$(module_platform_list "$module" files)"
         [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
     done
 }
@@ -451,12 +446,12 @@ audit_user_and_system_files() {
                 if ! sudo -n true 2>/dev/null; then
                     printf '%s unreadable\n' "$target" >> "$audit_tmp/system-file-drift.raw"
                     checks_incomplete=1
-                elif ! sudo -n cmp -s "$dotfiles_dir/$source_path" "$target"; then
+                elif ! sudo -n cmp -s "$(dirname "$manifest")/$source_path" "$target"; then
                     printf '%s content-or-missing\n' "$target" >> "$audit_tmp/system-file-drift.raw"
                 elif [[ "$(stat -c %a "$target")" != "${mode#0}" ]]; then
                     printf '%s mode\n' "$target" >> "$audit_tmp/system-file-drift.raw"
                 fi
-            elif [[ ! -f "$target" ]] || ! cmp -s "$dotfiles_dir/$source_path" "$target"; then
+            elif [[ ! -f "$target" ]] || ! cmp -s "$(dirname "$manifest")/$source_path" "$target"; then
                 printf '%s content-or-missing\n' "$target" >> "$audit_tmp/system-file-drift.raw"
             elif [[ "$(stat -c %a "$target")" != "${mode#0}" ]]; then
                 printf '%s mode\n' "$target" >> "$audit_tmp/system-file-drift.raw"
@@ -468,10 +463,10 @@ audit_user_and_system_files() {
 }
 
 audit_defaults() {
-    local manifest="$dotfiles_dir/profiles/defaults/desktop.list"
+    local manifest="$dotfiles_dir/modules/defaults/defaults.list"
     local property value extra current
 
-    stage_selected defaults || return 0
+    module_selected defaults || return 0
     heading "Desktop defaults"
     if ! command -v xdg-settings >/dev/null 2>&1; then
         printf 'xdg-settings not found, skipping desktop default comparison.\n'
@@ -491,19 +486,19 @@ audit_defaults() {
 }
 
 selected_service_manifests() {
-    local stage manifest
-    for stage in "${execution_order[@]}"; do
-        stage_selected "$stage" || continue
-        manifest="$DOTFILES_SERVICE_DIR/$stage.list"
+    local module manifest
+    for module in "${execution_order[@]}"; do
+        module_selected "$module" || continue
+        manifest="$(module_platform_list "$module" services)"
         [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
     done
 }
 
 selected_group_manifests() {
-    local stage manifest
-    for stage in "${execution_order[@]}"; do
-        stage_selected "$stage" || continue
-        manifest="$DOTFILES_GROUP_DIR/$stage.list"
+    local module manifest
+    for module in "${execution_order[@]}"; do
+        module_selected "$module" || continue
+        manifest="$(module_platform_list "$module" groups)"
         [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
     done
 }

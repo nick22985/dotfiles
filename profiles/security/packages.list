@@ -1,0 +1,12 @@
+package                 arch
+clamav                  =
+cryfs                   =
+mkcert                  =
+nmap                    =
+tailscale               =
+tcpdump                 =
+ufw                     =
+wireshark-qt            =
+nordvpn-bin             aur:nordvpn-bin
+signalbackup-tools-git  aur:signalbackup-tools-git
+sirikali                aur:sirikali

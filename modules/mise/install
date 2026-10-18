@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "mise tools"
+
+# Each selected profile can pin its own tools in profiles/<profile>/tools.list.
+manifests=()
+read -r -a tool_profiles <<< "${DOTFILES_ACTIVE_PROFILES:-core}"
+for profile in "${tool_profiles[@]}"; do
+    [[ -f "$DOTFILES_DIR/profiles/$profile/tools.list" ]] && manifests+=("$DOTFILES_DIR/profiles/$profile/tools.list")
+done
+if ! command_exists mise && [[ "$DRY_RUN" != "1" ]]; then
+    log_error "mise is required; install the selected package profiles first"
+    exit 1
+fi
+if ((${#manifests[@]} == 0)); then
+    log_error "No tools.list in the selected profiles: ${tool_profiles[*]}"
+    exit 1
+fi
+
+status=0
+for manifest in "${manifests[@]}"; do
+    while read -r tool version active extra; do
+        [[ -n "${tool:-}" && "$tool" != \#* ]] || continue
+        if [[ -n "${extra:-}" || ! "$tool" =~ ^[a-z0-9_-]+$ \
+            || ! "$version" =~ ^[a-zA-Z0-9._+-]+$ || ! "$active" =~ ^(active|installed)$ ]]; then
+            log_error "Invalid tool entry in $manifest"
+            status=1
+            continue
+        fi
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Would install $tool@$version with mise ($active)"
+            continue
+        fi
+        mise install "$tool@$version" || { status=1; continue; }
+        if [[ "$active" == "active" ]]; then
+            mise use --global "$tool@$version" || status=1
+        fi
+    done < "$manifest"
+done
+
+((status == 0)) && log_success "Pinned mise tools are installed"
+exit "$status"

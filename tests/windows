@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Exercises run.ps1 with PowerShell 7 on Linux: OS=Windows_NT makes it behave as on Windows, fake
+# winget, mise and gpg commands record what would be installed, and a temporary HOME/LOCALAPPDATA
+# stand in for the user profile. Skips when pwsh is not installed.
+
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+pwsh_bin="${PWSH:-$(command -v pwsh || true)}"
+if [[ -z "$pwsh_bin" ]]; then
+    printf 'windows tests skipped: pwsh not found (set PWSH to its path)\n'
+    exit 0
+fi
+
+test_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-windows-test.XXXXXX")"
+trap 'rm -rf -- "$test_dir"' EXIT
+mkdir -p "$test_dir/bin" "$test_dir/home/.config" "$test_dir/local"
+
+# Git is "installed"; everything else is missing until it is installed.
+cat > "$test_dir/bin/winget" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$WINGET_LOG"
+case "$1" in
+    list) [[ "$3" == Git.Git ]] || grep -qxF "$3" "$WINGET_LOG.installed" 2>/dev/null ;;
+    install) printf '%s\n' "$3" >> "$WINGET_LOG.installed" ;;
+esac
+EOF
+# A tool is "installed" once mise install has run for it.
+cat > "$test_dir/bin/mise" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MISE_LOG"
+case "$1" in
+    where) grep -qxF "install $2" "$MISE_LOG" ;;
+esac
+EOF
+# Every signing key is present.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/gpg"
+chmod +x "$test_dir/bin/winget" "$test_dir/bin/mise" "$test_dir/bin/gpg"
+
+export PATH="$test_dir/bin:$PATH" OS=Windows_NT HOME="$test_dir/home" LOCALAPPDATA="$test_dir/local"
+export WINGET_LOG="$test_dir/winget.log" MISE_LOG="$test_dir/mise.log"
+
+fail() {
+    printf 'FAIL: %s\n' "$1" >&2
+    exit 1
+}
+
+runner() {
+    "$pwsh_bin" -NoProfile -File "$repo_dir/run.ps1" "$@"
+}
+
+expect_status() {
+    local expected="$1" status
+    shift
+    set +e
+    runner "$@" > "$test_dir/out" 2>&1
+    status=$?
+    set -e
+    [[ "$status" == "$expected" ]] || {
+        cat "$test_dir/out" >&2
+        fail "run.ps1 $* returned $status instead of $expected"
+    }
+}
+
+# The same fixtures tests/run checks the bash parser against.
+export REPO_DIR="$repo_dir"
+for table in "$repo_dir"/tests/fixtures/package-tables/*.list; do
+    expected="$(sed -n 's/^# expect windows: //p' "$table")"
+    actual="$(TABLE="$table" "$pwsh_bin" -NoProfile -Command '
+        . (Join-Path $env:REPO_DIR "lib/windows/common.ps1")
+        . (Join-Path $env:REPO_DIR "lib/windows/packages.ps1")
+        $errors = New-Object System.Collections.ArrayList
+        $entries = @(Resolve-PackageTable $env:TABLE $errors)
+        if ($errors.Count -gt 0) { "invalid"; exit }
+        foreach ($entry in $entries) { "$($entry.Source) $($entry.Package)" }
+    ')"
+    [[ "$actual" == "$expected" ]] \
+        || fail "$(basename "$table") on windows resolved to '$actual' instead of '$expected'"
+done
+
+expect_status 0 doctor
+expect_status 0 list
+grep -q '^  core ' "$test_dir/out" || fail "list does not offer core on Windows"
+if grep -q '^  full ' "$test_dir/out"; then
+    fail "list offers the Arch-only full profile on Windows"
+fi
+
+expect_status 0 plan --host windows
+grep -q 'packages' "$test_dir/out" || fail "plan does not run the packages module"
+grep -q 'dotfiles' "$test_dir/out" || fail "plan does not run the dotfiles module"
+grep -q '^  git ' "$test_dir/out" || fail "plan does not run the git module"
+if grep -q '^  mise ' "$test_dir/out"; then
+    fail "plan runs mise without a profile that pins tools"
+fi
+expect_status 0 plan --host windows --profile development
+grep -q '^  mise ' "$test_dir/out" || fail "the development profile does not run mise on Windows"
+if grep -q '^  docker ' "$test_dir/out"; then
+    fail "plan runs a module without a Windows version"
+fi
+expect_status 2 plan --host overlord
+expect_status 2 plan --host windows --desktop hyprland
+expect_status 0 plan --host windows --skip git
+grep -q '^Skipped: git$' "$test_dir/out" || fail "plan does not report a skipped module"
+expect_status 2 plan --host windows --skip packages
+expect_status 2 plan --host windows --skip not-a-module
+
+existing_config='existing user config'
+printf '%s\n' "$existing_config" > "$test_dir/home/.config/starship.toml"
+
+expect_status 0 audit --host windows
+expect_status 1 audit --host windows --check
+grep -q 'missing Neovim.Neovim' "$test_dir/out" || fail "audit does not report a missing package"
+grep -q 'starship.toml should link to env/.config/starship.toml but is a file' "$test_dir/out" \
+    || fail "audit does not report an unlinked dotfile"
+PATH=/usr/bin:/bin expect_status 2 audit --host windows --check
+expect_status 2 audit --host windows --dry
+
+expect_status 0 apply --host windows --dry
+[[ ! -L "$test_dir/home/.config/starship.toml" ]] || fail "dry apply linked a dotfile"
+if grep -q '^install' "$WINGET_LOG"; then
+    fail "dry apply installed a package"
+fi
+grep -q 'Would install Neovim.Neovim' "$test_dir/out" || fail "dry apply does not report missing packages"
+
+: > "$WINGET_LOG"
+expect_status 0 apply --host windows
+grep -q '^install --id Neovim.Neovim --exact --source winget' "$WINGET_LOG" \
+    || fail "apply did not install a missing package with winget"
+if grep -q '^install --id Git.Git ' "$WINGET_LOG"; then
+    fail "apply reinstalled a package that is already installed"
+fi
+[[ "$(readlink "$test_dir/home/.config/starship.toml")" == "$repo_dir/env/.config/starship.toml" ]] \
+    || fail "apply did not link starship.toml"
+[[ "$(readlink "$test_dir/local/nvim")" == "$repo_dir/env/.config/nvim" ]] \
+    || fail "apply did not link the Neovim config"
+[[ "$(readlink "$test_dir/home/.git_")" == "$repo_dir/env/.git_" ]] || fail "apply did not link .git_"
+grep -q '^install --id GnuPG.Gpg4win ' "$WINGET_LOG" || fail "apply did not install Gpg4win"
+[[ "$(git config --file "$test_dir/home/.gitconfig.local" gpg.program)" == "$test_dir/bin/gpg" ]] \
+    || fail "the git module did not point Git at gpg"
+expect_status 0 audit --host windows --check
+grep -q 'No audit differences found.' "$test_dir/out" || fail "audit reports differences after apply"
+
+receipt="$(find "$test_dir/local/dotfiles/runs" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+[[ "$(cat "$receipt/exit-status")" == 0 ]] || fail "receipt does not record success"
+backup="$(find "$receipt/backups/user" -name starship.toml -type f)"
+[[ "$(cat "$backup")" == "$existing_config" ]] || fail "the replaced config was not kept in the receipt"
+
+expect_status 0 apply --host windows
+grep -q 'starship.toml is linked' "$test_dir/out" || fail "a second apply is not idempotent"
+
+"$pwsh_bin" -NoProfile -File "$receipt/restore-user.ps1" || fail "restore script failed"
+[[ ! -L "$test_dir/home/.config/starship.toml" ]] || fail "restore left the starship link"
+[[ "$(cat "$test_dir/home/.config/starship.toml")" == "$existing_config" ]] \
+    || fail "restore did not put the original config back"
+[[ ! -e "$test_dir/local/nvim" ]] || fail "restore left the Neovim link"
+[[ ! -e "$test_dir/home/.gitconfig.local" ]] || fail "restore left the gpg.program setting"
+[[ -f "$repo_dir/env/.config/starship.toml" ]] || fail "restore removed the repository file"
+
+expect_status 0 apply --host windows --profile development
+grep -q '^install --id jdx.mise ' "$WINGET_LOG" || fail "apply did not install mise"
+grep -qx 'install node@24.20.0' "$MISE_LOG" || fail "apply did not install a pinned tool"
+grep -qx 'use --global node@24.20.0' "$MISE_LOG" || fail "apply did not activate an active tool"
+if grep -qx 'use --global node@22.22.3' "$MISE_LOG"; then
+    fail "apply activated a tool pinned as installed only"
+fi
+expect_status 0 audit --host windows --profile development --check
+
+set +e
+env -u DOTFILES_RUNNER_ACTIVE "$pwsh_bin" -NoProfile -File "$repo_dir/modules/packages/install.ps1" >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "a module script ran outside run.ps1"
+
+printf 'windows tests passed\n'

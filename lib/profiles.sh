@@ -5,58 +5,102 @@
 source "${DOTFILES_DIR:?DOTFILES_DIR must be set}/lib/platforms.sh"
 
 profile_dir="${DOTFILES_DIR:?DOTFILES_DIR must be set}/profiles"
-host_profile_dir="$profile_dir/hosts"
-default_profile_file="$profile_dir/default.conf"
+host_profile_dir="$DOTFILES_DIR/hosts"
+default_profile_file="$host_profile_dir/default.conf"
 profile_mode=0
 desktop_profile="hyprland"
 desktop_profile_explicit=0
-requested_platform="arch"
+requested_platform=""
 export DOTFILES_PROFILE_MODE=0
 export DOTFILES_ACTIVE_PROFILES=""
 export DOTFILES_DESKTOP="$desktop_profile"
+export DOTFILES_DESKTOP_PROFILES=""
 export DOTFILES_PLATFORM=""
-export DOTFILES_PACKAGE_DIR=""
 declare -a requested_profiles=()
 declare -a resolved_profiles=()
+declare -a resolved_desktop_profiles=()
 declare -a resolved_profile_runs=()
 declare -a requested_skips=()
 declare -A loaded_host_presets=()
+declare -A expanded_profiles=()
+
+# profiles/<name>/profile.conf holds "key value" lines: description, platforms (omitted for every
+# platform), include <profile>, module <module>, and for a desktop variant "desktop <selection>"
+# (picked by --desktop, not --profile).
+profile_conf_value() {
+    local profile="$1"
+    local wanted="$2"
+    local key value
+
+    while read -r key value; do
+        if [[ "$key" == "$wanted" ]]; then
+            printf '%s\n' "$value"
+        fi
+    done < "$profile_dir/$profile/profile.conf"
+}
+
+profile_supports_platform() {
+    local platforms
+    platforms="$(profile_conf_value "$1" platforms)"
+    [[ -z "$platforms" || " $platforms " == *" $2 "* ]]
+}
+
+profile_names() {
+    local conf
+    for conf in "$profile_dir"/*/profile.conf; do
+        [[ -f "$conf" ]] || continue
+        conf="${conf%/profile.conf}"
+        printf '%s\n' "${conf##*/}"
+    done
+}
+
+profile_is_selectable() {
+    [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ && -f "$profile_dir/$1/profile.conf" && -z "$(profile_conf_value "$1" desktop)" ]]
+}
+
+profile_selectable_names() {
+    local profile
+    while IFS= read -r profile; do
+        if profile_is_selectable "$profile"; then
+            printf '%s\n' "$profile"
+        fi
+    done < <(profile_names)
+}
+
+# Prints "profile selection" for each desktop variant.
+profile_desktop_variants() {
+    local profile selection
+    while IFS= read -r profile; do
+        selection="$(profile_conf_value "$profile" desktop)"
+        if [[ -n "$selection" ]]; then
+            printf '%s %s\n' "$profile" "$selection"
+        fi
+    done < <(profile_names)
+}
 
 profile_usage() {
-    cat <<'EOF'
-Profiles:
-  core         Base packages, shell, Git, tmux, and the SSH client
-  development  Java, JavaScript runtimes, repositories, sbx, and snd
-  desktop      Flatpaks, clipboard tools, and a desktop selection
-  system       Boot and multiboot configuration
-  virtualization  QEMU, libvirt, and VM tools
-  hardware     Device, SDR, GPU, and printing tools
-  security     Network and host security tools
-  media        Audio, recording, and media tools
-  ssh-server   SSH daemon configuration and remote access
-  gpu-amd      AMD graphics drivers and ROCm tools
-  gpu-intel    Intel graphics drivers and video acceleration
-  gpu-nvidia   NVIDIA graphics drivers and PRIME offload
-  laptop       Power profiles and thermal management
-  full         Every general workstation profile
+    local profile selection
+    local -a selections=()
 
-Desktop selections: hyprland, plasma, both
-EOF
+    printf 'Profiles:\n'
+    while IFS= read -r profile; do
+        printf '  %-14s %s\n' "$profile" "$(profile_conf_value "$profile" description)"
+    done < <(profile_selectable_names)
+    while read -r profile selection; do
+        selections+=("$selection")
+    done < <(profile_desktop_variants)
+    printf '\nDesktop selections: %s\n' "$(printf '%s, ' "${selections[@]}")both"
 }
 
 profile_add_request() {
     local profile="$1"
     local existing
 
-    case "$profile" in
-        core|development|desktop|system|virtualization|hardware|security|media|ssh-server|gpu-amd|gpu-intel|gpu-nvidia|laptop|full)
-            ;;
-        *)
-            printf 'Unknown profile: %s\n' "$profile" >&2
-            profile_usage >&2
-            return 2
-            ;;
-    esac
+    if ! profile_is_selectable "$profile"; then
+        printf 'Unknown profile: %s\n' "$profile" >&2
+        profile_usage >&2
+        return 2
+    fi
 
     profile_mode=1
     for existing in "${requested_profiles[@]}"; do
@@ -66,13 +110,13 @@ profile_add_request() {
 }
 
 profile_add_skip() {
-    local stage="$1"
+    local module="$1"
     local existing
 
     for existing in "${requested_skips[@]}"; do
-        [[ "$existing" == "$stage" ]] && return 0
+        [[ "$existing" == "$module" ]] && return 0
     done
-    requested_skips+=("$stage")
+    requested_skips+=("$module")
 }
 
 profile_load_selection_manifest() {
@@ -144,13 +188,19 @@ platform_resolve() {
     local detected_platform
 
     detected_platform="$(platform_detect)"
+    # A selection without a platform line is for whatever this machine is.
+    [[ -n "$requested_platform" ]] || requested_platform="$detected_platform"
 
-    if [[ "$requested_platform" != "arch" ]]; then
-        printf 'Unsupported platform in selection: %s\n' "$requested_platform" >&2
+    if [[ "$requested_platform" == "windows" ]]; then
+        printf 'Windows selections run through run.ps1, for example: powershell -ExecutionPolicy Bypass -File .\\run.ps1 plan --host windows\n' >&2
+        return 2
+    fi
+    if [[ "$requested_platform" != "arch" && "$requested_platform" != "ubuntu" ]]; then
+        printf 'Unsupported platform: %s\n' "$requested_platform" >&2
         return 2
     fi
     if [[ "$detected_platform" != "$requested_platform" ]]; then
-        printf 'This installer currently supports Arch Linux only; detected %s.\n' "$detected_platform" >&2
+        printf 'The selection is for %s, but this machine was detected as %s.\n' "$requested_platform" "$detected_platform" >&2
         return 2
     fi
 
@@ -158,16 +208,19 @@ platform_resolve() {
 }
 
 profile_set_desktop() {
-    case "$1" in
-        hyprland|plasma|both)
-            desktop_profile="$1"
-            ;;
-        *)
+    local profile selection
+
+    if [[ "$1" != "both" ]]; then
+        while read -r profile selection; do
+            [[ "$selection" == "$1" ]] && break
+        done < <(profile_desktop_variants)
+        if [[ "${selection:-}" != "$1" ]]; then
             printf 'Unknown desktop: %s\n' "$1" >&2
             profile_usage >&2
             return 2
-            ;;
-    esac
+        fi
+    fi
+    desktop_profile="$1"
 
     profile_mode=1
     desktop_profile_explicit=1
@@ -193,86 +246,76 @@ profile_add_resolved() {
     resolved_profiles+=("$profile")
 }
 
-profile_load_runs() {
+# Adds a profile's included profiles, its modules, then the profile itself; each is expanded once.
+profile_expand() {
     local profile="$1"
-    local manifest="$profile_dir/$profile.runs"
-    local line
+    local manifest="$profile_dir/$profile/profile.conf"
+    local key value extra existing
 
+    [[ -n "${expanded_profiles[$profile]+set}" ]] && return 0
+    expanded_profiles["$profile"]=1
     if [[ ! -f "$manifest" ]]; then
-        printf 'Profile manifest not found: %s\n' "$manifest" >&2
+        printf 'Profile not found: %s\n' "$manifest" >&2
         return 2
     fi
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%%#*}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        [[ -n "$line" ]] && profile_add_run "$line"
+    while read -r key value extra; do
+        [[ -n "${key:-}" && "$key" != \#* ]] || continue
+        case "$key" in
+            description|desktop|platforms) ;;
+            include) profile_expand "$value" || return $? ;;
+            module) profile_add_run "$value" ;;
+            *)
+                printf "Unknown key '%s' in %s\n" "$key" "$manifest" >&2
+                return 2
+                ;;
+        esac
     done < "$manifest"
+    profile_add_resolved "$profile"
 }
 
 profile_has_request() {
     local wanted="$1"
     local profile
 
-    for profile in "${requested_profiles[@]}"; do
-        [[ "$profile" == "$wanted" || "$profile" == "full" ]] && return 0
+    for profile in "${resolved_profiles[@]}"; do
+        [[ "$profile" == "$wanted" ]] && return 0
     done
     return 1
 }
 
 profile_resolve() {
-    local profile
+    local profile selection key value
 
     ((profile_mode == 1)) || return 0
-    if ((desktop_profile_explicit == 1)) && ! profile_has_request desktop; then
-        profile_add_request desktop
-    fi
     resolved_profiles=()
+    expanded_profiles=()
+    resolved_desktop_profiles=()
     resolved_profile_runs=()
 
-    profile_add_resolved core
-    profile_load_runs core
-
+    profile_expand core || return $?
     for profile in "${requested_profiles[@]}"; do
-        case "$profile" in
-            core)
-                ;;
-            full)
-                for profile in development desktop system virtualization hardware security media; do
-                    profile_add_resolved "$profile"
-                    profile_load_runs "$profile"
-                done
-                ;;
-            desktop)
-                profile_add_resolved desktop
-                profile_load_runs desktop
-                ;;
-            *)
-                profile_add_resolved "$profile"
-                profile_load_runs "$profile"
-                ;;
-        esac
+        profile_expand "$profile" || return $?
     done
+    if ((desktop_profile_explicit == 1)); then
+        profile_expand desktop || return $?
+    fi
 
     if profile_has_request desktop; then
-        case "$desktop_profile" in
-            hyprland)
-                profile_load_runs desktop-hyprland
-                ;;
-            plasma)
-                profile_load_runs desktop-plasma
-                ;;
-            both)
-                profile_load_runs desktop-hyprland
-                profile_load_runs desktop-plasma
-                ;;
-        esac
+        while read -r profile selection; do
+            [[ "$desktop_profile" == "both" || "$desktop_profile" == "$selection" ]] || continue
+            resolved_desktop_profiles+=("$profile")
+            while read -r key value; do
+                if [[ "$key" == "module" ]]; then
+                    profile_add_run "$value"
+                fi
+            done < "$profile_dir/$profile/profile.conf"
+        done < <(profile_desktop_variants)
     fi
 
     export DOTFILES_PROFILE_MODE=1
     export DOTFILES_ACTIVE_PROFILES="${resolved_profiles[*]}"
     export DOTFILES_DESKTOP="$desktop_profile"
+    export DOTFILES_DESKTOP_PROFILES="${resolved_desktop_profiles[*]}"
 }
 
 profile_includes_run() {

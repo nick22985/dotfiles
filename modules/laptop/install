@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Laptop"
+
+status=0
+apply_module_system_files laptop || status=1
+apply_module_services laptop || status=1
+((status == 0)) || exit 1
+# Capture first: grep -q exits on a match, and pipefail would count the writer's SIGPIPE as failure.
+if [[ "$DRY_RUN" != "1" ]] && ! grep -q '#' <<< "$(fprintd-list "$USER" 2>/dev/null)"; then
+    log_warn "No fingerprints enrolled; run 'fprintd-enroll' to use the reader for sudo and hyprlock"
+fi
+log_success "Power profiles, thermal management, and fingerprint sudo are enabled"

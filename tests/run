@@ -71,7 +71,7 @@ while IFS= read -r path; do
     fi
     mkdir -p "$(dirname "$target")"
     ln -s "$source" "$target"
-done < "$repo_dir/profiles/dotfiles/core.list"
+done < "$repo_dir/profiles/core/dotfiles.list"
 
 HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
     "$repo_dir/run" audit --profile core --config --check >/dev/null \
@@ -91,10 +91,10 @@ ln -s "$repo_dir/env/.bashrc" "$audit_home/.bashrc"
 "$repo_dir/run" doctor >/dev/null
 
 set +e
-bash "$repo_dir/runs/packages" --dry >/dev/null 2>&1
+bash "$repo_dir/modules/packages/install" --dry >/dev/null 2>&1
 status=$?
 set -e
-[[ "$status" == 2 ]] || fail "direct stage invocation returned $status instead of 2"
+[[ "$status" == 2 ]] || fail "direct module invocation returned $status instead of 2"
 
 deploy_home="$test_dir/deploy-home"
 mkdir -p "$deploy_home/.config/fish"
@@ -112,6 +112,17 @@ deploy_receipt="$(readlink -f "$XDG_STATE_HOME/dotfiles/latest")"
 "$deploy_receipt/restore-user.sh"
 [[ "$(< "$deploy_home/.config/fish/config.fish")" == before ]] \
     || fail "user restore script did not recover the original file"
+
+# A path changed twice in one run must end up as it was before the run, so records undo newest first.
+order_file="$test_dir/restore-order"
+printf 'original\n' > "$order_file"
+order_receipt="$test_dir/order-receipt"
+mkdir -p "$order_receipt/restore.d/user"
+cp -- "$deploy_receipt/restore-user.sh" "$order_receipt/"
+printf 'printf original > %q\n' "$order_file" > "$order_receipt/restore.d/user/000000.sh"
+printf 'printf intermediate > %q\n' "$order_file" > "$order_receipt/restore.d/user/000001.sh"
+"$order_receipt/restore-user.sh"
+[[ "$(< "$order_file")" == original ]] || fail "restore records did not run newest first"
 
 set +e
 "$repo_dir/run" --dry --profile core >/dev/null 2>&1
@@ -158,37 +169,67 @@ printf 'aur paru\naur example-package\n' > "$test_dir/aur-routing.list"
 [[ "$(< "$test_dir/aur-routing.output")" == $'helper\naur example-package' ]] \
     || fail "paru was routed through paru after bootstrap"
 
+# The fixtures are shared with tests/windows: every parser must resolve each table the way its
+# "# expect <platform>:" lines say, or reject it where they say invalid.
+for table in "$repo_dir"/tests/fixtures/package-tables/*.list; do
+    for platform in arch ubuntu; do
+        expected="$(sed -n "s/^# expect $platform: //p" "$table")"
+        if ! actual="$(
+            export DOTFILES_DIR="$repo_dir"
+            source "$repo_dir/lib/utils.sh"
+            platform_activate "$platform"
+            platform_resolve_package_table "$table" 2>/dev/null
+        )"; then
+            actual=invalid
+        fi
+        [[ "$actual" == "$expected" ]] \
+            || fail "$(basename "$table") on $platform resolved to '$actual' instead of '$expected'"
+    done
+done
+
+catalog_output="$($repo_dir/run list)"
+grep -q '^  kube  *ubuntu ' <<< "$catalog_output" || fail "run list omitted the kube profile's platform"
+grep -q '^  docker  *arch ' <<< "$catalog_output" || fail "run list omitted the docker module"
+show_output="$($repo_dir/run show docker)"
+grep -q '^Profiles: development$' <<< "$show_output" || fail "run show docker did not name its profile"
+grep -q 'docker.service' <<< "$show_output" || fail "run show docker omitted its service"
+set +e
+"$repo_dir/run" show no-such-thing >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" == 2 ]] || fail "run show of an unknown name returned $status instead of 2"
+
 walker_plan="$($repo_dir/run plan --profile desktop --desktop hyprland --script walker)"
 grep -q '^  hypr ' <<< "$walker_plan" || fail "Walker plan omitted its Hyprland dependency"
 grep -q '^  walker ' <<< "$walker_plan" || fail "Walker plan omitted Walker"
 
 ssh_plan="$($repo_dir/run plan --profile ssh-server --script ssh)"
 grep -Eq '^  ssh[[:space:]]+root[[:space:]]+high' <<< "$ssh_plan" \
-    || fail "SSH stage is not marked high risk"
+    || fail "SSH module is not marked high risk"
 
 set +e
-"$repo_dir/run" plan --profile core --script missing-stage >/dev/null 2>&1
+"$repo_dir/run" plan --profile core --script missing-module >/dev/null 2>&1
 status=$?
 set -e
-[[ "$status" == 2 ]] || fail "unknown stage returned $status instead of 2"
+[[ "$status" == 2 ]] || fail "unknown module returned $status instead of 2"
 
 set +e
 "$repo_dir/run" plan --profile desktop --desktop both --skip hypr >/dev/null 2>&1
 status=$?
 set -e
-[[ "$status" == 2 ]] || fail "broken stage dependency returned $status instead of 2"
+[[ "$status" == 2 ]] || fail "broken module dependency returned $status instead of 2"
 
 set +e
 TMPDIR="$test_dir/state" DOTFILES_ENV_DIR="$test_dir/empty-env" \
     "$repo_dir/run" apply --profile core --script dotfiles --dry >/dev/null 2>&1
 status=$?
 set -e
-[[ "$status" == 1 ]] || fail "failed stage returned $status instead of 1"
+[[ "$status" == 1 ]] || fail "failed module returned $status instead of 1"
 
 receipt_dir="$(readlink -f "$XDG_STATE_HOME/dotfiles/latest")"
 [[ -f "$receipt_dir/plan.txt" ]] || fail "run receipt omitted plan.txt"
 [[ -f "$receipt_dir/commit" ]] || fail "run receipt omitted commit"
-[[ -f "$receipt_dir/stages.tsv" ]] || fail "run receipt omitted stages.tsv"
+[[ -f "$receipt_dir/modules.tsv" ]] || fail "run receipt omitted modules.tsv"
 [[ "$(< "$receipt_dir/exit-status")" == 1 ]] || fail "failed receipt has wrong exit status"
 
 set +e
@@ -197,8 +238,8 @@ dependency_output="$(TMPDIR="$test_dir/state" DOTFILES_ENV_DIR="$test_dir/empty-
 status=$?
 set -e
 [[ "$status" == 1 ]] || fail "failed dependency run returned $status instead of 1"
-grep -q 'Skipping stage oh-my-zsh because dependency dotfiles failed' <<< "$dependency_output" \
-    || fail "dependent stage ran after dotfiles failed"
+grep -q 'Skipping module oh-my-zsh because dependency dotfiles failed' <<< "$dependency_output" \
+    || fail "dependent module ran after dotfiles failed"
 
 mkdir -p "$XDG_STATE_HOME/dotfiles"
 exec 8> "$XDG_STATE_HOME/dotfiles/apply.lock"
@@ -221,28 +262,31 @@ if ((EUID == 0)); then
     [[ "$status" == 2 ]] || fail "root apply returned $status instead of 2"
 fi
 
-if rg -q 'eval[[:space:]]+echo' "$repo_dir/runs/sync-repos"; then
+if rg -q 'eval[[:space:]]+echo' "$repo_dir/modules/sync-repos/install"; then
     fail "sync-repos still evaluates target paths"
 fi
-if rg -q 'setup_github_ssh_keys' "$repo_dir/runs/git"; then
-    fail "core Git stage still installs remote SSH keys"
+if rg -q 'setup_github_ssh_keys' "$repo_dir/modules/git/install"; then
+    fail "core Git module still installs remote SSH keys"
 fi
-if rg -q 'git[[:space:]]+pull' "$repo_dir/runs/git"; then
-    fail "core Git stage still updates the worktree"
+if rg -q 'git[[:space:]]+pull' "$repo_dir/modules/git/install"; then
+    fail "core Git module still updates the worktree"
 fi
-if rg -q 'sudo[[:space:]]+\./install\.sh' "$repo_dir/runs/grub-multiboot"; then
-    fail "GRUB stage still executes a downloaded root installer"
+if rg -q 'sudo[[:space:]]+\./install\.sh' "$repo_dir/modules/grub-multiboot/install"; then
+    fail "GRUB module still executes a downloaded root installer"
 fi
-[[ ! -e "$repo_dir/system/etc/pam.d/sddm" ]] \
+[[ ! -e "$repo_dir/modules/kde-plasma/system/etc/pam.d/sddm" ]] \
     || fail "repository still replaces the SDDM PAM file"
-[[ ! -e "$repo_dir/runs/system-files" ]] \
+[[ ! -e "$repo_dir/modules/system-files" ]] \
     || fail "generic privileged file traversal still exists"
-if rg -q 'curl .*\|.*(sh|bash)|wget .*\|.*(sh|bash)|sh -c .*curl' "$repo_dir/runs"; then
-    fail "a stage still pipes an unpinned remote installer into a shell"
+if rg -q 'curl .*\|.*(sh|bash)|wget .*\|.*(sh|bash)|sh -c .*curl' "$repo_dir/modules"; then
+    fail "a module still pipes an unpinned remote installer into a shell"
 fi
 
 if find "$test_dir/state" -mindepth 1 -maxdepth 1 -name 'dotfiles-run.*' -print -quit | grep -q .; then
     fail "runner left per-run state behind"
 fi
+
+# The Windows runner's tests; they skip themselves when pwsh is not installed.
+bash "$repo_dir/tests/windows" || fail "windows tests failed"
 
 printf 'run tests passed\n'

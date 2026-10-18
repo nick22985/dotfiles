@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "Fonts"
+
+install_module_packages fonts || exit 1
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would refresh the font cache"
+elif ! fc-cache -f; then
+    log_error "Failed to refresh the font cache"
+    exit 1
+fi
+log_success "Fonts are installed"

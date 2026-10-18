@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+source "$DOTFILES_DIR/lib/dotfiles.sh"
+parse_args "$@"
+set_context "User dotfiles"
+
+log_info "Deploying selected dotfile bundles: $(dotfile_bundle_names | tr '\n' ' ')"
+if ! deploy_dotfile_bundles; then
+    exit 1
+fi
+
+if [[ "$DRY_RUN" == "0" ]]; then
+    reload_hyprland
+    reload_tmux
+fi
+
+log_success "User dotfiles deployed"

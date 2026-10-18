@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "kubeconfig"
+
+# k3s writes its admin kubeconfig root-only, which only its bundled kubectl (through sudo) can read.
+# Copying it to ~/.kube/config lets the mise kubectl and helm reach the cluster as this user. k3s
+# renews the client certificate before it expires, so every apply refreshes the copy.
+k3s_config="/etc/rancher/k3s/k3s.yaml"
+target="$HOME/.kube/config"
+
+if ! sudo test -f "$k3s_config"; then
+    log_info "$k3s_config does not exist (not a k3s server); leaving $target alone"
+    exit 0
+fi
+if [[ -f "$target" ]] && sudo cmp -s -- "$k3s_config" "$target"; then
+    log_success "$target matches $k3s_config"
+    exit 0
+fi
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would copy $k3s_config to $target"
+    exit 0
+fi
+if [[ -z "${DOTFILES_RECEIPT_DIR:-}" ]]; then
+    log_error "Copying the kubeconfig requires the top-level runner and its recovery receipt"
+    exit 1
+fi
+
+mkdir -p -m 700 "$HOME/.kube"
+if [[ -e "$target" || -L "$target" ]]; then
+    backup="$DOTFILES_RECEIPT_DIR/backups/user/.kube/config"
+    mkdir -p "$(dirname "$backup")"
+    mv -- "$target" "$backup" || exit 1
+    receipt_add_restore user "$(printf 'rm -f -- %q\nmv -- %q %q' "$target" "$backup" "$target")"
+else
+    receipt_add_restore user "$(printf 'rm -f -- %q' "$target")"
+fi
+if ! sudo install -o "$(id -u)" -g "$(id -g)" -m 600 -- "$k3s_config" "$target"; then
+    log_error "Failed to copy $k3s_config to $target"
+    exit 1
+fi
+log_success "Copied $k3s_config to $target"

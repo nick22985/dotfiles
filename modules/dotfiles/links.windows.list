@@ -1,0 +1,10 @@
+# path below env/          target on Windows ("~" is the user profile, %VAR% is expanded)
+# A line applies when its path is part of a selected profile's dotfiles.list. Whatever is already at
+# the target is moved into the run receipt first.
+.config/nvim               %LOCALAPPDATA%/nvim
+.config/starship.toml      ~/.config/starship.toml
+.gitignore                 ~/.gitignore
+# .gitconfig signs every commit with GPG: the git module points Git at Gpg4win and warns while the
+# signing key is missing. Its commit template, hooks and excludes file live in .git_.
+.gitconfig                 ~/.gitconfig
+.git_                      ~/.git_

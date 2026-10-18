@@ -1,0 +1,7 @@
+package             arch
+grub                =
+os-prober           =
+timeshift           =
+btop                =
+nvtop               =
+timeshift-autosnap  aur:timeshift-autosnap

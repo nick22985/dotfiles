@@ -137,20 +137,36 @@ if ((listed == 0)); then
     log_info "echo '$(uname -n) $my_id <ssh-host>' >> $machines_file"
 fi
 
+folder_defaults="$(syncthing cli config defaults folder dump-json)" || exit 1
+default_settings=(fswatcher-enabled rescan-intervals max-conflicts auto-normalize puller-delays block-indexing
+    "min-disk-free value" "min-disk-free unit" "xattr-filter max-single-entry-size" "xattr-filter max-total-size")
+
 existing_folders="$(syncthing cli config folders list)"
 for folder in "${folders[@]}"; do
     IFS='|' read -r folder_id path _ <<< "$folder"
     if ! grep -Fxq -- "$folder_id" <<< "$existing_folders"; then
         mkdir -p -m 700 "$path"
         # Deleted and replaced files stay in .stversions for 30 days on the receiving machine.
-        folder_json="$(printf '{"id":"%s","label":"%s","path":"%s","type":"sendreceive","versioning":{"type":"trashcan","params":{"cleanoutDays":"30"}}}' \
-            "$folder_id" "$folder_id" "$path")"
-        if ! syncthing cli config folders add-json "$folder_json"; then
+        if ! folder_json="$(jq -c --arg id "$folder_id" --arg path "$path" \
+            '. + {id: $id, label: $id, path: $path, type: "sendreceive"} | .versioning += {type: "trashcan", params: {cleanoutDays: "30"}}' \
+            <<< "$folder_defaults")" || ! syncthing cli config folders add-json "$folder_json"; then
             status=1
             continue
         fi
         log_success "Created folder '$folder_id' for $path"
     fi
+    for setting in "${default_settings[@]}"; do
+        read -r -a setting_path <<< "$setting"
+        default_value="$(syncthing cli config defaults folder "${setting_path[@]}" get)" || { status=1; continue; }
+        current_value="$(syncthing cli config folders "$folder_id" "${setting_path[@]}" get)" || { status=1; continue; }
+        if [[ "$current_value" != "$default_value" ]]; then
+            if syncthing cli config folders "$folder_id" "${setting_path[@]}" set "$default_value"; then
+                log_success "Set $setting to $default_value for folder '$folder_id'"
+            else
+                status=1
+            fi
+        fi
+    done
     for device_id in "${peers[@]}"; do
         if ! syncthing cli config folders "$folder_id" devices list | grep -Fxq -- "$device_id"; then
             syncthing cli config folders "$folder_id" devices add --device-id "$device_id" || status=1

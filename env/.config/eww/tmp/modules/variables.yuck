@@ -1,7 +1,0 @@
-;; Auto-generated monitor-specific workspace variables
-(deflisten workspaces_info_0 :initial "{\"active\": 1, \"occupied\": [1,2,3,4,5,6]}"
-  "~/.config/eww/scripts/workspaces-listener.sh HDMI-A-5")
-
-(deflisten workspaces_info_1 :initial "{\"active\": 1, \"occupied\": [1,2,3,4,5,6]}"
-  "~/.config/eww/scripts/workspaces-listener.sh HDMI-A-1")
-

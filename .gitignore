@@ -12,6 +12,7 @@ env/.config/sbx/volume-owner/
 
 env/.config/audio-switcher/profiles.conf
 env/.config/audio-switcher/current_profile
+env/.config/eww/tmp/
 
 .claude/
 .sbx/

@@ -51,11 +51,36 @@ ssh_options=(-i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTim
     -o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/git-peer-sync-%C" -o ControlPersist=60)
 export GIT_SSH_COMMAND="ssh ${ssh_options[*]}"
 
+# The directories Syncthing leaves out of ~/projects by name ("(?d)name" in projects.stignore, a
+# shell pattern here too) hold no repositories that are synced, so they get no history either.
+skipped_names=(.stversions)
+while IFS= read -r pattern; do
+    skipped_names+=("$pattern")
+done < <(sed -n 's#^(?d)\([^/]*\)$#\1#p' "$dotfiles_dir/modules/syncthing/projects.stignore" 2>/dev/null)
+prune=(-path '*/.docker/db')
+for pattern in "${skipped_names[@]}"; do
+    prune+=(-o -name "$pattern")
+done
+
+# Whether path $1 (below $HOME) is inside one of those directories.
+skipped() {
+    local component pattern
+    local -a components
+    IFS=/ read -r -a components <<< "$1"
+    for component in "${components[@]}"; do
+        for pattern in "${skipped_names[@]}"; do
+            # shellcheck disable=SC2053 # the pattern is a glob
+            [[ "$component" == $pattern ]] && return 0
+        done
+    done
+    return 1
+}
+
 # Normal checkouts have a .git directory; bare clones (sync-repos --bare) keep HEAD, objects and refs at their root.
 repositories=()
 while IFS= read -r -d '' git_dir; do
     repositories+=("$(dirname "$git_dir")")
-done < <(find "$projects_dir" \( -name node_modules -o -name target -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
+done < <(find "$projects_dir" \( "${prune[@]}" \) -prune -o \
     \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
 
 # Whether Syncthing delivered the files that commits $2..$3 change to worktree $1: none of them
@@ -158,6 +183,7 @@ adopt_repositories() {
     [[ -f "$manifest_dir/$name.repos" ]] || return 0
     while IFS=$'\t' read -r relative branch; do
         [[ "$relative" == projects/* && "$relative" != *..* && -n "$branch" ]] || continue
+        skipped "$relative" && continue
         folder="$HOME/$relative"
         [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" ]] || continue
         source="$exchange_dir/$name/to/$this_host/$relative.bundle"
@@ -265,9 +291,11 @@ publish_bundle() {
 # out of their bundles) and a bundle for each other machine. Checkouts another machine has and this
 # one only has as files get an empty id list, which asks that machine for the whole repository.
 publish_exchange() {
-    local repository relative refs refs_file have have_file peer branch folder
+    local repository relative refs refs_file have have_file peer branch folder file
+    local -A published=()
     for repository in "${repositories[@]}"; do
         relative="${repository#"$HOME"/}"
+        published["$relative"]=1
         refs="$(shared_refs "$repository")"
         [[ -n "$refs" ]] || continue
         refs_file="$exchange_dir/$this_host/refs/$relative.refs"
@@ -288,12 +316,28 @@ publish_exchange() {
         [[ -f "$manifest_dir/$peer.repos" ]] || continue
         while IFS=$'\t' read -r relative branch; do
             [[ "$relative" == projects/* && "$relative" != *..* && -n "$branch" ]] || continue
+            skipped "$relative" && continue
             folder="$HOME/$relative"
+            [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" ]] || continue
+            published["$relative"]=1
             have_file="$exchange_dir/$this_host/have/$relative.have"
-            [[ -d "$folder" && ! -L "$folder" && ! -e "$folder/.git" && ! -f "$have_file" ]] || continue
-            publish_file "$have_file" < /dev/null || status=1
+            [[ -f "$have_file" ]] || publish_file "$have_file" < /dev/null || status=1
         done < "$manifest_dir/$peer.repos"
     done
+    # Drop what this machine published for repositories it no longer has or skips, and the bundle
+    # keys with them so a repository that comes back gets its bundles again.
+    while IFS= read -r -d '' file; do
+        relative="${file#"$exchange_dir/$this_host/"}"
+        case "$relative" in
+            refs/*.refs) relative="${relative#refs/}"; relative="${relative%.refs}" ;;
+            have/*.have) relative="${relative#have/}"; relative="${relative%.have}" ;;
+            to/*/*.bundle) peer="${relative#to/}"; peer="${peer%%/*}"; relative="${relative#to/"$peer"/}"; relative="${relative%.bundle}" ;;
+            *) continue ;;
+        esac
+        [[ -n "${published[$relative]:-}" ]] && continue
+        rm -f -- "$file"
+        [[ "$file" == *.bundle ]] && rm -f -- "$state_dir/$peer/$relative.bundle-key"
+    done < <(find "$exchange_dir/$this_host" -type f \( -name '*.refs' -o -name '*.have' -o -name '*.bundle' \) -print0 2>/dev/null)
 }
 
 status=0

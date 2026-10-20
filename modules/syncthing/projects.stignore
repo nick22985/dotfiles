@@ -1,5 +1,7 @@
 // Written to ~/projects/.stignore by modules/syncthing, which appends patterns for the bare-layout repositories it finds. The first matching pattern wins.
-// Working trees sync between machines; history, branches and the index move through git.
+// Working trees sync between machines; history, branches and the index move through git. When
+// another machine deletes a folder, git-peer-sync moves what is left of these to
+// ~/.local/share/projects-removed instead of Syncthing deleting it.
 .git
 .bare
 
@@ -28,6 +30,8 @@
 (?d)example-repos
 // Staging copies left behind by interrupted modules/sync-repos clones.
 (?d).*_stage_[0-9]*
+// Desktop trash folders.
+(?d).Trash-*
 
 // Log files (server logs grow to tens of GB) stay on the machine that wrote them.
 (?d)*.log

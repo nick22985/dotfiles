@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish what is staged and checked out to the other machines as it changes
+
+[Service]
+ExecStart=%h/.local/bin/git-peer-sync --watch
+Restart=on-failure
+RestartSec=1min
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

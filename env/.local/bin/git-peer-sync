@@ -8,15 +8,21 @@
 # (each machine publishes its worktree list in ~/projects/.git-peer-sync/<machine>.tsv). Normal
 # checkouts that only exist on the other machine get their repository created around the files
 # Syncthing delivered (the list is in ~/projects/.git-peer-sync/<machine>.repos). ~/dotfiles and the
-# submodules Syncthing carries with it get the same fetches and fast-forwards.
+# submodules Syncthing carries with it get the same fetches and fast-forwards. What is staged in
+# each worktree, and which branch it has checked out, goes along too (see publish_indexes), and the
+# other machines take it over (see apply_indexes). The watcher publishes that as soon as a HEAD or
+# index changes and pokes the other machines, which then sync just that repository.
 #
 # Machines that are not online together still exchange history through Syncthing (and the relay):
 # each machine publishes its refs, the commits it has and, for every other machine, a bundle of the
 # commits that one is missing (see publish_exchange). Refs from there are taken when they are newer
 # than the last SSH fetch from that machine.
 #
-#   git-peer-sync            fetch from every other machine (run by git-peer-sync.timer)
-#   git-peer-sync --serve    SSH forced command on the serving side: read-only git access
+#   git-peer-sync                   fetch from every other machine (run by git-peer-sync.timer)
+#   git-peer-sync --watch           publish changes as they happen (run by git-peer-sync-watch.service)
+#   git-peer-sync --publish <repo>  publish the index snapshots of one repository, poking the others when they changed
+#   git-peer-sync --repo <repo>     fetch one repository from every other machine (started by a poke)
+#   git-peer-sync --serve           SSH forced command on the serving side: read-only git access and pokes
 
 set -u -o pipefail
 
@@ -26,12 +32,19 @@ dotfiles_dir="$HOME/dotfiles"
 key_file="$HOME/.ssh/git_peer_sync"
 exchange_dir="$HOME/.local/share/git-peer-sync/exchange"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/git-peer-sync"
+removed_dir="$HOME/.local/share/projects-removed"
 
 if [[ "${1:-}" == "--serve" ]]; then
-    # Allow only git-upload-pack (fetch) for ~/dotfiles or a path below it or ~/projects.
+    # Allow only git-upload-pack (fetch) for ~/dotfiles or a path below it or ~/projects, and pokes
+    # for those paths, which start a sync of that repository in the background.
     command="${SSH_ORIGINAL_COMMAND:-}"
     if [[ "$command" =~ ^git-upload-pack\ \'((projects|dotfiles)/[^\']+|dotfiles)\'$ && "${BASH_REMATCH[1]}" != *..* ]]; then
         exec git-shell -c "$command"
+    fi
+    if [[ "$command" =~ ^git-peer-sync\ --poke\ \'((projects|dotfiles)/[^\']+|dotfiles)\'$ && "${BASH_REMATCH[1]}" != *..* && -d "$HOME/${BASH_REMATCH[1]}" ]]; then
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        exec systemd-run --user --quiet --no-block --collect --property=Nice=10 --property=IOSchedulingClass=idle \
+            "$HOME/.local/bin/git-peer-sync" --repo "$HOME/${BASH_REMATCH[1]}"
     fi
     echo "git-peer-sync: refused: $command" >&2
     exit 1
@@ -76,12 +89,51 @@ skipped() {
     return 1
 }
 
-# Normal checkouts have a .git directory; bare clones (sync-repos --bare) keep HEAD, objects and refs at their root.
-repositories=()
-while IFS= read -r -d '' git_dir; do
-    repositories+=("$(dirname "$git_dir")")
-done < <(find "$projects_dir" \( "${prune[@]}" \) -prune -o \
-    \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
+# Set repositories to those under ~/projects. Normal checkouts have a .git directory; bare clones
+# (sync-repos --bare) keep HEAD, objects and refs at their root.
+find_repositories() {
+    local git_dir
+    repositories=()
+    while IFS= read -r -d '' git_dir; do
+        repositories+=("$(dirname "$git_dir")")
+    done < <(find "$projects_dir" \( "${prune[@]}" \) -prune -o \
+        \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
+}
+
+# Add ~/dotfiles to repositories. Submodules come before the superproject: its branch only moves
+# once their commits match the files Syncthing delivered.
+add_dotfiles() {
+    local relative
+    [[ -d "$dotfiles_dir/.git" ]] || return 0
+    while IFS= read -r relative; do
+        git -C "$dotfiles_dir/$relative" symbolic-ref -q HEAD >/dev/null && repositories+=("$dotfiles_dir/$relative")
+    done < <(DOTFILES_DIR="$dotfiles_dir" "$HOME/.local/bin/dotfiles-stignore" --submodules)
+    repositories+=("$dotfiles_dir")
+}
+
+# Hold a lock on repository $1 until release_repository, so the runs that changes and pokes start
+# don't work on it at the same time as the timer's. A repository that can't have one goes without.
+lock_repository() {
+    local file
+    lock_fd=""
+    file="$(git -C "$1" rev-parse --path-format=absolute --git-path peer-sync/lock 2>/dev/null)" \
+        && mkdir -p -- "$(dirname -- "$file")" && exec {lock_fd}> "$file" && flock "$lock_fd"
+}
+
+release_repository() {
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+    lock_fd=""
+}
+
+# Whether a merge, cherry-pick, revert, bisect or rebase is in progress in worktree $1, or another
+# git command has its index locked.
+worktree_busy() {
+    local state
+    for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG rebase-merge rebase-apply index.lock; do
+        [[ -e "$(git -C "$1" rev-parse --path-format=absolute --git-path "$state")" ]] && return 0
+    done
+    return 1
+}
 
 # Whether Syncthing delivered the files that commits $2..$3 change to worktree $1: none of them
 # still has its $2 content (a submodule counts by its checked-out commit). One that differs from
@@ -108,7 +160,7 @@ delivered() {
 # still match the old commit they are updated, and if Syncthing already delivered the files the
 # new commits change (and nothing is staged) only the branch and index move.
 fast_forward() {
-    local repository="$1" name="$2" key value worktree="" branch commit peer state
+    local repository="$1" name="$2" key value worktree="" branch commit peer
     local -A checked_out=()
     while read -r key value; do
         case "$key" in
@@ -125,9 +177,7 @@ fast_forward() {
             git -C "$repository" update-ref "refs/heads/$branch" "$peer" "$commit" || continue
         else
             [[ -d "$worktree" ]] || continue
-            for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG rebase-merge rebase-apply; do
-                [[ -e "$(git -C "$worktree" rev-parse --path-format=absolute --git-path "$state")" ]] && continue 2
-            done
+            worktree_busy "$worktree" && continue
             if git -C "$worktree" diff --quiet HEAD; then
                 git -C "$worktree" merge --quiet --ff-only "$peer" >/dev/null 2>&1 || continue
             elif git -C "$worktree" diff --quiet "$peer" \
@@ -220,9 +270,165 @@ publish_file() {
     mkdir -p -- "$(dirname -- "$target")" && cat > "$temporary" && mv -- "$temporary" "$target"
 }
 
-# The refs other machines get from repository $1: its branches and latest stash, "<id> <ref>".
+# The refs other machines get from repository $1: its branches, latest stash and index snapshots
+# (see publish_indexes), "<id> <ref>".
 shared_refs() {
-    git -C "$1" for-each-ref --format='%(objectname) %(refname)' refs/heads/ refs/stash | sort
+    git -C "$1" for-each-ref --format='%(objectname) %(refname)' refs/heads/ refs/stash refs/index/ | sort
+}
+
+# Index snapshots: what is staged in each worktree and which branch it has checked out, as a commit
+# in refs/index/<id> that the other machines fetch with the branches (into
+# refs/indexes/<machine>/<id>). Its tree is the index, its parent HEAD and its message names the
+# worktree (below $HOME, the same on every machine; <id> is the start of its hash), the branch and
+# when it was made. A new commit is only made when one of those changed, so that says when it did.
+
+# The worktrees of repository $1 that get snapshots, "<worktree>\t<index file>\t<HEAD commit>":
+# those in ~/projects or ~/dotfiles with commits, outside the directories Syncthing skips. A copy of
+# a repository still lists the worktrees of the original, which belong to that one.
+snapshot_worktrees() {
+    local repository="$1" common worktree
+    local -a paths
+    common="$(git -C "$repository" rev-parse --path-format=absolute --git-common-dir)" || return 0
+    while IFS= read -r worktree; do
+        [[ "$worktree" == "$projects_dir"/* || "$worktree" == "$dotfiles_dir" || "$worktree" == "$dotfiles_dir"/* ]] || continue
+        [[ -e "$worktree/.git" ]] || continue
+        skipped "${worktree#"$HOME"/}" && continue
+        mapfile -t paths < <(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir --git-path index 'HEAD^{commit}' 2>/dev/null)
+        # Without commits rev-parse prints HEAD^{commit} itself.
+        [[ ${#paths[@]} == 3 && "${paths[0]}" == "$common" && "${paths[2]}" =~ ^[0-9a-f]+$ ]] || continue
+        printf '%s\t%s\t%s\n' "$worktree" "${paths[1]}" "${paths[2]}"
+    done < <(git -C "$repository" worktree list --porcelain | sed -n 's/^worktree //p')
+}
+
+# The snapshot ref of the worktree at $1 below $HOME.
+snapshot_ref() {
+    printf 'refs/index/%s\n' "$(git hash-object --stdin <<< "$1" | cut -c1-16)"
+}
+
+# What worktree $1 (index file $2, HEAD $3) has staged and checked out: "<tree> <HEAD> <branch>",
+# the branch being "detached" without one. write-tree runs on a copy, so the real index is never
+# locked or rewritten. Unmerged entries make it fail.
+index_state() {
+    local branch tree
+    branch="$(git -C "$1" symbolic-ref -q HEAD)" || branch=detached
+    cp -- "$2" "$index_copy" 2>/dev/null || return 1
+    tree="$(GIT_INDEX_FILE="$index_copy" git -C "$1" write-tree 2>/dev/null)" || return 1
+    printf '%s %s %s\n' "$tree" "$3" "$branch"
+}
+
+# The same for snapshot commit $2 of repository $1 (nothing when there is none).
+snapshot_state() {
+    git -C "$1" cat-file commit "$2" 2>/dev/null \
+        | awk '/^tree / { tree = $2 } /^parent / { parent = $2 } /^branch / { branch = $2 } END { if (tree != "") print tree, parent, branch }'
+}
+
+# When snapshot commit $2 of repository $1 was made, in nanoseconds since the epoch (0 for the first
+# ones, which had no time).
+snapshot_time() {
+    git -C "$1" cat-file commit "$2" 2>/dev/null | awk '/^time [0-9]+$/ { time = $2 } END { print (time == "" ? 0 : time) }'
+}
+
+# Publish the snapshots of repository $1's worktrees and drop those of worktrees it no longer has.
+# Returns 0 when one changed.
+publish_indexes() {
+    local repository="$1" worktree index head relative state ref tree branch commit id result=1
+    local -A current=()
+    while IFS=$'\t' read -r worktree index head; do
+        relative="${worktree#"$HOME"/}"
+        state="$(index_state "$worktree" "$index" "$head")" || continue
+        ref="$(snapshot_ref "$relative")"
+        current["${ref#refs/index/}"]=1
+        indexes=$((indexes + 1))
+        [[ "$(snapshot_state "$repository" "$ref")" == "$state" ]] && continue
+        read -r tree _ branch <<< "$state"
+        commit="$(printf 'git-peer-sync index\n\nworktree %s\nbranch %s\ntime %s\n' "$relative" "$branch" "$(date +%s%N)" \
+            | GIT_AUTHOR_NAME=git-peer-sync GIT_AUTHOR_EMAIL=git-peer-sync GIT_COMMITTER_NAME=git-peer-sync GIT_COMMITTER_EMAIL=git-peer-sync \
+                git -C "$worktree" commit-tree --no-gpg-sign -p "$head" "$tree")" || continue
+        git -C "$repository" update-ref "$ref" "$commit" || continue
+        changed_indexes=$((changed_indexes + 1))
+        result=0
+    done < <(snapshot_worktrees "$repository")
+    # What was agreed with the other machines goes with the snapshot; the backups stay.
+    while IFS= read -r ref; do
+        id="${ref##*/}"
+        [[ -n "${current[$id]:-}" ]] || git -C "$repository" update-ref -d "$ref"
+    done < <(git -C "$repository" for-each-ref --format='%(refname)' refs/index/ refs/index-base/)
+    return "$result"
+}
+
+# Take over the snapshots machine $2 published for repository $1's worktrees. One applies when this
+# machine's snapshot is still the last one both had (refs/index-base/<machine>/<id>) and that
+# machine's changed since, or, when both changed or they never agreed, when that machine's changed
+# last. This machine's state must still be the one it published, so nothing staged since is lost.
+apply_indexes() {
+    local repository="$1" name="$2" worktree index head relative ref id snapshot own base snapshot_time own_time refused
+    while IFS=$'\t' read -r worktree index head; do
+        relative="${worktree#"$HOME"/}"
+        ref="$(snapshot_ref "$relative")"
+        id="${ref#refs/index/}"
+        snapshot="$(git -C "$repository" rev-parse -q --verify "refs/indexes/$name/$id")" || continue
+        own="$(git -C "$repository" rev-parse -q --verify "$ref")" || continue
+        base="$(git -C "$repository" rev-parse -q --verify "refs/index-base/$name/$id")" || base=""
+        [[ "$snapshot" != "$base" ]] || continue
+        snapshot_time="$(snapshot_time "$repository" "$snapshot")"
+        own_time="$(snapshot_time "$repository" "$own")"
+        # The same state published on both sides: both keep the newer commit.
+        if [[ "$snapshot" == "$own" || "$(snapshot_state "$repository" "$snapshot")" == "$(snapshot_state "$repository" "$own")" ]]; then
+            if ((snapshot_time > own_time)); then
+                git -C "$repository" update-ref "$ref" "$snapshot" "$own" && own="$snapshot"
+            fi
+            [[ "$base" == "$own" ]] || git -C "$repository" update-ref "refs/index-base/$name/$id" "$own"
+            continue
+        fi
+        [[ "$own" == "$base" ]] || ((snapshot_time > own_time)) || continue
+        [[ "$(index_state "$worktree" "$index" "$head")" == "$(snapshot_state "$repository" "$own")" ]] || continue
+        refused="$(git -C "$repository" rev-parse --path-format=absolute --git-path "peer-sync/$name.refused/$id")"
+        if apply_index "$repository" "$worktree" "$name" "$ref" "$snapshot" "$base" \
+            && git -C "$repository" update-ref "$ref" "$snapshot" \
+            && git -C "$repository" update-ref "refs/index-base/$name/$id" "$snapshot"; then
+            echo "git-peer-sync: took over the index and branch of $relative from $name"
+            rm -f -- "$refused"
+        elif [[ "$(cat -- "$refused" 2>/dev/null)" != "$snapshot" ]]; then
+            # Said once per snapshot; it is tried again on every run.
+            echo "git-peer-sync: left $relative as it is: its branch or state here doesn't allow taking over $name's" >&2
+            mkdir -p -- "$(dirname -- "$refused")" && printf '%s\n' "$snapshot" > "$refused"
+        fi
+    done < <(snapshot_worktrees "$repository")
+}
+
+# Bring worktree $2 of repository $1 to snapshot $5 from machine $3 ($4 is the worktree's snapshot
+# ref, $6 the last one both had): HEAD, its branch and the index. The files stay as Syncthing left
+# them. A branch only moves forward, or to where that machine moved it when it is still where both
+# had it, so no commits are dropped; one checked out in another worktree isn't taken. The replaced
+# index is kept in refs/index-backup/<id>, whose reflog has the earlier ones.
+apply_index() {
+    local repository="$1" worktree="$2" name="$3" ref="$4" snapshot="$5" base="$6" tree parent branch tip=""
+    read -r tree parent branch < <(snapshot_state "$repository" "$snapshot")
+    [[ -n "${branch:-}" ]] || return 1
+    worktree_busy "$worktree" && return 1
+    if [[ "$branch" != detached ]]; then
+        [[ "$branch" == refs/heads/* ]] && git check-ref-format "$branch" || return 1
+        if [[ "$(git -C "$worktree" symbolic-ref -q HEAD)" != "$branch" ]] \
+            && git -C "$repository" worktree list --porcelain | grep -Fxq -- "branch $branch"; then
+            return 1
+        fi
+        tip="$(git -C "$repository" rev-parse -q --verify "$branch^{commit}")" || tip=""
+        if [[ -n "$tip" && "$tip" != "$parent" ]] && ! git -C "$repository" merge-base --is-ancestor "$tip" "$parent"; then
+            [[ -n "$base" && "$(snapshot_state "$repository" "$base" | cut -d' ' -f2-)" == "$tip $branch" ]] || return 1
+        fi
+    fi
+    git -C "$repository" update-ref --create-reflog -m "git-peer-sync: replaced by $name's index" "refs/index-backup/${ref#refs/index/}" "$(git -C "$repository" rev-parse "$ref")" || return 1
+    if [[ "$branch" == detached ]]; then
+        git -C "$worktree" update-ref --no-deref -m "git-peer-sync: from $name" HEAD "$parent" || return 1
+    else
+        if [[ "$tip" != "$parent" ]]; then
+            git -C "$repository" update-ref -m "git-peer-sync: from $name" "$branch" "$parent" "$tip" || return 1
+        fi
+        git -C "$worktree" symbolic-ref -m "git-peer-sync: from $name" HEAD "$branch" || return 1
+    fi
+    git -C "$worktree" read-tree "$tree" || return 1
+    git -C "$worktree" update-index -q --refresh >/dev/null
+    return 0
 }
 
 # When the refs of machine $2 for repository $1 were last brought here (nanoseconds since the
@@ -253,10 +459,10 @@ apply_exchange() {
         cut -d' ' -f1 <<< "$refs" | git -C "$repository" cat-file --batch-check | grep -q ' missing$' && return 1
     fi
     {
-        git -C "$repository" for-each-ref --format='%(refname)' "refs/remotes/$name/" "refs/stashes/$name" \
-            | grep -Fxv -f <(awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); print $2 }' <<< "$refs") \
+        git -C "$repository" for-each-ref --format='%(refname)' "refs/remotes/$name/" "refs/stashes/$name" "refs/indexes/$name/" \
+            | grep -Fxv -f <(awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); sub("^refs/index/", "refs/indexes/" name "/", $2); print $2 }' <<< "$refs") \
             | sed 's/^/delete /'
-        awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); print "update " $2 " " $1 }' <<< "$refs"
+        awk -v name="$name" '{ sub("^refs/heads/", "refs/remotes/" name "/", $2); sub("^refs/stash$", "refs/stashes/" name, $2); sub("^refs/index/", "refs/indexes/" name "/", $2); print "update " $2 " " $1 }' <<< "$refs"
     } | git -C "$repository" update-ref --stdin || return 1
     record_stamp "$repository" "$name" "$stamp"
 }
@@ -340,18 +546,174 @@ publish_exchange() {
     done < <(find "$exchange_dir/$this_host" -type f \( -name '*.refs' -o -name '*.have' -o -name '*.bundle' \) -print0 2>/dev/null)
 }
 
+# Fetch repository $1 from machine $2 (at $3, reachable over SSH when $4 is 1) and take over what
+# changed there.
+sync_repository() {
+    local repository="$1" name="$2" ssh_host="$3" reachable="$4" relative="${1#"$HOME"/}" remote_refs local_refs
+    local -a refspecs
+    if ((reachable)) && remote_refs="$(git -C "$repository" ls-remote "$ssh_host:$relative" 'refs/heads/*' refs/stash 'refs/index/*' 2>/dev/null)"; then
+        # Skip the fetch when every ref already matches what the last run stored.
+        local_refs="$(git -C "$repository" for-each-ref --format='%(objectname) %(refname)' "refs/remotes/$name/" "refs/stashes/$name" "refs/indexes/$name/" \
+            | sed "s#refs/remotes/$name/#refs/heads/#; s#refs/stashes/$name\$#refs/stash#; s#refs/indexes/$name/#refs/index/#" | sort)"
+        if [[ "$(printf '%s\n' "$remote_refs" | tr '\t' ' ' | sed '/^$/d' | sort)" == "$local_refs" ]]; then
+            record_stamp "$repository" "$name" "$(date +%s%N)"
+        else
+            refspecs=("+refs/heads/*:refs/remotes/$name/*" "+refs/index/*:refs/indexes/$name/*")
+            if grep -q $'\trefs/stash$' <<< "$remote_refs"; then
+                refspecs+=("+refs/stash:refs/stashes/$name")
+            else
+                git -C "$repository" update-ref -d "refs/stashes/$name" 2>/dev/null
+            fi
+            if git -C "$repository" fetch --quiet --prune --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "${refspecs[@]}"; then
+                record_stamp "$repository" "$name" "$(date +%s%N)"
+                fetched=$((fetched + 1))
+            else
+                echo "git-peer-sync: failed to fetch $relative from $name" >&2
+                status=1
+            fi
+        fi
+    fi
+    # Refs it published after the SSH fetch above (or while it was unreachable) still apply.
+    apply_exchange "$repository" "$name" && exchanged=$((exchanged + 1))
+    adopt_worktrees "$repository" "$name"
+    apply_indexes "$repository" "$name"
+    fast_forward "$repository" "$name"
+}
+
+move_removed_folders() {
+    local api_key address scheme errors relative target stamp
+    command -v jq >/dev/null && command -v curl >/dev/null || return 0
+    api_key="$(syncthing cli config gui apikey get 2>/dev/null)" && address="$(syncthing cli config gui raw-address get 2>/dev/null)" || return 0
+    scheme=http
+    [[ "$(syncthing cli config gui raw-use-tls get 2>/dev/null)" == "true" ]] && scheme=https
+    errors="$(curl -fsSk -H "X-API-Key: $api_key" "$scheme://$address/rest/folder/errors?folder=projects&perpage=100000")" || return 0
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    while IFS= read -r relative; do
+        [[ -n "$relative" && "$relative" != *..* && -d "$projects_dir/$relative" && ! -L "$projects_dir/$relative" ]] || continue
+        target="$removed_dir/$stamp/$relative"
+        mkdir -p -- "$(dirname -- "$target")" && mv -- "$projects_dir/$relative" "$target" \
+            && echo "git-peer-sync: $relative was deleted on another machine; moved what Syncthing ignores in it to $target"
+    done < <(jq -r '.errors[]? | select(.error | contains("deleted on a remote device but contains ignored files")) | .path' <<< "$errors" | LC_ALL=C sort)
+}
+
+connect() {
+    ssh "${ssh_options[@]}" -O check "$1" 2>/dev/null || ssh "${ssh_options[@]}" -fN "$1" 2>/dev/null
+}
+
+poke_peers() {
+    local index
+    for index in "${!peers[@]}"; do
+        connect "${peer_hosts[index]}" || continue
+        # shellcheck disable=SC2029 # the path is quoted for the forced command on the other side
+        ssh "${ssh_options[@]}" "${peer_hosts[index]}" "git-peer-sync --poke '$1'" < /dev/null \
+            || echo "git-peer-sync: could not poke ${peers[index]} about $1" >&2
+    done
+}
+
+# Publish the snapshots of each repository whose HEAD or index changes (through --publish) once
+# nothing has changed in it for a few seconds. inotify watches every git directory, including
+# those of linked worktrees, and starts over every hour to pick up new repositories.
+watch_repositories() {
+    local repository common directory path result
+    local -A owner=() pending=()
+    if ! command -v inotifywait >/dev/null; then
+        echo "git-peer-sync: inotifywait is missing (install inotify-tools)" >&2
+        return 1
+    fi
+    while true; do
+        find_repositories
+        add_dotfiles
+        owner=()
+        for repository in "${repositories[@]}"; do
+            common="$(git -C "$repository" rev-parse --path-format=absolute --git-common-dir)" || continue
+            owner["$common"]="$repository"
+            for directory in "$common"/worktrees/*/; do
+                [[ -d "$directory" ]] && owner["${directory%/}"]="$repository"
+            done
+        done
+        pending=()
+        while true; do
+            IFS= read -r -t 3 path
+            result=$?
+            if ((result == 0)); then
+                # git writes both through a lock file that it renames into place.
+                case "${path##*/}" in
+                    HEAD | index) [[ -n "${owner[${path%/*}]:-}" ]] && pending["${owner[${path%/*}]}"]=1 ;;
+                esac
+                continue
+            fi
+            for repository in "${!pending[@]}"; do
+                "$0" --publish "$repository"
+            done
+            pending=()
+            ((result > 128)) || break
+        done < <(timeout 1h inotifywait -mq -e moved_to --format '%w%f' --fromfile <(printf '%s\n' "${!owner[@]}"))
+    done
+}
+
 status=0
 this_host="$(uname -n)"
+manifest_dir="$projects_dir/.git-peer-sync"
+indexes=0
+changed_indexes=0
+fetched=0
+exchanged=0
+# Runs started by changes and pokes overlap with the timer's, so each has its own index copy.
+index_copy="$state_dir/index.$$"
+mkdir -p -- "$state_dir" || exit 1
+trap 'rm -f -- "$index_copy"' EXIT
 
+# Relay machines ("name device-id ssh-host relay") hold only encrypted Syncthing copies and no git.
+peers=()
+peer_hosts=()
+while read -r name _ ssh_host extra; do
+    [[ -n "${name:-}" && "$name" != \#* && "$name" != "$this_host" && -n "${ssh_host:-}" && -z "${extra:-}" ]] || continue
+    peers+=("$name")
+    peer_hosts+=("$ssh_host")
+done < "$machines_file"
+
+case "${1:-}" in
+    --watch)
+        watch_repositories
+        exit
+        ;;
+    --publish | --repo)
+        repository="${2:-}"
+        if [[ "$repository" != "$projects_dir"/* && "$repository" != "$dotfiles_dir" && "$repository" != "$dotfiles_dir"/* ]] \
+            || [[ "$repository" == *..* || ! -e "$repository/.git" && ! -f "$repository/HEAD" ]] || skipped "${repository#"$HOME"/}"; then
+            echo "git-peer-sync: not a repository it syncs: $repository" >&2
+            exit 1
+        fi
+        lock_repository "$repository"
+        if [[ "$1" == --publish ]]; then
+            publish_indexes "$repository" && poke_peers "${repository#"$HOME"/}"
+        else
+            for index in "${!peers[@]}"; do
+                reachable=0
+                connect "${peer_hosts[index]}" && reachable=1
+                sync_repository "$repository" "${peers[index]}" "${peer_hosts[index]}" "$reachable"
+            done
+            publish_indexes "$repository"
+        fi
+        exit "$status"
+        ;;
+    "") ;;
+    *)
+        echo "git-peer-sync: unknown option: $1" >&2
+        exit 1
+        ;;
+esac
+
+move_removed_folders
 # Pick up bare-layout repositories created since the last run (by hand or by sbx) so Syncthing
 # leaves their git internals alone.
 "$HOME/.local/bin/projects-stignore" || echo "git-peer-sync: could not update $projects_dir/.stignore" >&2
 # Follow changes to the dotfiles' gitignore rules.
 "$HOME/.local/bin/dotfiles-stignore" || echo "git-peer-sync: could not update $dotfiles_dir/.stignore" >&2
+find_repositories
 
 # Publish this machine's linked worktrees (repository, worktree, branch) for the others; Syncthing
 # carries the file. It is only rewritten when it changes so it doesn't cause a sync every run.
-manifest_dir="$projects_dir/.git-peer-sync"
 manifest="$(for repository in "${repositories[@]}"; do
     git -C "$repository" worktree list --porcelain | awk -v home="$HOME/" -v repo="${repository#"$HOME"/}" '
         /^worktree / { path = substr($0, 10); n++ }
@@ -369,28 +731,21 @@ done)"
 if [[ "$repository_manifest" != "$(cat -- "$manifest_dir/$this_host.repos" 2>/dev/null)" ]]; then
     mkdir -p "$manifest_dir" && printf '%s\n' "$repository_manifest" > "$manifest_dir/$this_host.repos"
 fi
-# The dotfiles go after the manifests, which only describe ~/projects. Submodules come before the
-# superproject: its branch only moves once their commits match the files Syncthing delivered.
-if [[ -d "$dotfiles_dir/.git" ]]; then
-    while IFS= read -r relative; do
-        git -C "$dotfiles_dir/$relative" symbolic-ref -q HEAD >/dev/null && repositories+=("$dotfiles_dir/$relative")
-    done < <(DOTFILES_DIR="$dotfiles_dir" "$HOME/.local/bin/dotfiles-stignore" --submodules)
-    repositories+=("$dotfiles_dir")
-fi
-# Relay machines ("name device-id ssh-host relay") hold only encrypted Syncthing copies and no git.
-peers=()
-peer_hosts=()
-while read -r name _ ssh_host extra; do
-    [[ -n "${name:-}" && "$name" != \#* && "$name" != "$this_host" && -n "${ssh_host:-}" && -z "${extra:-}" ]] || continue
-    peers+=("$name")
-    peer_hosts+=("$ssh_host")
-done < "$machines_file"
+# The dotfiles go after the manifests, which only describe ~/projects.
+add_dotfiles
+changed_repositories=()
+for repository in "${repositories[@]}"; do
+    lock_repository "$repository"
+    publish_indexes "$repository" && changed_repositories+=("$repository")
+    release_repository
+done
+echo "git-peer-sync: index snapshots: $changed_indexes of $indexes worktrees changed"
 
 for index in "${!peers[@]}"; do
     name="${peers[index]}"
     ssh_host="${peer_hosts[index]}"
     reachable=1
-    if ! ssh "${ssh_options[@]}" -O check "$ssh_host" 2>/dev/null && ! ssh "${ssh_options[@]}" -fN "$ssh_host" 2>/dev/null; then
+    if ! connect "$ssh_host"; then
         echo "git-peer-sync: $name ($ssh_host) is unreachable; using what it published through Syncthing"
         reachable=0
     fi
@@ -399,35 +754,16 @@ for index in "${!peers[@]}"; do
     fetched=0
     exchanged=0
     for repository in "${repositories[@]}"; do
-        relative="${repository#"$HOME"/}"
-        if ((reachable)) && remote_refs="$(git -C "$repository" ls-remote "$ssh_host:$relative" 'refs/heads/*' refs/stash 2>/dev/null)"; then
-            # Skip the fetch when every ref already matches what the last run stored.
-            local_refs="$(git -C "$repository" for-each-ref --format='%(objectname) %(refname)' "refs/remotes/$name/" "refs/stashes/$name" \
-                | sed "s#refs/remotes/$name/#refs/heads/#; s#refs/stashes/$name\$#refs/stash#" | sort)"
-            if [[ "$(printf '%s\n' "$remote_refs" | tr '\t' ' ' | sed '/^$/d' | sort)" == "$local_refs" ]]; then
-                record_stamp "$repository" "$name" "$(date +%s%N)"
-            else
-                refspecs=("+refs/heads/*:refs/remotes/$name/*")
-                if grep -q $'\trefs/stash$' <<< "$remote_refs"; then
-                    refspecs+=("+refs/stash:refs/stashes/$name")
-                else
-                    git -C "$repository" update-ref -d "refs/stashes/$name" 2>/dev/null
-                fi
-                if git -C "$repository" fetch --quiet --prune --no-auto-maintenance --no-write-fetch-head "$ssh_host:$relative" "${refspecs[@]}"; then
-                    record_stamp "$repository" "$name" "$(date +%s%N)"
-                    fetched=$((fetched + 1))
-                else
-                    echo "git-peer-sync: failed to fetch $relative from $name" >&2
-                    status=1
-                fi
-            fi
-        fi
-        # Refs it published after the SSH fetch above (or while it was unreachable) still apply.
-        apply_exchange "$repository" "$name" && exchanged=$((exchanged + 1))
-        adopt_worktrees "$repository" "$name"
-        fast_forward "$repository" "$name"
+        lock_repository "$repository"
+        sync_repository "$repository" "$name" "$ssh_host" "$reachable"
+        release_repository
     done
     echo "git-peer-sync: $name: updated $fetched over SSH and $exchanged through Syncthing of ${#repositories[@]} repositories"
+done
+
+# Changes the watcher missed reach the others now rather than on their next run.
+for repository in "${changed_repositories[@]}"; do
+    poke_peers "${repository#"$HOME"/}"
 done
 
 [[ -d "$exchange_dir" ]] && publish_exchange

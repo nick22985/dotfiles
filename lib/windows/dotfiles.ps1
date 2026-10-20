@@ -1,7 +1,8 @@
 # Windows dotfile links. modules/dotfiles/links.windows.list maps a path below env/ to where Windows
 # programs read it ("~" is the user profile, %VAR% is expanded). A link applies when its path belongs
 # to a selected profile's dotfiles.list bundle. An existing target is moved into the run receipt,
-# never deleted.
+# never deleted; entries of an existing directory that its source lacks are moved into the source
+# first, so untracked data stays with the link.
 
 function Get-DotfileBundlePaths {
     param([string[]]$Profiles)
@@ -90,8 +91,47 @@ function Backup-DotfileTarget {
     return $backup
 }
 
+function Merge-UntrackedDotfileEntries {
+    param([string]$Target, [string]$Source, [System.Collections.ArrayList]$Moved, [string]$Relative)
+
+    if ([IO.Path]::GetPathRoot($Target) -ne [IO.Path]::GetPathRoot($Source)) {
+        throw "Cannot move untracked entries of $Target into ${Source}: they are on different volumes"
+    }
+    $directory = $Target
+    if ($Relative) { $directory = Join-Path $Target $Relative }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
+        $name = $entry.Name
+        if ($Relative) { $name = Join-Path $Relative $entry.Name }
+        $destination = Join-Path $Source $name
+        $existing = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+        if ($null -eq $existing) {
+            if ($DryRun) {
+                Write-DotfilesLog info "Would move untracked $($entry.FullName) into $destination"
+            } else {
+                Move-Item -LiteralPath $entry.FullName -Destination $destination -ErrorAction Stop
+            }
+            [void]$Moved.Add($name)
+        } elseif ($entry.PSIsContainer -and -not $entry.LinkType -and $existing.PSIsContainer -and -not $existing.LinkType) {
+            Merge-UntrackedDotfileEntries $Target $Source $Moved $name
+        }
+    }
+}
+
+function Undo-MergedDotfileEntries {
+    param([string]$Target, [string]$Source, [System.Collections.ArrayList]$Moved)
+
+    if ($DryRun) { return }
+    for ($index = $Moved.Count - 1; $index -ge 0; $index--) {
+        try {
+            Move-Item -LiteralPath (Join-Path $Source $Moved[$index]) -Destination (Join-Path $Target $Moved[$index]) -ErrorAction Stop
+        } catch {
+            Write-DotfilesLog error "Failed to move $(Join-Path $Source $Moved[$index]) back to $(Join-Path $Target $Moved[$index])"
+        }
+    }
+}
+
 function New-DotfileLink {
-    param([string]$Source, [string]$Target, [string]$Backup)
+    param([string]$Source, [string]$Target, [string]$Backup, [System.Collections.ArrayList]$Moved)
 
     $isDirectory = Test-Path -LiteralPath $Source -PathType Container
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
@@ -114,6 +154,9 @@ function New-DotfileLink {
     }
     if ($Backup) {
         $lines += "Move-Item -LiteralPath $(ConvertTo-PowerShellLiteral $Backup) -Destination $(ConvertTo-PowerShellLiteral $Target)"
+        foreach ($name in $Moved) {
+            $lines += "Move-Item -LiteralPath $(ConvertTo-PowerShellLiteral (Join-Path $Source $name)) -Destination $(ConvertTo-PowerShellLiteral (Join-Path $Target $name))"
+        }
     }
     Add-DotfilesRestoreRecord $lines
 }
@@ -135,6 +178,20 @@ function Install-WindowsDotfiles {
             Write-DotfilesLog success "$($link.Target) is linked"
             continue
         }
+        $moved = New-Object System.Collections.ArrayList
+        if ($current -eq '' -and (Test-Path -LiteralPath $link.Target -PathType Container) -and (Test-Path -LiteralPath $link.Source -PathType Container)) {
+            try {
+                Merge-UntrackedDotfileEntries $link.Target $link.Source $moved ''
+            } catch {
+                Undo-MergedDotfileEntries $link.Target $link.Source $moved
+                Write-DotfilesLog error "Left $($link.Target) in place because its untracked entries could not be moved into $($link.Source); merge them by hand and rerun. $($_.Exception.Message)"
+                $ok = $false
+                continue
+            }
+            if (-not $DryRun -and $moved.Count -gt 0) {
+                Write-DotfilesLog info "Moved $($moved.Count) untracked entries of $($link.Target) into $($link.Source)"
+            }
+        }
         if ($DryRun) {
             if ($null -ne $current) { Write-DotfilesLog info "Would move the existing $($link.Target) into the run receipt" }
             Write-DotfilesLog info "Would link $($link.Target) to env/$($link.Path)"
@@ -143,10 +200,18 @@ function Install-WindowsDotfiles {
         try {
             $backup = ''
             if ($null -ne $current) { $backup = Backup-DotfileTarget $link.Target }
-            New-DotfileLink $link.Source $link.Target $backup
+            New-DotfileLink $link.Source $link.Target $backup $moved
             Write-DotfilesLog success "Linked $($link.Target) to env/$($link.Path)"
         } catch {
             Write-DotfilesLog error $_.Exception.Message
+            if ($backup -and $null -eq (Get-LinkTarget $link.Target)) {
+                try {
+                    Move-Item -LiteralPath $backup -Destination $link.Target -ErrorAction Stop
+                } catch {
+                    Write-DotfilesLog error "Failed to put $($link.Target) back from $backup"
+                }
+            }
+            if ((Get-LinkTarget $link.Target) -eq '') { Undo-MergedDotfileEntries $link.Target $link.Source $moved }
             $ok = $false
         }
     }

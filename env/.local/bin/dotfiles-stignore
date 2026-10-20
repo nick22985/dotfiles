@@ -4,9 +4,11 @@
 # state). Rules come from the global excludes file, .git/info/exclude and every .gitignore in the
 # superproject and its synced submodules. Git lets the last matching rule win and Syncthing the
 # first, so the rules are written in reverse. Tracked files below an ignored directory (sbx's
-# config.toml and Dockerfiles) are listed first as rooted "!" patterns: those still let Syncthing
-# skip the ignored directories. Patterns only this machine ignores (a relay keeps the private
-# submodule out) come first, from ~/.local/state/dotfiles/dotfiles.stignore.
+# config.toml and Dockerfiles) are listed before those rules as rooted "!" patterns. Syncthing stops
+# skipping ignored directories after the first "!" pattern with a slash, so the directories git
+# ignores whole (docker-compose's databases) are listed before the "!" patterns; otherwise Syncthing
+# walks into them and fails on the ones it can't read. Patterns only this machine ignores (a relay
+# keeps the private submodule out) come first, from ~/.local/state/dotfiles/dotfiles.stignore.
 #
 #   dotfiles-stignore           rewrite ~/dotfiles/.stignore when it changed (run by git-peer-sync,
 #                               once modules/syncthing has installed it)
@@ -65,6 +67,12 @@ repository_rules() {
     done < <(git -C "$repository" ls-files -- .gitignore '**/.gitignore' | awk -F/ '{ print NF "\t" $0 }' | sort -n | cut -f2-)
 }
 
+# The directories repository $1 ignores whole (no file in them is tracked), as rooted patterns; $2
+# is the repository's path below the superproject with a trailing slash ("" for the superproject).
+ignored_directories() {
+    git -C "$1" ls-files -o -i --exclude-standard --directory | sed -n "s#^\(.*\)/\$#$2\1#p" | escape | sed 's#^#/#'
+}
+
 # Initialized submodules that Syncthing carries (not below a rooted path of the base file), as
 # their path below the superproject.
 synced_submodules() {
@@ -89,6 +97,12 @@ generate() {
     cat -- "$base_file"
     [[ -d "$path/.git" || -f "$path/.git" ]] || return 0
     mapfile -t submodules < <(synced_submodules)
+
+    printf '\n// Directories git ignores whole, ahead of the "!" patterns so Syncthing skips them\n'
+    ignored_directories "$path" ""
+    for relative in "${submodules[@]}"; do
+        ignored_directories "$path/$relative" "$relative/"
+    done
 
     printf '\n// Tracked files below ignored directories\n'
     git -C "$path" ls-files -ci --exclude-standard | escape | sed 's#^#!/#'

@@ -67,8 +67,48 @@ validate_dotfile_path() {
         && "$path" != ../* && "$path" != */../* && "$path" != */.. ]]
 }
 
+merge_untracked_dotfile_entries() {
+    local target="$1" source="$2" relative="${3:-}"
+    local entry name
+
+    if [[ ! -r "$target/$relative" || ! -x "$target/$relative" ]]; then
+        log_error "Cannot read $target/$relative to merge it into $source/$relative"
+        return 1
+    fi
+    while IFS= read -r -d '' entry; do
+        name="$relative${entry##*/}"
+        if [[ ! -e "$source/$name" && ! -L "$source/$name" ]]; then
+            if [[ "$(stat -c %d -- "$entry")" != "$(stat -c %d -- "$source/$relative")" ]]; then
+                log_error "Cannot move untracked $target/$name into $source/$name: they are on different filesystems"
+                return 1
+            fi
+            if [[ "$DRY_RUN" == "1" ]]; then
+                log_info "Would move untracked $target/$name into $source/$name"
+            elif ! mv -n -- "$entry" "$source/$name" || [[ -e "$entry" || -L "$entry" ]]; then
+                log_error "Failed to move untracked $target/$name into $source/$name"
+                return 1
+            fi
+            dotfile_merged_entries+=("$name")
+        elif [[ -d "$entry" && ! -L "$entry" && -d "$source/$name" && ! -L "$source/$name" ]]; then
+            merge_untracked_dotfile_entries "$target" "$source" "$name/" || return 1
+        elif [[ ! -f "$entry" || -L "$entry" ]] || ! cmp -s -- "$entry" "$source/$name"; then
+            dotfile_shadowed_count=$((dotfile_shadowed_count + 1))
+        fi
+    done < <(find "$target/$relative" -mindepth 1 -maxdepth 1 -print0)
+}
+
+unmerge_untracked_dotfile_entries() {
+    local target="$1" source="$2" index name
+
+    for ((index = ${#dotfile_merged_entries[@]} - 1; index >= 0; index--)); do
+        name="${dotfile_merged_entries[index]}"
+        mv -n -- "$source/$name" "$target/$name" \
+            || log_error "Failed to move $source/$name back to $target/$name"
+    done
+}
+
 deploy_dotfile_bundles() {
-    local path source target source_real target_real backup backup_parent
+    local path source target source_real target_real backup backup_parent restore name
     local receipt_dir="${DOTFILES_RECEIPT_DIR:-}"
     local status=0
 
@@ -98,6 +138,22 @@ deploy_dotfile_bundles() {
             continue
         fi
 
+        if [[ -e "$target" || -L "$target" ]] && [[ -z "$receipt_dir" && "$DRY_RUN" != "1" ]]; then
+            log_error "Cannot replace $target without a run receipt backup directory"
+            status=1
+            continue
+        fi
+
+        dotfile_merged_entries=()
+        dotfile_shadowed_count=0
+        if [[ -d "$target" && ! -L "$target" && -d "$source" ]] \
+            && ! merge_untracked_dotfile_entries "$target" "$source"; then
+            unmerge_untracked_dotfile_entries "$target" "$source"
+            log_error "Left $target in place because its untracked entries could not be moved into $source; merge them by hand and rerun"
+            status=1
+            continue
+        fi
+
         if [[ "$DRY_RUN" == "1" ]]; then
             if [[ -e "$target" || -L "$target" ]]; then
                 log_info "Would back up and replace $target"
@@ -107,20 +163,22 @@ deploy_dotfile_bundles() {
             continue
         fi
 
+        if (( ${#dotfile_merged_entries[@]} > 0 )); then
+            log_info "Moved ${#dotfile_merged_entries[@]} untracked entries of $target into $source"
+        fi
         if [[ -e "$target" || -L "$target" ]]; then
-            if [[ -z "$receipt_dir" ]]; then
-                log_error "Cannot replace $target without a run receipt backup directory"
-                status=1
-                continue
-            fi
             backup="$receipt_dir/backups/user/$path"
             backup_parent="$(dirname "$backup")"
             mkdir -p "$backup_parent"
             if ! mv -- "$target" "$backup"; then
                 log_error "Failed to back up $target"
+                unmerge_untracked_dotfile_entries "$target" "$source"
                 status=1
                 continue
             fi
+        fi
+        if (( dotfile_shadowed_count > 0 )); then
+            log_warn "$dotfile_shadowed_count entries of $target differ from $source; their old copies are in $backup"
         fi
 
         mkdir -p "$(dirname "$target")"
@@ -129,11 +187,16 @@ deploy_dotfile_bundles() {
             if [[ -n "$backup" ]]; then
                 mv -- "$backup" "$target" \
                     || log_error "Failed to restore $target after link failure"
+                unmerge_untracked_dotfile_entries "$target" "$source"
             fi
             status=1
         elif [[ -n "$backup" ]]; then
-            receipt_add_restore user "$(printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q' \
+            restore="$(printf 'rm -f -- %q\nmkdir -p %q\nmv -- %q %q' \
                 "$target" "$(dirname "$target")" "$backup" "$target")"
+            for name in "${dotfile_merged_entries[@]}"; do
+                restore+=$'\n'"$(printf 'mv -n -- %q %q' "$source/$name" "$target/$name")"
+            done
+            receipt_add_restore user "$restore"
         else
             receipt_add_restore user "$(printf 'rm -f -- %q' "$target")"
         fi

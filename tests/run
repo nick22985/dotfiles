@@ -23,7 +23,7 @@ fail() {
 
 "$repo_dir/run" --help >/dev/null || fail "top-level help failed"
 
-audit_help="$($repo_dir/run audit --help)"
+audit_help="$("$repo_dir"/run audit --help)"
 grep -q '^Usage: ./run audit \[options\]$' <<< "$audit_help" \
     || fail "audit help does not name ./run audit"
 if grep -q 'scripts/audit-install' <<< "$audit_help"; then
@@ -124,19 +124,92 @@ printf 'printf intermediate > %q\n' "$order_file" > "$order_receipt/restore.d/us
 "$order_receipt/restore-user.sh"
 [[ "$(< "$order_file")" == original ]] || fail "restore records did not run newest first"
 
+merge_root="$test_dir/merge"
+merge_source="$merge_root/env/.config/app"
+merge_home="$merge_root/home"
+merge_receipt="$merge_root/receipt"
+mkdir -p "$merge_root/profiles/merge" "$merge_source/data/redis" \
+    "$merge_home/.config/app/data/postgres" "$merge_home/.config/app/data/redis" "$merge_receipt"
+printf '.config/app\n' > "$merge_root/profiles/merge/dotfiles.list"
+printf 'gitdir: elsewhere\n' > "$merge_source/.git"
+printf 'managed\n' > "$merge_source/config.yml"
+printf 'new\n' > "$merge_source/data/redis/dump.rdb"
+printf 'local\n' > "$merge_home/.config/app/config.yml"
+printf 'secret\n' > "$merge_home/.config/app/.env"
+printf '16\n' > "$merge_home/.config/app/data/postgres/PG_VERSION"
+printf 'old\n' > "$merge_home/.config/app/data/redis/dump.rdb"
+cp -- "$deploy_receipt/restore-user.sh" "$merge_receipt/"
+merge_deploy() {
+    (
+        set +eu
+        export DOTFILES_DIR="$repo_dir" DOTFILES_RECEIPT_DIR="$merge_receipt" HOME="$merge_home"
+        export DOTFILES_ACTIVE_PROFILES=merge DOTFILES_TEMP_DIR="$merge_root/tracking"
+        source "$repo_dir/lib/utils.sh"
+        source "$repo_dir/lib/dotfiles.sh"
+        dotfile_profile_dir="$merge_root/profiles"
+        dotfile_source_dir="${merge_env:-$merge_root/env}"
+        deploy_dotfile_bundles
+    )
+}
+merge_deploy >/dev/null || fail "whole-directory link with untracked data failed"
+[[ -L "$merge_home/.config/app" ]] || fail "whole-directory target was not linked"
+[[ "$(< "$merge_source/data/postgres/PG_VERSION")" == 16 ]] \
+    || fail "untracked nested data was not moved into the source"
+[[ "$(< "$merge_source/.env")" == secret ]] || fail "untracked file was not moved into the source"
+[[ "$(< "$merge_source/config.yml")" == managed ]] || fail "merge overwrote a source file"
+[[ "$(< "$merge_source/data/redis/dump.rdb")" == new ]] || fail "merge overwrote nested source data"
+[[ "$(< "$merge_receipt/backups/user/.config/app/data/redis/dump.rdb")" == old ]] \
+    || fail "shadowed target data was not kept in the backup"
+"$merge_receipt/restore-user.sh"
+[[ -d "$merge_home/.config/app" && ! -L "$merge_home/.config/app" ]] \
+    || fail "restore did not put the target directory back"
+[[ "$(< "$merge_home/.config/app/data/postgres/PG_VERSION")" == 16 \
+    && "$(< "$merge_home/.config/app/.env")" == secret \
+    && "$(< "$merge_home/.config/app/config.yml")" == local ]] \
+    || fail "restore did not return merged entries to the target"
+[[ ! -e "$merge_source/data/postgres" && ! -e "$merge_source/.env" ]] \
+    || fail "restore left merged entries in the source"
+
+if ((EUID != 0)); then
+    rm -rf -- "$merge_receipt/restore.d" "$merge_receipt/backups"
+    chmod 000 "$merge_home/.config/app/data/redis"
+    merge_deploy >/dev/null && fail "unreadable target directory was replaced"
+    chmod 755 "$merge_home/.config/app/data/redis"
+    [[ -d "$merge_home/.config/app" && ! -L "$merge_home/.config/app" \
+        && -f "$merge_home/.config/app/.env" && -f "$merge_home/.config/app/data/postgres/PG_VERSION" ]] \
+        || fail "failed merge did not move untracked entries back to the target"
+    [[ ! -e "$merge_source/.env" && ! -e "$merge_source/data/postgres" ]] \
+        || fail "failed merge left untracked entries in the source"
+fi
+
+if [[ -d /dev/shm && -w /dev/shm && "$(stat -c %d /dev/shm)" != "$(stat -c %d "$merge_root")" ]]; then
+    merge_env="$(mktemp -d /dev/shm/dotfiles-merge-test.XXXXXX)"
+    mkdir -p "$merge_env/.config/app"
+    printf 'gitdir: elsewhere\n' > "$merge_env/.config/app/.git"
+    rm -rf -- "$merge_receipt/restore.d" "$merge_receipt/backups"
+    set +e
+    merge_env="$merge_env" merge_deploy >/dev/null
+    status=$?
+    set -e
+    rm -rf -- "$merge_env"
+    [[ "$status" != 0 ]] || fail "merge across filesystems did not fail"
+    [[ -d "$merge_home/.config/app" && ! -L "$merge_home/.config/app" && -f "$merge_home/.config/app/.env" ]] \
+        || fail "merge across filesystems replaced the target"
+fi
+
 set +e
 "$repo_dir/run" --dry --profile core >/dev/null 2>&1
 status=$?
 set -e
 [[ "$status" == 2 ]] || fail "option-only invocation returned $status instead of 2"
 
-plan_one="$($repo_dir/run plan --profile desktop --desktop both)"
-plan_two="$($repo_dir/run plan --profile desktop --desktop both)"
+plan_one="$("$repo_dir"/run plan --profile desktop --desktop both)"
+plan_two="$("$repo_dir"/run plan --profile desktop --desktop both)"
 [[ "$plan_one" == "$plan_two" ]] || fail "plan output changed between identical runs"
 grep -q '^  hypr ' <<< "$plan_one" || fail "both desktop plan omitted Hyprland"
 grep -q '^  kde-plasma ' <<< "$plan_one" || fail "both desktop plan omitted Plasma"
 
-default_plan="$($repo_dir/run plan)"
+default_plan="$("$repo_dir"/run plan)"
 grep -q '^Profiles: core desktop$' <<< "$default_plan" \
     || fail "default plan did not select the desktop profile"
 grep -q '^Desktop: both$' <<< "$default_plan" \
@@ -144,7 +217,7 @@ grep -q '^Desktop: both$' <<< "$default_plan" \
 grep -q '^  hypr ' <<< "$default_plan" || fail "default plan omitted Hyprland"
 grep -q '^  kde-plasma ' <<< "$default_plan" || fail "default plan omitted Plasma"
 
-core_plan="$($repo_dir/run plan --profile core)"
+core_plan="$("$repo_dir"/run plan --profile core)"
 if grep -Eq '^  (hypr|kde-plasma) ' <<< "$core_plan"; then
     fail "explicit core profile did not override the configured default"
 fi
@@ -187,10 +260,10 @@ for table in "$repo_dir"/tests/fixtures/package-tables/*.list; do
     done
 done
 
-catalog_output="$($repo_dir/run list)"
+catalog_output="$("$repo_dir"/run list)"
 grep -q '^  kube  *ubuntu ' <<< "$catalog_output" || fail "run list omitted the kube profile's platform"
 grep -q '^  docker  *arch ' <<< "$catalog_output" || fail "run list omitted the docker module"
-show_output="$($repo_dir/run show docker)"
+show_output="$("$repo_dir"/run show docker)"
 grep -q '^Profiles: development$' <<< "$show_output" || fail "run show docker did not name its profile"
 grep -q 'docker.service' <<< "$show_output" || fail "run show docker omitted its service"
 set +e
@@ -199,11 +272,11 @@ status=$?
 set -e
 [[ "$status" == 2 ]] || fail "run show of an unknown name returned $status instead of 2"
 
-walker_plan="$($repo_dir/run plan --profile desktop --desktop hyprland --script walker)"
+walker_plan="$("$repo_dir"/run plan --profile desktop --desktop hyprland --script walker)"
 grep -q '^  hypr ' <<< "$walker_plan" || fail "Walker plan omitted its Hyprland dependency"
 grep -q '^  walker ' <<< "$walker_plan" || fail "Walker plan omitted Walker"
 
-ssh_plan="$($repo_dir/run plan --profile ssh-server --script ssh)"
+ssh_plan="$("$repo_dir"/run plan --profile ssh-server --script ssh)"
 grep -Eq '^  ssh[[:space:]]+root[[:space:]]+high' <<< "$ssh_plan" \
     || fail "SSH module is not marked high risk"
 
@@ -245,7 +318,7 @@ mkdir -p "$XDG_STATE_HOME/dotfiles"
 exec 8> "$XDG_STATE_HOME/dotfiles/apply.lock"
 flock -n 8
 set +e
-lock_output="$($repo_dir/run apply --profile core --script packages --dry 2>&1)"
+lock_output="$("$repo_dir"/run apply --profile core --script packages --dry 2>&1)"
 status=$?
 set -e
 flock -u 8

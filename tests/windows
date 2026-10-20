@@ -165,6 +165,57 @@ if grep -qx 'use --global node@22.22.3' "$MISE_LOG"; then
 fi
 expect_status 0 audit --host windows --profile development --check
 
+merge_dir="$test_dir/merge"
+merge_target="$merge_dir/home/app"
+mkdir -p "$merge_dir/modules/dotfiles" "$merge_dir/profiles/merge" "$merge_dir/env/app/data/redis" \
+    "$merge_target/data/postgres" "$merge_target/data/redis" "$merge_dir/receipt"
+printf 'app ~/app\n' > "$merge_dir/modules/dotfiles/links.windows.list"
+printf 'app\n' > "$merge_dir/profiles/merge/dotfiles.list"
+printf 'managed\n' > "$merge_dir/env/app/config.yml"
+printf 'new\n' > "$merge_dir/env/app/data/redis/dump.rdb"
+printf 'local\n' > "$merge_target/config.yml"
+printf 'secret\n' > "$merge_target/.env"
+printf '16\n' > "$merge_target/data/postgres/PG_VERSION"
+printf 'old\n' > "$merge_target/data/redis/dump.rdb"
+merge_install() {
+    DOTFILES_DIR="$merge_dir" DOTFILES_RECEIPT_DIR="$merge_dir/receipt" HOME="$merge_dir/home" \
+        "$pwsh_bin" -NoProfile -Command '
+            . (Join-Path $env:REPO_DIR "lib/windows/common.ps1")
+            . (Join-Path $env:REPO_DIR "lib/windows/dotfiles.ps1")
+            if (-not (Install-WindowsDotfiles @("merge"))) { exit 1 }
+        ' > "$test_dir/out" 2>&1
+}
+merge_install || { cat "$test_dir/out" >&2; fail "linking a directory with untracked data failed"; }
+[[ -L "$merge_target" ]] || fail "the directory target was not linked"
+[[ "$(cat "$merge_dir/env/app/data/postgres/PG_VERSION")" == 16 ]] \
+    || fail "untracked nested data was not moved into the source"
+[[ "$(cat "$merge_dir/env/app/.env")" == secret ]] || fail "an untracked file was not moved into the source"
+[[ "$(cat "$merge_dir/env/app/config.yml")" == managed ]] || fail "the merge overwrote a source file"
+[[ "$(cat "$merge_dir/env/app/data/redis/dump.rdb")" == new ]] || fail "the merge overwrote nested source data"
+RECEIPT="$merge_dir/receipt" "$pwsh_bin" -NoProfile -Command '
+    $ErrorActionPreference = "Stop"
+    $records = Join-Path $env:RECEIPT "restore.d/user"
+    foreach ($record in @(Get-ChildItem -LiteralPath $records -Filter "*.ps1" | Sort-Object Name -Descending)) { . $record.FullName }
+' || fail "restoring the merged directory failed"
+[[ -d "$merge_target" && ! -L "$merge_target" ]] || fail "restore did not put the directory back"
+[[ "$(cat "$merge_target/data/postgres/PG_VERSION")" == 16 && "$(cat "$merge_target/.env")" == secret \
+    && "$(cat "$merge_target/config.yml")" == local ]] \
+    || fail "restore did not return the merged entries to the directory"
+[[ ! -e "$merge_dir/env/app/data/postgres" && ! -e "$merge_dir/env/app/.env" ]] \
+    || fail "restore left merged entries in the source"
+
+if ((EUID != 0)); then
+    rm -rf -- "$merge_dir/receipt/restore.d" "$merge_dir/receipt/backups"
+    chmod 000 "$merge_target/data/redis"
+    merge_install && fail "an unreadable directory target was replaced"
+    chmod 755 "$merge_target/data/redis"
+    [[ -d "$merge_target" && ! -L "$merge_target" && -f "$merge_target/.env" \
+        && -f "$merge_target/data/postgres/PG_VERSION" ]] \
+        || fail "a failed merge did not move the untracked entries back"
+    [[ ! -e "$merge_dir/env/app/.env" && ! -e "$merge_dir/env/app/data/postgres" ]] \
+        || fail "a failed merge left untracked entries in the source"
+fi
+
 set +e
 env -u DOTFILES_RUNNER_ACTIVE "$pwsh_bin" -NoProfile -File "$repo_dir/modules/packages/install.ps1" >/dev/null 2>&1
 status=$?

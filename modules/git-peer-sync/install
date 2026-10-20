@@ -90,5 +90,5 @@ if [[ "$DRY_RUN" != "1" ]]; then
 fi
 apply_module_services git-peer-sync || status=1
 
-((status == 0)) && log_success "Git peer sync runs every 10 minutes"
+((status == 0)) && log_success "Git peer sync runs every 10 minutes and on every change"
 exit "$status"

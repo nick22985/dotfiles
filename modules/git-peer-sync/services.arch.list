@@ -1,2 +1,3 @@
 # scope action requirement unit
 user enable-now required git-peer-sync.timer
+user enable-now required git-peer-sync-watch.service

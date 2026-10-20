@@ -15,3 +15,4 @@ clang                    =                       -
 syncthing                =                       -
 vineflower               aur:vineflower          -
 infisical-bin            aur:infisical-bin       -
+inotify-tools            =                       -

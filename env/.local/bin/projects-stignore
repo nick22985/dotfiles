@@ -7,6 +7,9 @@
 # A repository converted to that layout by hand (sbx does this) is a normal checkout elsewhere; the
 # two layouts can't be merged, so it is skipped entirely and its committed work moves through
 # git-peer-sync.
+# Build output and temporary directories (dist, build, out, tmp, ...) are ignored where git ignores
+# them; a committed dist still syncs, and so do the data directories and files like .env that git
+# ignores.
 #
 #   projects-stignore           rewrite ~/projects/.stignore when it changed (run by git-peer-sync
 #                               and modules/sync-repos so new repositories are covered quickly)
@@ -20,6 +23,7 @@ orgs_file="$private_dir/orgs.txt"
 repos_file="$private_dir/repos.txt"
 base_file="$dotfiles_dir/modules/syncthing/projects.stignore"
 path="$HOME/projects"
+build_names=(dist build out bin .pnpm-store tmp temp .tmp)
 
 [[ -f "$base_file" ]] || { echo "projects-stignore: missing $base_file" >&2; exit 1; }
 
@@ -38,7 +42,7 @@ fi
 
 bare_internals() {
     printf '\n// Bare repository %s\n' "$1"
-    for name in HEAD FETCH_HEAD ORIG_HEAD MERGE_RR COMMIT_EDITMSG config description hooks info logs objects refs packed-refs worktrees modules lfs rr-cache shallow branches index; do
+    for name in HEAD FETCH_HEAD ORIG_HEAD MERGE_RR COMMIT_EDITMSG config description hooks info logs objects refs packed-refs worktrees modules lfs rr-cache shallow branches index peer-sync; do
         printf '%s/%s\n' "$1" "$name"
     done
 }
@@ -58,10 +62,41 @@ sbx_runtime_entries() {
         -type d -name .sbx -print0 -prune 2>/dev/null | sort -z)
 }
 
+ignored_build_directories() {
+    local git_path root directory component pattern patterns added
+    local -a names=(.sbx) components
+    while IFS= read -r pattern; do
+        names+=("$pattern")
+    done < <(sed -n 's#^(?d)\([^/]*\)$#\1#p' "$base_file")
+    while IFS= read -r -d '' git_path; do
+        root="${git_path%/.git}"
+        patterns=""
+        added=""
+        while IFS= read -r -d '' directory; do
+            [[ "$directory" == */ ]] || continue
+            directory="${directory%/}"
+            [[ " ${build_names[*]} " == *" ${directory##*/} "* ]] || continue
+            [[ -n "$added" && "$directory" == "$added"/* ]] && continue
+            IFS=/ read -r -a components <<< "$directory"
+            for component in "${components[@]}"; do
+                for pattern in "${names[@]}"; do
+                    # shellcheck disable=SC2053 # the pattern is a glob
+                    [[ "$component" == $pattern ]] && continue 3
+                done
+            done
+            patterns+="(?d)${root#"$path"}/$(sed 's/[][*?{}\\]/\\&/g' <<< "$directory")"$'\n'
+            added="$directory"
+        done < <(git -C "$root" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null | LC_ALL=C sort -z)
+        [[ -n "$patterns" ]] && printf '\n// Build output git ignores in %s\n%s' "${root#"$path"}" "$patterns"
+    done < <(find "$path" \( -name node_modules -o -name target -o -name .bare -o -name .stversions -o -name '.Trash-*' -o -path '*/.docker/db' \) -prune -o \
+        -name .git -print0 -prune 2>/dev/null | sort -z)
+}
+
 generate() {
     cat -- "$base_file"
     [[ -d "$path" ]] || return 0
     sbx_runtime_entries
+    ignored_build_directories
     for root in "${declared_bare[@]}"; do
         bare_internals "${root#"$path"}"
     done

@@ -1,4 +1,6 @@
 # Development-only configuration.
+.claude/CLAUDE.md
+.claude/rules
 .config/.nickInstall
 .config/docker-compose
 .config/entr

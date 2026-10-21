@@ -12,7 +12,7 @@ hl.on("hyprland.start", function()
 	-- and outside a uwsm session graphical-session.target never starts them. Apps launched through
 	-- elephant inherit its environment; without XCURSOR_SIZE, X11 apps size the cursor from the DPI.
 	-- elephant restarts because it may already be running without these variables.
-	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE XCURSOR_SIZE HYPRCURSOR_SIZE BRIDGE_PATH PROTON_REMOTE_DEBUG_CMD PRESSURE_VESSEL_FILESYSTEMS_RW && systemctl --user start hyprpolkitagent swaync hypridle game-presence && systemctl --user restart elephant walker; systemctl --user start wayvnc")
+	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE XCURSOR_SIZE HYPRCURSOR_SIZE BRIDGE_PATH PROTON_REMOTE_DEBUG_CMD PRESSURE_VESSEL_FILESYSTEMS_RW && systemctl --user start hyprpolkitagent swaync hypridle game-presence now-playing && systemctl --user restart elephant walker; systemctl --user start wayvnc")
 	hl.exec_cmd("uwsm app -- 1password --silent")
 	hl.exec_cmd("uwsm app -- steam")
 	hl.exec_cmd("uwsm app -- tailscale systray")

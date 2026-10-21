@@ -1,0 +1,7 @@
+[Unit]
+Description=Show a notification whenever a new track starts playing
+
+[Service]
+ExecStart=%h/.config/eww/scripts/media.sh notify
+Restart=always
+RestartSec=5

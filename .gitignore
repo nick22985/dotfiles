@@ -16,6 +16,7 @@ env/.config/eww/tmp/
 env/.config/swaync/position.css
 
 .claude/
+!env/.claude/
 .sbx/
 .config/sbx/config.private.toml
 env/.config/sbx/image-dirs/

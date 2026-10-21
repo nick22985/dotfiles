@@ -8,8 +8,6 @@
 
 MONITORS_FILE=~/.cache/eww/monitors.list
 PANEL_WIDTH=330
-BAND_WIDTH=2560
-EDGE_GAP=20
 
 close_all() {
     local w
@@ -34,30 +32,9 @@ show_page() {
 
 # Right margin that puts the panel under the pill for the monitor's layout.
 panel_offset() {
-    local name size width height scale layout
+    local name
     name=$(sed -n "$(($1 + 1))p" "$MONITORS_FILE" 2>/dev/null)
-    size=$(hyprctl -j monitors 2>/dev/null \
-        | jq -r --arg n "$name" '.[] | select(.name == $n) | "\(.width) \(.height) \(.scale)"')
-    read -r width height scale <<< "$size"
-
-    if [[ -z "$width" ]]; then
-        echo "$EDGE_GAP"
-        return
-    fi
-    width=$(awk -v w="$width" -v s="$scale" 'BEGIN { printf "%d", w / s }')
-    height=$(awk -v h="$height" -v s="$scale" 'BEGIN { printf "%d", h / s }')
-
-    if ! ~/.config/eww/scripts/ultrawide-layout.sh is-ultrawide "$width" "$height"; then
-        echo "$EDGE_GAP"
-        return
-    fi
-
-    layout=$(~/.config/eww/scripts/ultrawide-layout.sh get)
-    case "$layout" in
-        band)   echo $(( (width - BAND_WIDTH) / 2 + EDGE_GAP )) ;;
-        thirds) echo $(( width / 6 - PANEL_WIDTH / 2 )) ;;
-        *)      echo "$EDGE_GAP" ;;
-    esac
+    ~/.config/eww/scripts/ultrawide-layout.sh margin "$name" "$PANEL_WIDTH"
 }
 
 case "$1" in

@@ -60,7 +60,7 @@
 
 ;; Notification history for the control center: {count, items: [{id, app, summary, body, icon, urgency, ago}]}
 (deflisten notifications :initial '{"count":0,"items":[]}'
-  "~/.config/eww/scripts/notifications.py listen")
+  "~/.config/eww/scripts/notifications.sh listen")
 
 ;; Recent picked colours; colorpicker.sh pushes updates after each pick
 (defpoll colorpicker_colors :interval "600s" :initial "[]"

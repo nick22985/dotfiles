@@ -3,5 +3,6 @@
 .config/hypr
 .config/swappy
 .config/swaync
+.config/systemd/user/swaync.service.d/monitor.conf
 .config/walker
 .config/xdg-desktop-portal

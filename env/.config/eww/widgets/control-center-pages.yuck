@@ -267,7 +267,7 @@ EWW_PW_END")
        :space-evenly false
     (button :class "cc-notif-main"
             :hexpand true
-            :onclick "setsid -f sh -c '~/.config/eww/scripts/notifications.py open ${n.id}; ~/.config/eww/scripts/control-center.sh close'"
+            :onclick "setsid -f sh -c '~/.config/eww/scripts/notifications.sh open ${n.id}; ~/.config/eww/scripts/control-center.sh close'"
       (box :space-evenly false
            :spacing 10
         (box :class "cc-notif-icon"
@@ -303,7 +303,7 @@ EWW_PW_END")
     (button :class "cc-icon-btn cc-notif-close"
             :valign "start"
             :tooltip "Dismiss"
-            :onclick "setsid -f ~/.config/eww/scripts/notifications.py dismiss ${n.id}"
+            :onclick "setsid -f ~/.config/eww/scripts/notifications.sh dismiss ${n.id}"
       (label :text "󰅖"))))
 
 (defwidget cc_notifications_page []
@@ -313,7 +313,7 @@ EWW_PW_END")
     (cc_page_head :title "Notifications"
       (button :class "cc-chip"
               :visible {notifications.count > 0}
-              :onclick "setsid -f ~/.config/eww/scripts/notifications.py clear"
+              :onclick "setsid -f ~/.config/eww/scripts/notifications.sh clear"
         (label :text "Clear all")))
     (cc_list
       (box :visible {notifications.count == 0}

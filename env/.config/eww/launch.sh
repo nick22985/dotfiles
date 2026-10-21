@@ -218,4 +218,10 @@ setsid ~/.config/eww/scripts/monitor-watcher.sh \
     >> ~/.cache/eww/monitor-watcher.log 2>&1 </dev/null &
 disown 2>/dev/null || true
 
+# Keeps swaync's popups on the focused monitor.
+pkill -f "notification-position.sh listen" 2>/dev/null || true
+setsid ~/.config/eww/scripts/notification-position.sh listen \
+    >> ~/.cache/eww/notification-position.log 2>&1 </dev/null &
+disown 2>/dev/null || true
+
 flock -u 9

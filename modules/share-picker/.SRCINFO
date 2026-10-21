@@ -1,0 +1,24 @@
+pkgbase = hyprland-preview-share-picker-patched
+	pkgdesc = Hyprland share picker with window and monitor previews, with fixed window captures
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/WhySoBad/hyprland-preview-share-picker
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = git
+	depends = gtk4
+	depends = gtk4-layer-shell
+	depends = xdg-desktop-portal-hyprland
+	depends = hyprland
+	provides = hyprland-preview-share-picker
+	conflicts = hyprland-preview-share-picker
+	conflicts = hyprland-preview-share-picker-git
+	source = hyprland-preview-share-picker::git+https://github.com/WhySoBad/hyprland-preview-share-picker#commit=7e11349d3f6ecae75b42be73d6a258503656cc8f
+	source = hyprland-protocols::git+https://github.com/hyprwm/hyprland-protocols
+	source = fix-captures.patch
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = fdf3993a8fd8281ef64129117a5f83f759bab52179eb61632db65023ceecadb2
+
+pkgname = hyprland-preview-share-picker-patched

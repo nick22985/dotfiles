@@ -547,9 +547,9 @@ install_packages_pacman() {
     if [ ${#packages_to_install[@]} -gt 0 ]; then
         log_info "Installing packages: ${packages_to_install[*]}"
         if [[ $DRY_RUN == "0" ]]; then
-            # Try to install packages and capture output
+            # Sync and upgrade with the install: a stale database 404s on new packages, and a sync alone is a partial upgrade
             local install_output
-            if install_output=$(sudo pacman -S --needed --noconfirm -- "${packages_to_install[@]}" 2>&1); then
+            if install_output=$(sudo pacman -Syu --needed --noconfirm -- "${packages_to_install[@]}" 2>&1); then
                 log_success "All packages installed successfully"
             else
                 # Parse the output to find specific failed packages
@@ -563,8 +563,9 @@ install_packages_pacman() {
                 if [ ${#failed_packages[@]} -gt 0 ]; then
                     log_error "Failed to install packages: ${failed_packages[*]} (not found in repositories)"
                 else
-                    # Format multi-line error output to be more readable
-                    local formatted_error=$(echo "$install_output" | head -5 | tr '\n' '; ' | sed 's/; $//')
+                    # pacman prints the cause after the transaction summary, so prefer its error lines
+                    local formatted_error=$(echo "$install_output" | grep -E '^(error|warning):' | head -5 | tr '\n' '; ' | sed 's/; $//')
+                    [[ -n "$formatted_error" ]] || formatted_error=$(echo "$install_output" | tail -5 | tr '\n' '; ' | sed 's/; $//')
                     log_error "Package installation failed: $formatted_error"
                 fi
                 status=1

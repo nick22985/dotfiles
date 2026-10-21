@@ -1,4 +1,5 @@
 package             arch
+cuda                =
 nvidia-open         =
 nvidia-utils        =
 nvidia-prime        =

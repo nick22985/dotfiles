@@ -37,15 +37,19 @@ find_icon() {
     return 1
 }
 
-desktop_icon() {
-    local name="$1" dir file
+desktop_value() {
+    local name="$1" key="$2" dir file
     [[ "$name" =~ ^[[:alnum:]_.+-]+$ ]] || return 1
     for dir in "${APP_DIRS[@]}"; do
         for file in "$dir/$name.desktop" "$dir/${name,,}.desktop"; do
-            [[ -f "$file" ]] && { sed -n 's/^Icon=//p' "$file" | head -n1; return; }
+            [[ -f "$file" ]] && { sed -n "s/^$key=//p" "$file" | head -n1; return; }
         done
     done
     return 1
+}
+
+desktop_icon() {
+    desktop_value "$1" Icon
 }
 
 first_icon() {

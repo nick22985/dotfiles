@@ -15,4 +15,19 @@ elif ! elephant service enable; then
     exit 1
 fi
 apply_module_services walker || exit 1
+
+elephant_invocation="$(systemctl --user show -p InvocationID --value elephant 2>/dev/null)"
+if [[ -n "$elephant_invocation" ]] && journalctl --user -q -o cat "_SYSTEMD_INVOCATION_ID=$elephant_invocation" 2>/dev/null | grep -q 'plugin was built with a different version'; then
+    mapfile -t elephant_packages < <(pacman -Qqs '^elephant')
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would rebuild ${elephant_packages[*]}, since Elephant's providers were built with a different Go version"
+    else
+        log_info "Rebuilding ${elephant_packages[*]}, since Elephant's providers were built with a different Go version"
+        if ! paru -S --rebuild --noconfirm --removemake -- "${elephant_packages[@]}"; then
+            log_error "Failed to rebuild the Elephant packages"
+            exit 1
+        fi
+        systemctl --user try-restart elephant walker
+    fi
+fi
 log_success "Walker is configured"

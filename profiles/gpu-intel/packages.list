@@ -1,4 +1,5 @@
 package             arch
 intel-media-driver  =
+shaderc             =
 vulkan-intel        =
 lib32-vulkan-intel  multilib:lib32-vulkan-intel

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "rpc-bridge"
+
+version="1.4.1.2"
+url="https://github.com/enderice2/rpc-bridge/releases/download/v$version/bridge.zip"
+sha256="15a7876a6ca6773f36fc1b1bdbbd67dd92d07836ad7cbfc9dca0dc036adc7286"
+target="$HOME/.local/share/rpc-bridge/bridge.exe"
+
+if [[ "$(sha256sum "$target" 2>/dev/null | cut -d' ' -f1)" == "$sha256" ]]; then
+    log_success "rpc-bridge $version is installed"
+    exit 0
+fi
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would install rpc-bridge $version to $target"
+    exit 0
+fi
+
+tmp="$(mktemp -d)" || exit 1
+trap 'rm -rf -- "$tmp"' EXIT
+if ! curl -fsSL --retry 3 -o "$tmp/bridge.zip" "$url" || ! bsdtar -xOf "$tmp/bridge.zip" bridge.exe > "$tmp/bridge.exe"; then
+    log_error "Failed to download rpc-bridge $version from $url"
+    exit 1
+fi
+if [[ "$(sha256sum "$tmp/bridge.exe" | cut -d' ' -f1)" != "$sha256" ]]; then
+    log_error "rpc-bridge $version's bridge.exe doesn't match the pinned hash, so it wasn't installed"
+    exit 1
+fi
+if ! mkdir -p "${target%/*}" || ! install -m 0755 "$tmp/bridge.exe" "$target"; then
+    log_error "Failed to install bridge.exe to $target"
+    exit 1
+fi
+log_success "rpc-bridge $version is installed"

@@ -1,5 +1,8 @@
 /* Catppuccin Macchiato with the Hyprland border gradient as the accent, matching eww
    (eww/styles/_palette.scss). */
+
+@import url("position.css");
+
 @define-color crust #181926;
 @define-color surface0 #363a4f;
 @define-color surface1 #494d64;

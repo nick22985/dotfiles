@@ -25,7 +25,7 @@ show_page() {
         1) eww update wifi_enabled="$(nmcli radio wifi 2>/dev/null)"; "$scripts/wifi.sh" rescan ;;
         2) eww update bt_devices="$("$scripts/bluetooth.sh" list)" ;;
         3) eww update clip_entries="$("$scripts/clipboard.sh" list)" ;;
-        4) eww update audio_devices="$("$scripts/audio-devices.sh" list)" ;;
+        4) eww update audio_devices="$("$scripts/audio-devices.sh" list)" app_volumes="$("$scripts/audio-devices.sh" volumes)" ;;
         5) "$scripts/wallpaper.sh" refresh "$(eww get cc_open 2>/dev/null)" ;;
     esac
 }

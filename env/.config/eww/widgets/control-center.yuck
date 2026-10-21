@@ -13,7 +13,7 @@
       (label :class "cc-tile-icon" :text icon)
       (label :class "cc-tile-text" :text text))))
 
-(defwidget cc_slider [icon value onclick onchange]
+(defwidget cc_slider [icon value onclick onchange ?onmore ?moretooltip]
   (box :class "cc-row"
        :space-evenly false
        :spacing 10
@@ -26,7 +26,12 @@
            :max 101
            :value value
            :onchange onchange)
-    (label :class "cc-row-value" :text "${value}%")))
+    (label :class "cc-row-value" :text "${value}%")
+    (button :class "cc-icon-btn cc-row-more"
+            :visible {(onmore ?: '') != ''}
+            :tooltip moretooltip
+            :onclick onmore
+      (label :text "󰅂"))))
 
 (defwidget cc_stat [name value unit]
   (box :class "cc-stat"
@@ -152,10 +157,6 @@
                  :text "Clipboard"
                  :active false
                  :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 3")
-        (cc_tile :icon "󰕾"
-                 :text "Audio"
-                 :active false
-                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 4")
         (cc_tile :icon "󰐥"
                  :text "Power"
                  :active false
@@ -163,7 +164,9 @@
       (cc_slider :icon "${audio_state.muted == 'true' ? '󰝟' : '󰖀'}"
                  :value {audio_state.volume}
                  :onclick "pactl set-sink-mute @DEFAULT_SINK@ toggle"
-                 :onchange "pactl set-sink-volume @DEFAULT_SINK@ {}%")
+                 :onchange "pactl set-sink-volume @DEFAULT_SINK@ {}%"
+                 :onmore "setsid -f ~/.config/eww/scripts/control-center.sh page 4"
+                 :moretooltip "Apps and devices")
       (cc_slider :icon "${audio_state.mic_muted == 'true' ? '󰍭' : '󰍬'}"
                  :value {audio_state.mic_volume}
                  :onclick "pactl set-source-mute @DEFAULT_SOURCE@ toggle"
@@ -174,6 +177,27 @@
                    :onclick ""
                    :onchange "(brightnessctl -d intel_backlight set {}% 2>/dev/null || brightnessctl set {}%) >/dev/null; eww update brightness={}"))
       (cc_media)
+      (box :class "cc-notif-preview"
+           :orientation "v"
+           :space-evenly false
+           :spacing 6
+        (box :space-evenly false
+          (label :class "cc-label" :halign "start" :hexpand true :text "Notifications")
+          (button :class "cc-chip"
+                  :visible {notifications.count > 0}
+                  :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 6"
+            (label :text "Show all · ${notifications.count}")))
+        (scroll :class "cc-notif-preview-list"
+                :vscroll true
+                :hscroll false
+                :height 118
+          (box :orientation "v"
+               :space-evenly false
+               :spacing 6
+            (box :visible {notifications.count == 0}
+              (cc_empty :text "No notifications"))
+            (for n in {notifications.latest}
+              (cc_notification :n n :compact true)))))
       (box :class "cc-stats"
            :space-evenly true
            :spacing 6

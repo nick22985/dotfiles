@@ -12,10 +12,9 @@ hl.on("hyprland.start", function()
 	-- and outside a uwsm session graphical-session.target never starts them. Apps launched through
 	-- elephant inherit its environment; without XCURSOR_SIZE, X11 apps size the cursor from the DPI.
 	-- elephant restarts because it may already be running without these variables.
-	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE XCURSOR_SIZE HYPRCURSOR_SIZE && systemctl --user start hyprpolkitagent swaync hypridle && systemctl --user restart elephant; systemctl --user start wayvnc")
+	hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE XCURSOR_SIZE HYPRCURSOR_SIZE BRIDGE_PATH PROTON_REMOTE_DEBUG_CMD PRESSURE_VESSEL_FILESYSTEMS_RW && systemctl --user start hyprpolkitagent swaync hypridle game-presence && systemctl --user restart elephant walker; systemctl --user start wayvnc")
 	hl.exec_cmd("uwsm app -- 1password --silent")
 	hl.exec_cmd("uwsm app -- steam")
-	hl.exec_cmd("uwsm app -- walker --gapplication-service")
 	hl.exec_cmd("uwsm app -- tailscale systray")
 	hl.exec_cmd("wl-paste --type text --watch cliphist store")
 	hl.exec_cmd("wl-paste --type image --watch cliphist store")
@@ -33,9 +32,9 @@ hl.on("hyprland.start", function()
 	-- The terminal's rule is not silent so the session starts focused on ws1 on any monitor layout.
 	hl.exec_cmd(vars.terminal, { workspace = "1" })
 	hl.exec_cmd("brave --disable-features=WaylandWpColorManagerV1", { workspace = "2 silent" })
-	hl.exec_cmd("flatpak run com.discordapp.Discord")
 	-- hl.exec_cmd("discord")
-	hl.exec_cmd("flatpak run com.slack.Slack")
+	hl.exec_cmd("~/.config/hypr/scripts/after-tray.sh flatpak run com.discordapp.Discord")
+	hl.exec_cmd("~/.config/hypr/scripts/after-tray.sh flatpak run com.slack.Slack")
 
 	-- From conf/env.conf
 	hl.exec_cmd("XDG_MENU_PREFIX=arch- kbuildsycoca6")

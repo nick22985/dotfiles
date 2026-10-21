@@ -66,6 +66,12 @@
 	font-size: 12px;
 }
 
+.cc-row-more {
+	min-width: 24px;
+	min-height: 24px;
+	margin-left: -6px;
+}
+
 .cc-scale trough {
 	min-height: 6px;
 	border-radius: 3px;
@@ -274,6 +280,35 @@
 	font-size: 12px;
 }
 
+.cc-app {
+	padding: 4px 10px;
+}
+
+.cc-app-head {
+	margin-bottom: 2px;
+}
+
+.cc-app-icon {
+	min-width: 16px;
+	min-height: 16px;
+	background-size: contain;
+	background-position: center;
+	background-repeat: no-repeat;
+	color: $overlay0;
+	font-size: 12px;
+}
+
+.cc-app-name {
+	color: $subtext0;
+	font-size: 12px;
+}
+
+.cc-app-empty {
+	padding: 6px 10px;
+	color: $overlay0;
+	font-size: 12px;
+}
+
 // Notifications page
 .cc-notif {
 	padding: 8px 4px 8px 10px;
@@ -283,6 +318,18 @@
 
 .cc-notif.critical {
 	box-shadow: inset 2px 0 0 $red;
+}
+
+.cc-notif.compact {
+	min-height: 40px;
+}
+
+.cc-notif-preview-list scrollbar {
+	opacity: 0;
+}
+
+.cc-notif-preview-list .cc-empty {
+	padding: 44px 0;
 }
 
 .cc-notif-main {
@@ -325,6 +372,34 @@
 	min-height: 24px;
 	border-radius: 12px;
 	color: $overlay0;
+	opacity: 0;
+}
+
+.cc-notif-hover:hover .cc-notif-close {
+	opacity: 1;
+}
+
+.cc-notif-group-head {
+	padding: 0 4px 0 10px;
+}
+
+.cc-notif-group-app {
+	color: $subtext0;
+	font-size: 12px;
+	font-weight: bold;
+}
+
+.cc-notif-group-count {
+	color: $overlay0;
+	font-size: 11px;
+}
+
+.cc-notif-group-clear {
+	min-width: 22px;
+	min-height: 22px;
+	border-radius: 11px;
+	color: $overlay0;
+	font-size: 12px;
 }
 
 // Wi-Fi password prompt

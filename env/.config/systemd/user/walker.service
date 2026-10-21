@@ -1,0 +1,9 @@
+[Unit]
+Description=Walker launcher, kept running so it opens instantly
+After=elephant.service
+PartOf=elephant.service
+
+[Service]
+ExecStart=/usr/bin/walker --gapplication-service
+Restart=always
+RestartSec=1

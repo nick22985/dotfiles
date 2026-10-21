@@ -8,14 +8,29 @@
 # swaync forgets the monitor when it restarts, so its systemd drop-in
 # (~/.config/systemd/user/swaync.service.d/monitor.conf) applies again once it is up.
 
+position_css="$HOME/.config/swaync/position.css"
+ultrawide_ratio=2.5
+middle_right=0.75
+
 focused_output() {
-    hyprctl -j monitors 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null | head -n1
+    hyprctl -j monitors 2>/dev/null | jq -r --argjson ratio "$ultrawide_ratio" --argjson right "$middle_right" '
+        .[] | select(.focused)
+        | [.name, (if .width / .height >= $ratio then (.width / .scale * (1 - $right) | floor) else 0 end)]
+        | @tsv' 2>/dev/null | head -n1
+}
+
+apply_offset() {
+    local css=".floating-notifications.background > scrolledwindow { margin-right: ${1}px; }"
+    [[ "$(cat "$position_css" 2>/dev/null)" == "$css" ]] && return 0
+    printf '%s\n' "$css" > "$position_css" && swaync-client --reload-css >/dev/null 2>&1
 }
 
 apply() {
-    local output
-    output=$(focused_output)
-    [[ -n "$output" ]] && swaync-client --change-noti-monitor "$output" >/dev/null 2>&1
+    local output offset
+    IFS=$'\t' read -r output offset < <(focused_output)
+    [[ -n "$output" ]] || return 0
+    apply_offset "${offset:-0}"
+    swaync-client --change-noti-monitor "$output" >/dev/null 2>&1
 }
 
 listen() {

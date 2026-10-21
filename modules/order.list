@@ -21,6 +21,7 @@ syncthing
 syncthing-relay
 git-peer-sync
 flatpak
+rpc-bridge
 snap
 grub-multiboot
 kde-plasma

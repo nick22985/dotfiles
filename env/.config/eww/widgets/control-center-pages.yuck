@@ -158,6 +158,37 @@
                :active {d.default}
                :onclick "setsid -f ~/.config/eww/scripts/audio-devices.sh ${command} ${d.id}"))))
 
+(defwidget cc_app_list [apps]
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 2
+    (label :class "cc-label" :halign "start" :text "Apps")
+    (label :class "cc-app-empty"
+           :halign "start"
+           :visible {arraylength(apps) == 0}
+           :text "Nothing is playing")
+    (for a in apps
+      (box :class "cc-app"
+           :orientation "v"
+           :space-evenly false
+        (box :class "cc-app-head"
+             :space-evenly false
+             :spacing 6
+          (box :class "cc-app-icon"
+               :style {a.icon == '' ? '' : "background-image: url('${a.icon}');"}
+            (label :hexpand true
+                   :visible {a.icon == ''}
+                   :text "󰎆"))
+          (label :class "cc-app-name"
+                 :halign "start"
+                 :limit-width 34
+                 :tooltip {a.media}
+                 :text {a.name}))
+        (cc_slider :icon {a.muted ? '󰝟' : '󰕾'}
+                   :value {app_volumes[a.id] ?: 0}
+                   :onclick "setsid -f ~/.config/eww/scripts/audio-devices.sh mute-app ${a.id}"
+                   :onchange "pactl set-sink-input-volume ${a.id} {}%")))))
+
 (defwidget cc_audio_page []
   (box :orientation "v"
        :space-evenly false
@@ -172,6 +203,7 @@
                :onclick "pactl set-source-mute @DEFAULT_SOURCE@ toggle"
                :onchange "pactl set-source-volume @DEFAULT_SOURCE@ {}%")
     (cc_list :height 260
+      (cc_app_list :apps {audio_devices.apps})
       (cc_device_list :title "Output" :devices {audio_devices.sinks} :command "set-sink")
       (cc_device_list :title "Input" :devices {audio_devices.sources} :command "set-source"))
     (box :class "cc-page-foot"
@@ -262,49 +294,79 @@ EWW_PW_END")
 
 ;; One notification: the sender's icon (a bell when it has none), app and age, then the text.
 ;; Click focuses the app's window; the cross dismisses it.
-(defwidget cc_notification [n]
-  (box :class "cc-notif ${n.urgency}"
-       :space-evenly false
-    (button :class "cc-notif-main"
-            :hexpand true
-            :onclick "setsid -f sh -c '~/.config/eww/scripts/notifications.sh open ${n.id}; ~/.config/eww/scripts/control-center.sh close'"
-      (box :space-evenly false
-           :spacing 10
-        (box :class "cc-notif-icon"
-             :valign "start"
-             :style {n.icon == '' ? '' : "background-image: url('${n.icon}');"}
-          (label :hexpand true
-                 :visible {n.icon == ''}
-                 :text {n.urgency == 'critical' ? '󰀦' : '󰂚'}))
-        (box :orientation "v"
-             :space-evenly false
-             :hexpand true
-             :spacing 2
-          (box :space-evenly false
-               :spacing 6
-            (label :class "cc-notif-app"
+(defwidget cc_notification [n ?compact]
+  (eventbox :class "cc-notif-hover"
+    (box :class "cc-notif ${n.urgency} ${compact == 'true' ? 'compact' : ''}"
+         :space-evenly false
+      (button :class "cc-notif-main"
+              :hexpand true
+              :onclick "setsid -f sh -c '~/.config/eww/scripts/notifications.sh open ${n.id}; ~/.config/eww/scripts/control-center.sh close'"
+        (box :space-evenly false
+             :spacing 10
+          (box :class "cc-notif-icon"
+               :valign "start"
+               :style {n.icon == '' ? '' : "background-image: url('${n.icon}');"}
+            (label :hexpand true
+                   :visible {n.icon == ''}
+                   :text {n.urgency == 'critical' ? '󰀦' : '󰂚'}))
+          (box :orientation "v"
+               :space-evenly false
+               :hexpand true
+               :spacing 2
+            (box :space-evenly false
+                 :spacing 6
+              (label :class "cc-notif-app"
+                     :halign "start"
+                     :hexpand true
+                     :limit-width 24
+                     :visible {compact == 'true'}
+                     :text {n.app == '' ? 'Notification' : n.app})
+              (label :class "cc-notif-summary"
+                     :halign "start"
+                     :hexpand true
+                     :xalign 0
+                     :wrap true
+                     :visible {compact != 'true'}
+                     :text {n.summary != '' ? n.summary : (n.app == '' ? 'Notification' : n.app)})
+              (label :class "cc-notif-ago" :valign "start" :text {n.ago}))
+            (label :class "cc-notif-summary"
                    :halign "start"
-                   :hexpand true
                    :limit-width 26
-                   :text {n.app == '' ? 'Notification' : n.app})
-            (label :class "cc-notif-ago" :text {n.ago}))
-          (label :class "cc-notif-summary"
-                 :halign "start"
-                 :xalign 0
-                 :wrap true
-                 :visible {n.summary != ''}
-                 :text {n.summary})
-          (label :class "cc-notif-body"
-                 :halign "start"
-                 :xalign 0
-                 :wrap true
-                 :visible {n.body != ''}
-                 :text {n.body}))))
-    (button :class "cc-icon-btn cc-notif-close"
-            :valign "start"
-            :tooltip "Dismiss"
-            :onclick "setsid -f ~/.config/eww/scripts/notifications.sh dismiss ${n.id}"
-      (label :text "󰅖"))))
+                   :visible {compact == 'true'}
+                   :text {n.summary != '' ? n.summary : (n.body != '' ? n.body : (n.app == '' ? 'Notification' : n.app))})
+            (label :class "cc-notif-body"
+                   :halign "start"
+                   :xalign 0
+                   :wrap true
+                   :visible {compact != 'true' && n.body != ''}
+                   :text {n.body}))))
+      (button :class "cc-icon-btn cc-notif-close"
+              :valign "start"
+              :tooltip "Dismiss"
+              :onclick "setsid -f ~/.config/eww/scripts/notifications.sh dismiss ${n.id}"
+        (label :text "󰅖")))))
+
+(defwidget cc_notification_group [g]
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 4
+    (box :class "cc-notif-group-head"
+         :space-evenly false
+         :spacing 6
+      (label :class "cc-notif-group-app"
+             :halign "start"
+             :limit-width 30
+             :text {g.app == '' ? 'Notification' : g.app})
+      (label :class "cc-notif-group-count"
+             :halign "start"
+             :hexpand true
+             :text {g.count > 1 ? g.count : ''})
+      (button :class "cc-icon-btn cc-notif-group-clear"
+              :tooltip "Dismiss all from this app"
+              :onclick "setsid -f ~/.config/eww/scripts/notifications.sh dismiss-group ${g.id}"
+        (label :text "󰅖")))
+    (for n in {g.items}
+      (cc_notification :n n))))
 
 (defwidget cc_notifications_page []
   (box :orientation "v"
@@ -320,9 +382,9 @@ EWW_PW_END")
         (cc_empty :text "No notifications"))
       (box :orientation "v"
            :space-evenly false
-           :spacing 6
-        (for n in {notifications.items}
-          (cc_notification :n n))))
+           :spacing 12
+        (for g in {notifications.groups}
+          (cc_notification_group :g g))))
     (box :class "cc-page-foot"
          :space-evenly false
          :spacing 8

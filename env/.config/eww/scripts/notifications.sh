@@ -15,14 +15,14 @@
 # commands carry the numeric id.
 # shellcheck disable=SC2016 # the single-quoted strings are jq programs
 
+# shellcheck source=lib/icons.sh
+source "$(dirname "$0")/lib/icons.sh"
+
 RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
 STATE="$RUNTIME/eww-notifications.json"
 LOCK="$RUNTIME/eww-notifications.lock"
 LIMIT=50
 BUS_NAME=org.freedesktop.Notifications
-ICON_DIRS=("$HOME/.local/share/icons" /usr/share/icons)
-ICON_SIZES=(scalable 48x48 64x64 128x128 256x256 32x32 48)
-ICON_KINDS=(apps status devices categories actions)
 
 # Each bus message as one tab-separated line: a Notify call as
 # "call, sender and cookie, icon candidates, entry", its reply as "reply, destination and cookie, id",
@@ -95,51 +95,18 @@ render() {
               elif $s < 6 * 86400 then strflocaltime("%a")
               else strflocaltime("%d %b") end;
         if type == "array" then . else [] end
-        | {count: length, items: map({id, app, summary, body, icon, urgency, ago: (.time | ago)})}' "$STATE" 2>/dev/null \
-        || echo '{"count":0,"items":[]}'
+        | map({id, app, summary, body, icon, urgency, ago: (.time | ago)}) as $items
+        | {count: ($items | length),
+           latest: $items[:2],
+           groups: ($items | reduce .[] as $n ([];
+               (map(.app) | index($n.app)) as $i
+               | if $i == null then . + [{id: $n.id, app: $n.app, items: [$n]}] else .[$i].items += [$n] end)
+               | map(.count = (.items | length)))}' "$STATE" 2>/dev/null \
+        || echo '{"count":0,"latest":[],"groups":[]}'
 }
 
 push() {
     eww update notifications="$(render)" 2>/dev/null
-}
-
-icon_theme() {
-    sed -n 's/^gtk-icon-theme-name[[:space:]]*=[[:space:]]*"\?\([^"]*\)"\?[[:space:]]*$/\1/p' \
-        ~/.config/gtk-3.0/settings.ini /etc/gtk-3.0/settings.ini 2>/dev/null | head -n1
-}
-
-# A file for an icon given as a path, a file:// url or a theme icon name. Icons are shown through a
-# CSS url(), so only plain names and paths are taken.
-find_icon() {
-    local name="${1#file://}" theme base size kind extension
-    [[ -n "$name" ]] || return 1
-    if [[ "$name" == /* ]]; then
-        [[ "$name" =~ ^[[:alnum:]_./+\ -]+$ && -f "$name" ]] && printf '%s\n' "$name"
-        return
-    fi
-    [[ "$name" =~ ^[[:alnum:]_.+-]+$ ]] || return 1
-    for theme in $(icon_theme) hicolor Adwaita; do
-        for base in "${ICON_DIRS[@]}"; do
-            for size in "${ICON_SIZES[@]}"; do
-                for kind in "${ICON_KINDS[@]}"; do
-                    for extension in svg png; do
-                        [[ -f "$base/$theme/$size/$kind/$name.$extension" ]] && { printf '%s\n' "$base/$theme/$size/$kind/$name.$extension"; return; }
-                    done
-                done
-            done
-        done
-    done
-    for extension in svg png; do
-        [[ -f "/usr/share/pixmaps/$name.$extension" ]] && { printf '%s\n' "/usr/share/pixmaps/$name.$extension"; return; }
-    done
-    return 1
-}
-
-first_icon() {
-    local candidate
-    while IFS= read -r -d $'\x1f' candidate; do
-        find_icon "$candidate" && return
-    done <<< "$1"$'\x1f'
 }
 
 # Every message to and from the notification server, restarting busctl if it stops.
@@ -186,10 +153,23 @@ valid_id() {
     [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid notification id: $1" >&2; exit 1; }
 }
 
-dismiss() {
+close_notification() {
     gdbus call --session --dest "$BUS_NAME" --object-path /org/freedesktop/Notifications \
         --method "$BUS_NAME.CloseNotification" "$1" >/dev/null 2>&1
+}
+
+dismiss() {
+    close_notification "$1"
     change 'map(select(.id != $id))' --argjson id "$1"
+    push
+}
+
+dismiss_group() {
+    local id
+    for id in $(jq -r --argjson id "$1" 'first(.[] | select(.id == $id) | .app) as $app | .[] | select(.app == $app) | .id' "$STATE" 2>/dev/null); do
+        close_notification "$id"
+    done
+    change '(first(.[] | select(.id == $id) | .app) // null) as $app | if $app == null then . else map(select(.app != $app)) end' --argjson id "$1"
     push
 }
 
@@ -212,10 +192,11 @@ clear_all() {
 case "$1" in
     listen) listen ;;
     dismiss) valid_id "$2"; dismiss "$2" ;;
+    dismiss-group) valid_id "$2"; dismiss_group "$2" ;;
     open) valid_id "$2"; open_app "$2" ;;
     clear) clear_all ;;
     *)
-        echo "Usage: $0 {listen|dismiss <id>|open <id>|clear}" >&2
+        echo "Usage: $0 {listen|dismiss <id>|dismiss-group <id>|open <id>|clear}" >&2
         exit 1
         ;;
 esac

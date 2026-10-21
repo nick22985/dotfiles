@@ -1,0 +1,8 @@
+[Unit]
+Description=Let Flatpak Discord detect Proton games, which it can't see from its sandbox
+
+[Service]
+ExecStart=%h/.local/bin/game-presence
+Restart=on-failure
+RestartSec=1min
+Nice=10

@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/game-presence"
+games_file="$cache_dir/games.tsv"
+detectable_url="https://discord.com/api/v9/applications/detectable"
+discord_app="com.discordapp.Discord"
+scan_interval=10
+
+refresh_games() {
+    [[ -n "$(find "$games_file" -mtime -7 2>/dev/null)" ]] && return 0
+    mkdir -p "$cache_dir"
+    curl -fsS --max-time 60 "$detectable_url" \
+        | jq -r '.[]
+            | (.executables[]?
+                | select(.os == "win32" and .is_launcher != true and .arguments == null and (.name | startswith(">") | not))
+                | ["exe", .name]),
+              (.name as $name | .third_party_skus[]? | select(.distributor == "steam") | ["steam", .id, $name])
+            | @tsv' > "$games_file.tmp" \
+        && [[ -s "$games_file.tmp" ]] && mv -- "$games_file.tmp" "$games_file"
+    rm -f -- "$games_file.tmp"
+    [[ -s "$games_file" ]]
+}
+
+declare -A games=() steam_games=()
+load_games() {
+    local kind key name
+    games=()
+    steam_games=()
+    while IFS=$'\t' read -r kind key name; do
+        case "$kind" in
+            exe) games[$key]=1 ;;
+            steam) [[ -n "${steam_games[$key]:-}" ]] || steam_games[$key]="${name//[\/\\:*?\"<>|]/}" ;;
+        esac
+    done < "$games_file"
+}
+
+steam_app_id() {
+    local var
+    while IFS= read -r -d '' var; do
+        if [[ "$var" == SteamAppId=* ]]; then
+            printf '%s\n' "${var#SteamAppId=}"
+            return 0
+        fi
+    done 2>/dev/null < "/proc/$1/environ"
+    return 1
+}
+
+find_game() {
+    local cmdline exe path suffix i pid steam_id fallback=""
+    local -a parts
+    for cmdline in /proc/[0-9]*/cmdline; do
+        [[ -O "$cmdline" ]] || continue
+        IFS= read -r -d '' exe < "$cmdline" 2>/dev/null || continue
+        path="${exe,,}"
+        path="${path//\\//}"
+        [[ "$path" == *.exe && "$path" != */windows/* && "$path" != */common/proton* ]] || continue
+        pid="${cmdline#/proc/}"
+        pid="${pid%/cmdline}"
+        IFS=/ read -r -a parts <<< "$path"
+        suffix=""
+        for ((i = ${#parts[@]} - 1; i >= 0 && i >= ${#parts[@]} - 5; i--)); do
+            suffix="${parts[i]}${suffix:+/$suffix}"
+            if [[ -n "${games[$suffix]:-}" ]]; then
+                printf '%s\t%s\n' "$pid" "$exe"
+                return 0
+            fi
+        done
+        if [[ -z "$fallback" ]] && steam_id="$(steam_app_id "$pid")" && [[ -n "${steam_games[$steam_id]:-}" ]]; then
+            fallback="$pid"$'\t'"${exe%[\\/]*}\\${steam_games[$steam_id]}.exe"
+        fi
+    done
+    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
+}
+
+discord_pid() {
+    local pid
+    for pid in $(flatpak ps --columns=application,child-pid 2>/dev/null | awk -v app="$discord_app" '$1 == app { print $2 }'); do
+        if [[ "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" == *" -- $discord_app "* ]]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
+start_stand_in() {
+    local path="${2#?:}"
+    path="/tmp/game-presence${path//\\//}"
+    # shellcheck disable=SC2016
+    flatpak run --die-with-parent --parent-pid="$1" --parent-share-pids --command=bash "$discord_app" \
+        -c 'mkdir -p "${2%/*}" && cp /usr/bin/sleep "$2" && exec -a "$1" "$2" infinity' bash "$2" "$path" >/dev/null 2>&1 &
+    stand_in="$!"
+}
+
+if ! refresh_games; then
+    echo "game-presence: couldn't download Discord's list of detectable games" >&2
+    exit 1
+fi
+load_games
+loaded="$(stat -c %Y "$games_file")"
+
+game_pid=""
+stand_in=""
+while true; do
+    if [[ -n "$stand_in" ]] && ! kill -0 "$game_pid" 2>/dev/null; then
+        kill "$stand_in" 2>/dev/null
+        stand_in=""
+    fi
+    if [[ -n "$stand_in" ]] && ! kill -0 "$stand_in" 2>/dev/null; then
+        stand_in=""
+    fi
+    if [[ -z "$stand_in" ]] && game="$(find_game)" && parent="$(discord_pid)" && [[ -n "$parent" ]]; then
+        game_pid="${game%%$'\t'*}"
+        start_stand_in "$parent" "${game#*$'\t'}"
+    fi
+    sleep "$scan_interval"
+    if refresh_games && [[ "$(stat -c %Y "$games_file")" != "$loaded" ]]; then
+        load_games
+        loaded="$(stat -c %Y "$games_file")"
+    fi
+done

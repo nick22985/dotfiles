@@ -29,6 +29,27 @@ count_lines() {
     grep -c . <<< "$1"
 }
 
+TRAY_WATCHER=org.kde.StatusNotifierWatcher
+
+tray_items() {
+    busctl --user --json=short get-property "$TRAY_WATCHER" /StatusNotifierWatcher "$TRAY_WATCHER" RegisteredStatusNotifierItems 2>/dev/null \
+        | jq -r '.data[] | capture("^(?<name>:[0-9.]+)(/StatusNotifierItem)?$").name' 2>/dev/null
+}
+
+restore_tray_items() {
+    local registered name
+    for _ in {1..50}; do
+        busctl --user status "$TRAY_WATCHER" >/dev/null 2>&1 && break
+        sleep 0.1
+    done
+    registered=$(tray_items)
+    for name in $1; do
+        grep -qxF "$name" <<< "$registered" && continue
+        busctl --user status "$name" >/dev/null 2>&1 || continue
+        busctl --user call "$TRAY_WATCHER" /StatusNotifierWatcher "$TRAY_WATCHER" RegisterStatusNotifierItem s "$name" >/dev/null 2>&1
+    done
+}
+
 SAMPLE_INTERVAL=0.3
 STABLE_SAMPLES=7
 MAX_SAMPLES=60
@@ -134,6 +155,7 @@ pkill -f monitor-watcher.sh 2>/dev/null || true
 
 # Full reset: kill any existing daemon so we cannot inherit stale windows
 # from a previous monitor layout.
+saved_tray_items=$(tray_items)
 eww kill 2>/dev/null || true
 for _ in {1..50}; do
     eww ping >/dev/null 2>&1 || break
@@ -204,6 +226,7 @@ open_and_verify() {
 if ((${#windows[@]} > 0)); then
     open_and_verify || echo "launch.sh: some bars never opened; see ~/.cache/eww/launch.log"
 fi
+restore_tray_items "$saved_tray_items"
 
 final_signature=$(monitor_signature)
 if [[ "$final_signature" != "$launch_signature" && -z "$EWW_LAUNCH_RETRY" ]]; then

@@ -34,6 +34,11 @@ hl.env("XDG_SESSION_TYPE", "wayland")
 -- Allow better support for screen sharing (Google Meet, Discord, etc)
 hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
 
+local rpc_bridge = os.getenv("HOME") .. "/.local/share/rpc-bridge/bridge.exe"
+hl.env("BRIDGE_PATH", rpc_bridge)
+hl.env("PROTON_REMOTE_DEBUG_CMD", rpc_bridge .. " --steam")
+hl.env("PRESSURE_VESSEL_FILESYSTEMS_RW", rpc_bridge)
+
 hl.config({
     xwayland = {
         force_zero_scaling = true,

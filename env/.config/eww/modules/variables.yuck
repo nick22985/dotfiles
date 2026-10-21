@@ -59,7 +59,7 @@
   "~/.config/eww/scripts/notification-status.sh")
 
 ;; Notification history for the control center: {count, items: [{id, app, summary, body, icon, urgency, ago}]}
-(deflisten notifications :initial '{"count":0,"items":[]}'
+(deflisten notifications :initial '{"count":0,"latest":[],"groups":[]}'
   "~/.config/eww/scripts/notifications.sh listen")
 
 ;; Recent picked colours; colorpicker.sh pushes updates after each pick
@@ -102,8 +102,11 @@
 ;; Wallpaper page: rows of two {id, name, thumb, kind, current}, filled by wallpaper.sh
 (defvar wp_list '[]')
 
-(defpoll audio_devices :interval "5s" :initial '{"sinks":[],"sources":[]}' :run-while {cc_page == 4}
+(defpoll audio_devices :interval "2s" :initial '{"sinks":[],"sources":[],"apps":[]}' :run-while {cc_page == 4}
   "~/.config/eww/scripts/audio-devices.sh list")
+
+(defpoll app_volumes :interval "2s" :initial '{}' :run-while {cc_page == 4}
+  "~/.config/eww/scripts/audio-devices.sh volumes")
 
 ;; Power menu: the action waiting for a second press, and who/where/how long
 (defvar pm_confirm "")

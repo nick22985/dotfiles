@@ -1,0 +1,110 @@
+;; Topbar: workspace dots (left), window title + clock (centre), tray + status pill (right).
+;; On ultrawide monitors, uw_layout places the islands at the edges, in a centred
+;; 2560px band, or centred in each third of the screen.
+
+(defwidget workspace_dots [ws]
+  (box :class "island ws-island"
+       :space-evenly false
+    (box :class "ws-dots"
+         :space-evenly false
+         :spacing 6
+         :valign "center"
+      (for w in {ws.list}
+        (button :class "ws-dot ${w.id == ws.active ? 'active' : w.filled ? 'filled' : 'empty'}"
+                :valign "center"
+                :tooltip "Workspace ${w.id}"
+                :onclick "hyprctl dispatch 'hl.dsp.focus({ workspace = ${w.id} })'"
+          (label :text ""))))
+    (label :class "ws-number" :text "${ws.active}")))
+
+(defwidget window_title []
+  (box :class "window-title"
+       :space-evenly false
+       :spacing 6
+       :visible {window_info.class != ""}
+    (label :class "window-class"
+           :text "${window_info.class == 'brave-browser' ? 'Brave' :
+                    window_info.class == 'org.telegram.desktop' ? 'Telegram' :
+                    window_info.class == 'org.gnome.Nautilus' ? 'Nautilus' :
+                    window_info.class == 'Alacritty' ? 'Terminal' :
+                    window_info.class == 'com.mitchellh.ghostty' ? 'Terminal' :
+                    window_info.class == 'kitty' ? 'Terminal' :
+                    window_info.class == 'discord' ? 'Discord' :
+                    window_info.class == 'Slack' ? 'Slack' :
+                    window_info.class}")
+    (label :class "window-name"
+           :limit-width 60
+           :visible {window_info.title != ""}
+           :text "· ${window_info.title}")))
+
+(defwidget centre_island []
+  (box :class "island centre-island"
+       :space-evenly false
+    (window_title)
+    (box :class "island-sep"
+         :valign "center"
+         :visible {window_info.class != ""})
+    (button :class "clock"
+            :tooltip "${date_long}
+
+${calendar}"
+      (label :text time))))
+
+(defwidget status_pill [monitor]
+  (eventbox :onscroll "[ '{}' == 'up' ] && pactl set-sink-volume @DEFAULT_SINK@ +5% || pactl set-sink-volume @DEFAULT_SINK@ -5%"
+    (button :class "status-pill ${cc_open == monitor ? 'open' : ''}"
+            :valign "center"
+            :onclick "~/.config/eww/scripts/control-center.sh toggle ${monitor}"
+            :onrightclick "swaync-client -t -sw"
+            :tooltip "${network_name} · ${audio_state.volume}% | Click: control center | Right: notifications | Scroll: volume"
+      (box :space-evenly false
+           :spacing 12
+        (label :class "pill-icon ${network_status == 'connected' ? '' : 'off'}"
+               :text "${network_status == 'connected' ? (network_name =~ '.*WiFi.*' ? '󰖩' : '󰈀') : '󱐅'}")
+        (label :class "pill-icon ${bluetooth_status == 'on' ? '' : 'off'}"
+               :text "${bluetooth_status == 'on' ? '󰂯' : '󰂲'}")
+        (label :class "pill-icon ${audio_state.muted == 'true' ? 'muted' : ''}"
+               :text "${audio_state.muted == 'true' ? '󰝟' :
+                        audio_state.volume <= 30 ? '󰕿' :
+                        audio_state.volume <= 60 ? '󰖀' : '󰕾'}")
+        (label :class "pill-icon bell ${notification_status.class ?: 'none'}"
+               :text "${notification_status.class == 'notification' ? '󰂚' :
+                        notification_status.class == 'dnd-notification' ? '󰪑' :
+                        notification_status.class == 'dnd-none' ? '󰪑' :
+                        notification_status.class == 'inhibited-notification' ? '󰂛' :
+                        notification_status.class == 'inhibited-none' ? '󰂛' :
+                        notification_status.class == 'dnd-inhibited-notification' ? '󰪕' :
+                        notification_status.class == 'dnd-inhibited-none' ? '󰪕' : '󰂜'}")
+        (box :visible {has_battery == 'true'}
+          (label :class "pill-battery ${bat_status == 'Charging' ? 'charging' : bat < 20 ? 'critical' : bat < 30 ? 'warning' : ''}"
+                 :text "${bat_status == 'Charging' ? '󰢟' :
+                          bat <= 10 ? '󰪞' :
+                          bat <= 20 ? '󰪟' :
+                          bat <= 30 ? '󰪠' :
+                          bat <= 40 ? '󰪡' :
+                          bat <= 50 ? '󰪢' :
+                          bat <= 60 ? '󰪣' :
+                          bat <= 80 ? '󰪤' : '󰪥'} ${bat}%"))))))
+
+(defwidget right_island [monitor]
+  (box :class "island right-island"
+       :space-evenly false
+    (systray :class "tray"
+             :icon-size 14
+             :spacing 10)
+    (status_pill :monitor monitor)))
+
+;; `space-evenly` gives each group exactly a third of the bar, so the centre island
+;; is truly centred whatever the side islands' widths.
+(defwidget bar [monitor uw ws]
+  (box :class "bar layout-${uw == 'true' ? uw_layout : 'edges'}"
+       :space-evenly true
+       :hexpand true
+       :halign {uw == 'true' && uw_layout == 'band' ? 'center' : 'fill'}
+       :width {uw == 'true' && uw_layout == 'band' ? 2560 : 0}
+    (box :halign {uw == 'true' && uw_layout == 'thirds' ? 'center' : 'start'}
+      (workspace_dots :ws ws))
+    (box :halign "center"
+      (centre_island))
+    (box :halign {uw == 'true' && uw_layout == 'thirds' ? 'center' : 'end'}
+      (right_island :monitor monitor))))

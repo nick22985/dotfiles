@@ -65,31 +65,44 @@ wait_for_stable_monitors() {
     printf '%s\n' "$current"
 }
 
-# Substitutes {{MONITOR_ID}} in a template once per monitor.
+# Prints "true" when the monitor (by Hyprland name) is wider than 2.4:1 in logical pixels.
+is_ultrawide() {
+    local size width height
+    size=$(hyprctl -j monitors 2>/dev/null \
+        | jq -r --arg n "$1" '.[] | select(.name == $n) | "\((.width / .scale) | floor) \((.height / .scale) | floor)"')
+    read -r width height <<< "$size"
+    if [[ -n "$width" ]] && ~/.config/eww/scripts/ultrawide-layout.sh is-ultrawide "$width" "$height"; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# Substitutes {{MONITOR_ID}} and {{ULTRAWIDE}} in a template once per monitor.
 generate_from_template() {
     local template_file="$1"
     local output_file="$2"
-    local monitor_count="$3"
+    local monitors="$3"
 
     {
         echo ";; Auto-generated from template: $(basename "$template_file")"
-        for ((i=0; i<monitor_count; i++)); do
-            sed "s|{{MONITOR_ID}}|${i}|g" "$template_file"
+        local i=0 monitor
+        while IFS= read -r monitor; do
+            [[ -z "$monitor" ]] && continue
+            sed -e "s|{{MONITOR_ID}}|${i}|g" -e "s|{{ULTRAWIDE}}|$(is_ultrawide "$monitor")|g" "$template_file"
             echo ""
-        done
+            ((i++))
+        done <<< "$monitors"
     } > "$output_file"
 }
 
 generate_monitor_config() {
     local monitors="$1"
 
-    local monitor_count
-    monitor_count=$(count_lines "$monitors")
-
     mkdir -p ~/.config/eww/tmp/{bars,widgets,modules}
     mkdir -p ~/.config/eww/templates ~/.cache/eww
 
-    # Stash for other scripts (e.g. show-colorpicker-popup.sh) so they can map
+    # Stash for other scripts (e.g. control-center.sh) so they can map
     # a Hyprland monitor to the same GDK index we are binding to here.
     printf '%s\n' "$monitors" > "$MONITORS_FILE"
 
@@ -98,7 +111,7 @@ generate_monitor_config() {
         local i=0
         while IFS= read -r monitor; do
             [[ -z "$monitor" ]] && continue
-            echo "(deflisten workspaces_info_${i} :initial \"{\\\"active\\\": 1, \\\"occupied\\\": [1,2,3,4,5,6]}\""
+            echo "(deflisten workspaces_info_${i} :initial \"{\\\"active\\\": 1, \\\"occupied\\\": [1,2,3,4,5,6], \\\"list\\\": []}\""
             echo "  \"~/.config/eww/scripts/workspaces-listener.sh ${monitor}\")"
             echo ""
             ((i++))
@@ -106,19 +119,14 @@ generate_monitor_config() {
     } > ~/.config/eww/tmp/modules/variables.yuck
 
     generate_from_template \
-        ~/.config/eww/templates/center-modules.yuck.template \
-        ~/.config/eww/tmp/widgets/center-modules.yuck \
-        "$monitor_count"
-
-    generate_from_template \
         ~/.config/eww/templates/topbar-content.yuck.template \
         ~/.config/eww/tmp/bars/topbar.yuck \
-        "$monitor_count"
+        "$monitors"
 
     generate_from_template \
-        ~/.config/eww/templates/colorpicker-popup-window.yuck.template \
-        ~/.config/eww/tmp/widgets/colorpicker-popup-windows.yuck \
-        "$monitor_count"
+        ~/.config/eww/templates/control-center.yuck.template \
+        ~/.config/eww/tmp/widgets/control-center-windows.yuck \
+        "$monitors"
 }
 
 # Stop any existing watcher first so it does not react to the churn below.

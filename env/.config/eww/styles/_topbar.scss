@@ -1,53 +1,147 @@
-// Top bar specific styles
-window#topbar0,
-window#topbar1,
-window#topbar2,
-window#topbar {
-	background-color: rgba(0, 0, 0, 0);
-	margin: 5px;
+// Top bar: three floating islands over a transparent window
+window {
+	background-color: transparent;
 }
 
-.topbar-centerbox {
-	/* Ensure proper spacing */
+.bar {
+	padding: 8px 20px 4px;
 }
 
-.left-container,
-.center-container,
-.right-container {
-	/* Container specific styling if needed */
+.island {
+	min-height: 34px;
+	padding: 0 14px;
+	border-radius: 17px;
+	border: 1px solid rgba(202, 211, 245, 0.08);
+	background-color: rgba(24, 25, 38, 0.8);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+	color: $text;
 }
 
-.modules-left {
-	border-radius: 0 15px 15px 0;
-	margin-top: 2px;
-	background-color: #000000;
-	padding-right: 5px;
-	/* Only expand to content size */
-	min-width: 0;
+// Workspaces
+.ws-island {
+	padding: 0 12px 0 14px;
 }
 
-.modules-center {
-	padding: 0 15px;
-	margin-top: 2px;
-	border-radius: 15px 15px 15px 15px;
-	background-color: #000000;
-	/* Only expand to content size */
-	min-width: 0;
+.ws-dot {
+	min-width: 8px;
+	min-height: 8px;
+	border-radius: 4px;
+	background-color: $surface2;
+	transition: min-width 200ms ease, background-color 200ms ease;
 }
 
-.modules-right {
-	padding-left: 5px;
-	border-radius: 15px 0 0 15px;
-	margin-top: 2px;
-	background-color: #000000;
-	/* Only expand to content size */
-	min-width: 0;
+.ws-dot.empty {
+	background-color: transparent;
+	border: 1px solid $surface1;
+	min-width: 6px;
+	min-height: 6px;
 }
 
-.logo {
-	padding: 0 10px;
-	color: #89b4fa;
-	font-size: 16px;
+.ws-dot.filled:hover,
+.ws-dot.empty:hover {
+	background-color: $overlay2;
+}
+
+.ws-dot.active {
+	min-width: 28px;
+	background-image: $accent;
+}
+
+.ws-number {
+	margin-left: 12px;
+	color: $overlay0;
+	font-size: 12px;
+}
+
+// Centre: window title + clock
+.window-title {
+	margin-right: 10px;
+}
+
+.window-class {
+	color: $text;
 	font-weight: bold;
 }
 
+.window-name {
+	color: $subtext0;
+}
+
+.island-sep {
+	min-width: 1px;
+	min-height: 14px;
+	margin-right: 10px;
+	background-color: $surface1;
+}
+
+.clock {
+	color: $text;
+	font-weight: bold;
+}
+
+// Right: tray + status pill
+.right-island {
+	padding: 0 4px 0 14px;
+}
+
+.tray {
+	margin-right: 10px;
+}
+
+.status-pill {
+	padding: 0 12px;
+	min-height: 26px;
+	border-radius: 13px;
+	background-color: rgba(54, 58, 79, 0.6);
+	transition: background-color 150ms ease;
+}
+
+.status-pill:hover {
+	background-color: $surface0;
+}
+
+.status-pill.open {
+	background-color: $surface1;
+	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.45);
+}
+
+.pill-icon {
+	color: $text;
+}
+
+.pill-icon.off {
+	color: $overlay0;
+}
+
+.pill-icon.muted {
+	color: $red;
+}
+
+.bell.notification,
+.bell.dnd-notification,
+.bell.inhibited-notification,
+.bell.dnd-inhibited-notification {
+	color: $peach;
+}
+
+.bell.dnd-none,
+.bell.dnd-inhibited-none,
+.bell.inhibited-none {
+	color: $overlay0;
+}
+
+.pill-battery {
+	color: $text;
+}
+
+.pill-battery.charging {
+	color: $green;
+}
+
+.pill-battery.warning {
+	color: $yellow;
+}
+
+.pill-battery.critical {
+	color: $red;
+}

@@ -1,10 +1,11 @@
 #!/bin/bash
 # Hyprland window listener for eww
-# This script listens to Hyprland events and outputs window class changes
+# This script listens to Hyprland events and outputs the active window as {"class", "title"}
 
 # Function to get current active window
 get_active_window() {
-    hyprctl -j activewindow 2>/dev/null | jq -r '.class // ""' || echo ""
+    hyprctl -j activewindow 2>/dev/null | jq -c '{class: (.class // ""), title: (.title // "")}' 2>/dev/null \
+        || echo '{"class":"","title":""}'
 }
 
 # Output initial window

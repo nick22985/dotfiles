@@ -43,6 +43,13 @@ case "$1" in
         echo "=== Current Monitors ==="
         hyprctl -j monitors 2>/dev/null | jq -r '.[].name' | nl || echo "Could not detect monitors"
         ;;
+    "layout")
+        if [[ -z "$2" ]]; then
+            ~/.config/eww/scripts/ultrawide-layout.sh get
+        else
+            ~/.config/eww/scripts/ultrawide-layout.sh set "$2"
+        fi
+        ;;
     "logs")
         echo "Monitor watcher log (last 20 lines):"
         tail -20 ~/.cache/eww/monitor-watcher.log 2>/dev/null || echo "No monitor watcher log found"
@@ -52,7 +59,7 @@ case "$1" in
         tail -f ~/.cache/eww/monitor-watcher.log 2>/dev/null || echo "No monitor watcher log found"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|reload|reset|status|logs|watch}"
+        echo "Usage: $0 {start|stop|restart|reload|reset|status|layout|logs|watch}"
         echo ""
         echo "Commands:"
         echo "  start/restart - Launch eww with dynamic monitor detection"
@@ -60,6 +67,7 @@ case "$1" in
         echo "  reload        - Reload eww configuration only"
         echo "  reset/clear   - Kill everything, clear generated configs/cache, relaunch"
         echo "  status        - Show running processes and monitor info"
+        echo "  layout [mode] - Show or set the ultrawide bar layout (edges|band|thirds)"
         echo "  logs          - Show monitor watcher logs"
         echo "  watch         - Watch monitor watcher logs in real-time"
         exit 1

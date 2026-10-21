@@ -1,0 +1,147 @@
+;; Control center dropped from the status pill: toggles, sliders, stats, recent colours.
+;; Commands that open another menu close the panel first.
+
+(defwidget cc_tile [icon text active onclick]
+  (button :class "cc-tile ${active ? 'on' : ''}"
+          :onclick onclick
+    (box :orientation "v"
+         :space-evenly false
+         :spacing 4
+      (label :class "cc-tile-icon" :text icon)
+      (label :class "cc-tile-text" :text text))))
+
+(defwidget cc_slider [icon value onclick onchange]
+  (box :class "cc-row"
+       :space-evenly false
+       :spacing 10
+    (button :class "cc-row-icon"
+            :onclick onclick
+      (label :text icon))
+    (scale :class "cc-scale"
+           :hexpand true
+           :min 0
+           :max 101
+           :value value
+           :onchange onchange)
+    (label :class "cc-row-value" :text "${value}%")))
+
+(defwidget cc_stat [name value unit]
+  (box :class "cc-stat"
+       :orientation "v"
+       :space-evenly false
+    (label :class "cc-stat-name" :halign "start" :text name)
+    (label :class "cc-stat-value" :halign "start" :text "${value}${unit}")
+    (graph :class "cc-graph"
+           :value value
+           :time-range "60s"
+           :min 0
+           :max 100
+           :thickness 1.5
+           :dynamic false
+           :height 18)))
+
+(defwidget cc_layout_button [layout text]
+  (button :class "cc-seg ${uw_layout == layout ? 'on' : ''}"
+          :onclick "~/.config/eww/scripts/ultrawide-layout.sh set ${layout}"
+    (label :text text)))
+
+(defwidget control_center [monitor uw]
+  (eventbox :onhover "eww update cc_hover=true"
+            :onhoverlost "eww update cc_hover=false; setsid -f ~/.config/eww/scripts/control-center.sh close-later"
+    (box :class "control-center"
+         :orientation "v"
+         :space-evenly false
+         :spacing 12
+      (box :class "cc-head"
+           :space-evenly false
+        (label :class "cc-date" :halign "start" :hexpand true :text date_long)
+        (label :class "cc-power"
+               :visible {has_battery == 'true'}
+               :tooltip {power_draw.tooltip}
+               :text {power_draw.text}))
+      (box :class "cc-tiles"
+           :space-evenly true
+           :spacing 6
+        (cc_tile :icon "${network_status == 'connected' ? '󰖩' : '󱐅'}"
+                 :text "Network"
+                 :active {network_status == 'connected'}
+                 :onclick "~/.config/eww/scripts/control-center.sh close; networkmanager_dmenu &")
+        (cc_tile :icon "${bluetooth_status == 'on' ? '󰂯' : '󰂲'}"
+                 :text "Bluetooth"
+                 :active {bluetooth_status == 'on'}
+                 :onclick "~/.config/eww/scripts/control-center.sh close; rofi-bluetooth &")
+        (cc_tile :icon "󱜠"
+                 :text "Hotspot"
+                 :active false
+                 :onclick "hotspot toggle")
+        (cc_tile :icon "󰪑"
+                 :text "DND"
+                 :active {matches(notification_status.class ?: 'none', '^dnd')}
+                 :onclick "swaync-client -d -sw"))
+      (box :class "cc-tiles"
+           :space-evenly true
+           :spacing 6
+        (cc_tile :icon "󰂜"
+                 :text "Alerts"
+                 :active false
+                 :onclick "~/.config/eww/scripts/control-center.sh close; swaync-client -t -sw")
+        (cc_tile :icon ""
+                 :text "Clipboard"
+                 :active false
+                 :onclick "~/.config/eww/scripts/control-center.sh close; cliphist list | rofi -dmenu | cliphist decode | wl-copy")
+        (cc_tile :icon "󰕾"
+                 :text "Mixer"
+                 :active false
+                 :onclick "~/.config/eww/scripts/control-center.sh close; pavucontrol &")
+        (cc_tile :icon "󰐥"
+                 :text "Power"
+                 :active false
+                 :onclick "~/.config/eww/scripts/control-center.sh close; ~/.config/rofi/scripts/powermenu.sh"))
+      (cc_slider :icon "${audio_state.muted == 'true' ? '󰝟' : '󰖀'}"
+                 :value {audio_state.volume}
+                 :onclick "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+                 :onchange "pactl set-sink-volume @DEFAULT_SINK@ {}%")
+      (cc_slider :icon "${audio_state.mic_muted == 'true' ? '󰍭' : '󰍬'}"
+                 :value {audio_state.mic_volume}
+                 :onclick "pactl set-source-mute @DEFAULT_SOURCE@ toggle"
+                 :onchange "pactl set-source-volume @DEFAULT_SOURCE@ {}%")
+      (box :visible {brightness != 'disabled'}
+        (cc_slider :icon "󰃟"
+                   :value {brightness == 'disabled' ? 0 : brightness}
+                   :onclick ""
+                   :onchange "(brightnessctl -d intel_backlight set {}% 2>/dev/null || brightnessctl set {}%) >/dev/null; eww update brightness={}"))
+      (box :class "cc-stats"
+           :space-evenly true
+           :spacing 6
+        (cc_stat :name "CPU" :value {round(EWW_CPU.avg, 0)} :unit "%")
+        (cc_stat :name "MEM" :value {round(EWW_RAM.used_mem_perc, 0)} :unit "%")
+        (cc_stat :name "TEMP" :value temp :unit "°"))
+      (box :class "cc-layout"
+           :orientation "v"
+           :space-evenly false
+           :spacing 6
+           :visible {uw == 'true'}
+        (label :class "cc-label" :halign "start" :text "Ultrawide layout")
+        (box :class "cc-segs"
+             :space-evenly true
+          (cc_layout_button :layout "edges" :text "Edges")
+          (cc_layout_button :layout "band" :text "Centre")
+          (cc_layout_button :layout "thirds" :text "Thirds")))
+      (box :class "cc-colors"
+           :space-evenly false
+           :spacing 6
+        (label :class "cc-label" :text "Recent")
+        (for c in colorpicker_colors
+          (button :class "cc-swatch"
+                  :style "background-color: ${c};"
+                  :tooltip "${c}"
+                  :onclick "echo -n '${c}' | wl-copy && notify-send 'Color Copied' '${c} copied to clipboard'"
+            (label :text "")))
+        (box :hexpand true)
+        (button :class "cc-chip"
+                :onclick "~/.config/eww/scripts/control-center.sh close; setsid -f ~/.config/eww/scripts/colorpicker.sh"
+          (label :text " Pick")))
+      (box :class "cc-foot"
+           :space-evenly false
+        (label :halign "start" :hexpand true :text "disk / ${round(EWW_DISK['/'].used_perc, 0)}%")
+        (label :halign "end" :text "${network_name}")))))

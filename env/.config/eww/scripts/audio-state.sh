@@ -4,11 +4,12 @@
 # ~15 pactl processes per second.
 
 emit() {
-  local vol mute mic_mute
+  local vol mic_vol mute mic_mute
   vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\d+(?=%)' | head -1)
+  mic_vol=$(pactl get-source-volume @DEFAULT_SOURCE@ 2>/dev/null | grep -oP '\d+(?=%)' | head -1)
   pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -q 'yes' && mute=true || mute=false
   pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | grep -q 'yes' && mic_mute=true || mic_mute=false
-  printf '{"volume":%s,"muted":"%s","mic_muted":"%s"}\n' "${vol:-50}" "$mute" "$mic_mute"
+  printf '{"volume":%s,"mic_volume":%s,"muted":"%s","mic_muted":"%s"}\n' "${vol:-50}" "${mic_vol:-50}" "$mute" "$mic_mute"
 }
 
 emit

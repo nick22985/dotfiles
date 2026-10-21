@@ -36,7 +36,7 @@ limit=10
 # For eww - output recent colors as JSON array
 [[ $# -eq 1 && $1 = "-j" ]] && {
   if [ -s "$loc/colors" ]; then
-    head -n 5 "$loc/colors" | jq -R . | jq -s .
+    head -n 5 "$loc/colors" | jq -R . | jq -sc .
   else
     echo "[]"
   fi
@@ -62,7 +62,7 @@ echo "$color" >"$loc/colors"
 echo "$prevColors" >>"$loc/colors"
 sed -i '/^$/d' "$loc/colors"
 
-# Update eww with new color
-eww update colorpicker_recent="$(head -n 1 "$loc/colors" 2>/dev/null || echo '')"
+# Update eww with the new recent colours
+eww update colorpicker_colors="$(head -n 5 "$loc/colors" | jq -R . | jq -sc .)"
 
 notify "Color picked: $color" "Copied to clipboard"

@@ -65,8 +65,14 @@ get_workspaces_info() {
     # Ensure we have valid output
     [[ -z "$final_workspaces" ]] && final_workspaces="1,2,3,4,5,6"
     
+    # Per-workspace entries for the dots: {id, filled}
+    local filled list
+    filled=$(echo "$hypr_data" | jq -c '[.[] | select(.windows > 0) | .id]' 2>/dev/null || echo "[]")
+    list=$(jq -cn --argjson ids "[$final_workspaces]" --argjson filled "$filled" \
+        '[$ids[] as $i | {id: $i, filled: any($filled[]; . == $i)}]' 2>/dev/null || echo "[]")
+
     # Create JSON output
-    echo "{\"active\": $active_workspace, \"occupied\": [$final_workspaces]}"
+    echo "{\"active\": $active_workspace, \"occupied\": [$final_workspaces], \"list\": $list}"
 }
 
 # Rate limiting variables

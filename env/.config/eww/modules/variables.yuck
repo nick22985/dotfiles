@@ -1,64 +1,36 @@
 ;; Variables and polls for system monitoring
+;; CPU, RAM and disk come from eww's built-in EWW_CPU / EWW_RAM / EWW_DISK.
 
-;; Clock with seconds
-(defpoll time :interval "1s"
-  "date '+%I:%M:%S %p'")
+;; Clock
+(defpoll time :interval "5s"
+  "date '+%I:%M %p'")
 
-;; Date for tooltip
-(defpoll date_tooltip :interval "60s"
-  "date '+%Y %B'")
+(defpoll date_long :interval "60s"
+  "date '+%A %d %B %Y'")
 
-;; Calendar for tooltip
 (defpoll calendar :interval "3600s"
   "cal")
 
-;; CPU usage
-(defpoll cpu :interval "1s"
-  "top -bn1 | awk '/Cpu\\(s\\)/ {print int(100 - $8)}'")
-
-;; Memory usage (percentage)
-(defpoll mem_percent :interval "5s"
-  "free | awk '/Mem:/ {printf \"%.0f\", $3/$2 * 100.0}'")
-
-;; Memory usage (human readable format)
-(defpoll mem :interval "5s"
-  "free -h | awk '/Mem:/ {print $3 \"/\" $2}'")
+;; CPU package temperature from hwmon
+(defpoll temp :interval "5s" :initial "0"
+  "~/.config/eww/scripts/cpu-temp.sh")
 
 ;; Battery (only show if battery exists)
 (defpoll has_battery :interval "30s"
   "[ -e /sys/class/power_supply/BAT0 ] && echo 'true' || echo 'false'")
 
-(defpoll bat :interval "1s"
+(defpoll bat :interval "30s"
   "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null || echo '0'")
 
-(defpoll bat_status :interval "1s"
+(defpoll bat_status :interval "5s"
   "cat /sys/class/power_supply/BAT0/status 2>/dev/null || echo 'Unknown'")
 
-;; Disk usage
-(defpoll disk :interval "30s"
-  "df -h / | awk 'NR==2 {print int($5)}'")
+;; Power draw as {"text", "tooltip"}
+(defpoll power_draw :interval "5s" :initial '{"text":"","tooltip":""}'
+  "~/.config/eww/scripts/powerdraw.sh")
 
-;; Temperature (fallback to a default if sensors not available)
-(defpoll temp :interval "1s"
-  "sensors 2>/dev/null | grep 'acpitz-acpi' -A2 | grep 'temp1:' | awk '{match($2, /[0-9]+\\.[0-9]+/); print int(substr($2, RSTART, RLENGTH))}' | head -1 || echo '28'")
-
-;; Power draw (simplified text version)
-(defpoll power_draw :interval "1s"
-  "~/.config/eww/scripts/powerdraw.sh 2>/dev/null | jq -r '.text // \"⚡ N/A\"' || echo '⚡ N/A'")
-
-(defpoll power_draw_tooltip :interval "1s"
-  "~/.config/eww/scripts/powerdraw.sh 2>/dev/null | jq -r '.tooltip // \"Power monitoring unavailable\"' || echo 'Power monitoring unavailable'")
-
-;; Hyprland active workspace
-(deflisten workspace_id :initial "1"
-  "~/.config/eww/scripts/workspace-listener.sh")
-
-;; Global workspace info - shows all workspaces properly based on binding
-(deflisten workspaces_info :initial "{\"active\": 1, \"occupied\": [1,2,3,4,5,6]}"
-  "~/.config/eww/scripts/workspaces-listener.sh")
-
-;; Hyprland active window (listen to hyprland events)
-(deflisten window_info :initial ""
+;; Hyprland active window as {"class", "title"}
+(deflisten window_info :initial '{"class":"","title":""}'
   "~/.config/eww/scripts/hypr-window-listener.sh")
 
 ;; Network info
@@ -68,51 +40,31 @@
 (defpoll network_name :interval "5s"
   "nmcli -t -f STATE,CONNECTION general 2>/dev/null | head -1 | cut -d: -f2 || echo 'No Network'")
 
-;; Network speed (download/upload)
-(defpoll network_down :interval "1s"
-  "cat /proc/net/dev | awk '/wl/ || /eth/ || /enp/ {rx += $2} END {print rx/1024/1024}' | head -1 || echo '0'")
-
-(defpoll network_up :interval "1s"
-  "cat /proc/net/dev | awk '/wl/ || /eth/ || /enp/ {tx += $10} END {print tx/1024/1024}' | head -1 || echo '0'")
-
-;; Network speed formatted
-(defpoll network_speed :interval "1s"
-  "~/.config/eww/scripts/network-speed.sh")
-
 ;; Bluetooth status
 (defpoll bluetooth_status :interval "5s"
   "bluetoothctl show 2>/dev/null | grep 'Powered: yes' >/dev/null && echo 'on' || echo 'off'")
 
-;; Audio state (volume, sink mute, source mute) — driven by `pactl subscribe`,
+;; Audio state (volume, mic volume, sink mute, source mute) — driven by `pactl subscribe`,
 ;; so updates fire only on actual audio events instead of polling every 100ms.
-(deflisten audio_state :initial '{"volume":50,"muted":"false","mic_muted":"false"}'
+(deflisten audio_state :initial '{"volume":50,"mic_volume":50,"muted":"false","mic_muted":"false"}'
   "~/.config/eww/scripts/audio-state.sh")
-
-
-
-;; Network hover state
-(defvar network_hover false)
-
-;; Volume hover state
-(defvar volume_hover false)
 
 ;; Notification status (if using swaync)
 (deflisten notification_status :initial "{\"class\": \"none\"}"
   "~/.config/eww/scripts/notification-status.sh")
 
-;; Color picker recent color
-(defpoll colorpicker_recent :interval "1s" :initial ""
-  "~/.config/eww/scripts/colorpicker.sh -e")
-
-
-
-;; Colorpicker hover state
-(defvar colorpicker_hover false)
+;; Recent picked colours; colorpicker.sh pushes updates after each pick
+(defpoll colorpicker_colors :interval "600s" :initial "[]"
+  "~/.config/eww/scripts/colorpicker.sh -j")
 
 ;; Brightness level (0-100) or "disabled" if no backlight control
-(defpoll brightness :interval "500ms" :initial "disabled"
+(defpoll brightness :interval "5s" :initial "disabled"
   "~/.config/eww/scripts/brightness.sh")
 
-;; MPD status (if you use mpd)
-(deflisten mpd_status :initial ""
-  "mpc current 2>/dev/null || echo ''")
+;; Ultrawide bar layout: edges | band | thirds (see scripts/ultrawide-layout.sh)
+(defpoll uw_layout :interval "3600s" :initial "band"
+  "~/.config/eww/scripts/ultrawide-layout.sh get")
+
+;; Control center: index of the monitor it is open on, or ""
+(defvar cc_open "")
+(defvar cc_hover false)

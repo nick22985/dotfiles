@@ -4,17 +4,12 @@
 
 ;; Include all modules
 (include "./modules/variables.yuck")
-(include "./widgets/clock.yuck")
-(include "./widgets/system.yuck")
-(include "./widgets/left-modules.yuck")
-(include "./widgets/center-modules.yuck")
-(include "./widgets/right-modules.yuck")
-(include "./widgets/colorpicker-popup.yuck")
+(include "./widgets/bar.yuck")
+(include "./widgets/control-center.yuck")
 
 (include "./bars/topbar.yuck")
 
 ;; Include auto-generated dynamic config (only if files exist)
 (include "./tmp/modules/variables.yuck")
-(include "./tmp/widgets/center-modules.yuck") 
-(include "./tmp/widgets/colorpicker-popup-windows.yuck")
+(include "./tmp/widgets/control-center-windows.yuck")
 (include "./tmp/bars/topbar.yuck")

@@ -1,182 +1,160 @@
-// Widget specific styles
-
-// Common widget padding
-.battery,
-.clipboard,
-.colorpicker,
-.power-draw,
-.bluetooth,
-.pulseaudio,
-.network,
-.disk,
-.memory,
-.backlight,
-.cpu,
-.temperature,
-
-.tray,
-.window,
-.workspaces,
-.clock {
-	padding: 0 5px;
+// Control center dropdown
+.control-center {
+	padding: 14px;
+	border-radius: 16px;
+	border: 1px solid rgba(202, 211, 245, 0.08);
+	background-color: rgba(24, 25, 38, 0.94);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+	color: $text;
 }
 
-.notifications {
-	padding: 0 5px;
-	margin-right: 2px;
+.cc-date {
+	font-weight: bold;
 }
 
-.pulseaudio {
-	padding-top: 3px;
+.cc-power,
+.cc-foot,
+.cc-label,
+.cc-stat-name {
+	color: $overlay0;
+	font-size: 12px;
 }
 
-// Clock styling
-.clock {
-	color: #5fd1fa;
+// Toggle tiles
+.cc-tile {
+	padding: 10px 0 8px;
+	border-radius: 12px;
+	background-color: $mantle;
+	color: $subtext0;
+	transition: background-color 150ms ease;
 }
 
-// Mic unmuted state (white)
-.pulseaudio-mic {
-	color: #ffffff;
+.cc-tile:hover {
+	background-color: $surface0;
 }
 
-// Temperature critical state and muted states (red) - must come after to override
-.temperature.critical,
-.pulseaudio.muted,
-.pulseaudio-mic.muted {
-	color: #ff0000;
-	padding-top: 0;
+.cc-tile.on {
+	background-image: linear-gradient(135deg, rgba(51, 204, 255, 0.22), rgba(0, 255, 153, 0.16));
+	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.35);
+	color: $text;
 }
 
-// Battery states
-.battery.charging {
-	color: #ffffff;
-	background-color: #26a65b;
+.cc-tile-icon {
+	font-size: 18px;
 }
 
-.battery.warning:not(.charging) {
-	background-color: #ffbe61;
-	color: black;
+.cc-tile-text {
+	font-size: 11px;
 }
 
-.battery.critical:not(.charging) {
-	background-color: #f53c3c;
-	color: #ffffff;
-	animation-name: blink;
-	animation-duration: 0.5s;
-	animation-timing-function: linear;
-	animation-iteration-count: infinite;
-	animation-direction: alternate;
+// Sliders
+.cc-row-icon {
+	min-width: 28px;
+	min-height: 28px;
+	border-radius: 14px;
+	background-color: $mantle;
+	color: $text;
 }
 
-@keyframes blink {
-	to {
-		background-color: #ffffff;
-		color: #000000;
-	}
+.cc-row-icon:hover {
+	background-color: $surface0;
 }
 
-// Notification colors based on state
-.notifications.none {
-	color: #ffffff; // Default white only for 'none' state
+.cc-row-value {
+	min-width: 38px;
+	color: $subtext0;
+	font-size: 12px;
 }
 
-.notifications.notification,
-.notifications.notification.cc-open {
-	color: #5fd1fa; // Blue for notifications
+.cc-scale trough {
+	min-height: 6px;
+	border-radius: 3px;
+	background-color: $surface0;
 }
 
-.notifications.dnd-notification,
-.notifications.dnd-none,
-.notifications.dnd-notification.cc-open,
-.notifications.dnd-none.cc-open {
-	color: #f53c3c; // Red for DND
+.cc-scale highlight {
+	border-radius: 3px;
+	background-image: $accent;
 }
 
-.notifications.inhibited-notification,
-.notifications.inhibited-none {
-	color: #ffbe61; // Yellow for inhibited
+.cc-scale slider {
+	min-width: 14px;
+	min-height: 14px;
+	margin: -4px 0;
+	border-radius: 7px;
+	background-color: $text;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
-.notifications.dnd-inhibited-notification,
-.notifications.dnd-inhibited-none {
-	color: #ff8c00; // Orange for DND + inhibited
+// Stats
+.cc-stat {
+	padding: 8px 10px;
+	border-radius: 12px;
+	background-color: $mantle;
 }
 
-// Workspace styling
-.workspace {
-	// padding: 4px 8px;
-	margin: 0 2px;
-	border-radius: 5px;
-	transition: background-color 0.2s ease;
+.cc-stat-value {
+	font-weight: bold;
 }
 
-.workspace:hover {
-	background-color: rgba(95, 209, 250, 0.3);
+.cc-graph {
+	margin-top: 4px;
+	color: $accent-a;
+	background-color: rgba(51, 204, 255, 0.08);
 }
 
-.workspace label {
-	font-size: 15px;
-	padding: 2px 4px;
-	min-width: 16px;
+// Ultrawide layout switch
+.cc-segs {
+	padding: 3px;
+	border-radius: 10px;
+	background-color: $mantle;
 }
 
-.workspace.active {
-	// background-color: #5fd1fa;
-	// color: #000000;
+.cc-seg {
+	padding: 5px 0;
+	border-radius: 8px;
+	color: $subtext0;
+	font-size: 12px;
 }
 
-// Audio groups and network groups
-.audio-group,
-.network-group {
-	padding: 0;
+.cc-seg:hover {
+	color: $text;
 }
 
-.audio-group > *,
-.network-group > * {
-	padding: 0 3px;
+.cc-seg.on {
+	background-color: $surface1;
+	color: $text;
 }
 
-// Specific padding for mic button
-.pulseaudio-mic {
-	padding-right: 5px;
+// Recent colours
+.cc-swatch {
+	min-width: 20px;
+	min-height: 20px;
+	border-radius: 6px;
+	border: 1px solid rgba(202, 211, 245, 0.15);
 }
 
-// Network icon padding
-.network {
-	padding-right: 8px;
+.cc-chip {
+	padding: 3px 10px;
+	border-radius: 10px;
+	background-color: $mantle;
+	font-size: 12px;
 }
 
-// Hotspot icon padding
-.hotspot {
-	padding-right: 8px;
+.cc-chip:hover {
+	background-color: $surface0;
 }
 
-// System monitoring
-.cpu,
-.memory,
-.disk,
-.temperature {
-	color: #ffffff;
+.cc-foot {
+	padding-top: 2px;
 }
 
-
-
-.power-draw {
-	color: #f9e2af;
-}
-
-// Systray-specific styling (scoped to eww windows only)
-window .tray {
-	padding: 0 5px;
-}
-
-// Target systray menus specifically within eww context
+// Systray menus (scoped to eww windows only)
 window .tray menu,
 window .tray .menu {
-	background-color: #1e1e2e;
-	color: #cdd6f4;
-	border: 1px solid #313244;
+	background-color: $mantle;
+	color: $text;
+	border: 1px solid $surface0;
 	border-radius: 6px;
 	padding: 4px;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -185,7 +163,7 @@ window .tray .menu {
 window .tray menuitem,
 window .tray .menuitem {
 	background-color: transparent;
-	color: #cdd6f4;
+	color: $text;
 	padding: 6px 12px;
 	border-radius: 4px;
 	margin: 1px;
@@ -193,33 +171,21 @@ window .tray .menuitem {
 
 window .tray menuitem:hover,
 window .tray .menuitem:hover {
-	background-color: #313244;
-	color: #ffffff;
+	background-color: $surface0;
 }
 
 window .tray menuitem:active,
 window .tray .menuitem:active {
-	background-color: #89b4fa;
-	color: #000000;
+	background-color: $blue;
+	color: $crust;
 }
 
-// Systray tooltips
-// General tooltips
+// Tooltips
 tooltip {
-	background-color: #1e1e2e;
-	color: #cdd6f4;
-	border: 1px solid #313244;
-	border-radius: 5px;
-	padding: 5px 8px;
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-window .tray tooltip,
-window .tray .tooltip {
-	background-color: #1e1e2e;
-	color: #cdd6f4;
-	border: 1px solid #313244;
-	border-radius: 5px;
+	background-color: $mantle;
+	color: $text;
+	border: 1px solid $surface0;
+	border-radius: 6px;
 	padding: 5px 8px;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
@@ -227,9 +193,9 @@ window .tray .tooltip {
 // Systray popovers
 window .tray popover,
 window .tray .popover {
-	background-color: #1e1e2e;
-	color: #cdd6f4;
-	border: 1px solid #313244;
+	background-color: $mantle;
+	color: $text;
+	border: 1px solid $surface0;
 	border-radius: 6px;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -238,43 +204,4 @@ window .tray popover > contents,
 window .tray .popover > contents {
 	background-color: transparent;
 	padding: 4px;
-}
-
-// Colorpicker popup styling
-.colorpicker-popup {
-	background-color: #1e1e2e;
-	border: 1px solid #313244;
-	border-radius: 8px;
-	padding: 4px;
-	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.colorpicker-popup * {
-	margin: 0;
-	padding: 0;
-	min-height: 0;
-}
-
-.colorpicker-popup-title {
-	color: #cdd6f4;
-	font-weight: bold;
-	font-size: 13px;
-	margin: 0;
-	padding: 0;
-	min-height: 0;
-}
-
-.colorpicker-popup-item {
-	padding: 1px 0;
-}
-
-.colorpicker-popup-dot {
-	font-size: 14px;
-	min-width: 20px;
-}
-
-.colorpicker-popup-text {
-	color: #cdd6f4;
-	font-size: 12px;
-	font-family: monospace;
 }

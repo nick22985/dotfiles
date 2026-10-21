@@ -9,6 +9,7 @@
 (include "./widgets/control-center-pages.yuck")
 (include "./widgets/powermenu.yuck")
 (include "./widgets/osd.yuck")
+(include "./widgets/calendar.yuck")
 
 (include "./bars/topbar.yuck")
 

@@ -213,6 +213,7 @@ printf 'keep\n' > "$whole_root/env/.config/tool/keep.conf"
 printf 'gone\n' > "$whole_root/env/.config/tool/gone.conf"
 ln -s "$whole_root/env/.config/app/widgets/bar.yuck" "$whole_home/.config/app/widgets/bar.yuck"
 ln -s "$whole_root/env/.config/app/widgets/deleted.yuck" "$whole_home/.config/app/widgets/deleted.yuck"
+ln -s ../../../../env/.config/app/widgets/old.yuck "$whole_home/.config/app/widgets/old.yuck"
 cp -- "$deploy_receipt/restore-user.sh" "$whole_receipt/"
 whole_deploy() {
     (
@@ -232,6 +233,8 @@ whole_output="$(whole_deploy 2>&1)" || fail "deploy with a marked directory fail
     || fail "marked directory was not linked whole"
 [[ ! -e "$whole_root/env/.config/app/widgets/deleted.yuck" && ! -L "$whole_root/env/.config/app/widgets/deleted.yuck" ]] \
     || fail "a broken per-file link was merged into the source"
+[[ ! -e "$whole_root/env/.config/app/widgets/old.yuck" && ! -L "$whole_root/env/.config/app/widgets/old.yuck" ]] \
+    || fail "a broken relative per-file link was merged into the source"
 ! grep -q 'differ from' <<< "$whole_output" || fail "per-file links to the source were reported as local changes"
 [[ -L "$whole_home/.config/tool/gone.conf" ]] || fail "unmarked directory was not linked per file"
 rm -- "$whole_root/env/.config/tool/gone.conf"

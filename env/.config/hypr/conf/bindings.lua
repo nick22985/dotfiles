@@ -13,6 +13,8 @@ hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float())
 hl.bind(mainMod .. " + SHIFT + C", hl.dsp.exec_cmd("python3 ~/.config/hypr/scripts/center-window.py"))
 hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
+-- Window switcher: walker's windows provider (elephant-windows); pressing it again closes it
+hl.bind("ALT + Tab", hl.dsp.exec_cmd("walker --provider windows"))
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo()) -- dwindle
 
 -- Move focus with mainMod + arrow keys

@@ -3,7 +3,7 @@
 #   toggle <index>   open on monitor <index>, or close if already open there
 #   close            close it on every monitor
 #   close-later      close after a short delay unless the pointer came back
-#   page <n>         show a page (0 main, 1 Wi-Fi, 2 Bluetooth, 3 clipboard, 4 audio) and refresh it
+#   page <n>         show a page (0 main, 1 Wi-Fi, 2 Bluetooth, 3 clipboard, 4 audio, 5 wallpaper, 6 notifications) and refresh it
 #   offset <index>   print the right margin that puts a panel under the pill
 
 MONITORS_FILE=~/.cache/eww/monitors.list
@@ -28,6 +28,7 @@ show_page() {
         2) eww update bt_devices="$("$scripts/bluetooth.sh" list)" ;;
         3) eww update clip_entries="$("$scripts/clipboard.sh" list)" ;;
         4) eww update audio_devices="$("$scripts/audio-devices.sh" list)" ;;
+        5) "$scripts/wallpaper.sh" refresh "$(eww get cc_open 2>/dev/null)" ;;
     esac
 }
 
@@ -67,6 +68,7 @@ case "$1" in
             exit 0
         fi
         close_all
+        ~/.config/eww/scripts/calendar.sh close
         x=$(panel_offset "$index")
         eww open "control-center${index}" --anchor "top right" --pos "${x}x6"
         eww update cc_open="$index" cc_hover=false cc_page=0

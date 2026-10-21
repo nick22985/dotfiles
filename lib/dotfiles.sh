@@ -84,7 +84,10 @@ merge_untracked_dotfile_entries() {
     fi
     while IFS= read -r -d '' entry; do
         name="$relative${entry##*/}"
-        if [[ ! -e "$source/$name" && ! -L "$source/$name" ]]; then
+        if [[ -L "$entry" && ! -e "$entry" ]] && dotfile_link_into_source "$entry"; then
+            # A link from an earlier deploy to a file since deleted from the source.
+            continue
+        elif [[ ! -e "$source/$name" && ! -L "$source/$name" ]]; then
             if [[ "$(stat -c %d -- "$entry")" != "$(stat -c %d -- "$source/$relative")" ]]; then
                 log_error "Cannot move untracked $target/$name into $source/$name: they are on different filesystems"
                 return 1
@@ -117,6 +120,16 @@ unmerge_untracked_dotfile_entries() {
     done
 }
 
+# Whether a link points into the source tree, whether it is absolute or relative (older
+# deploys made relative links).
+dotfile_link_into_source() {
+    local link
+
+    link="$(readlink -- "$1")" || return 1
+    [[ "$link" == /* ]] || link="$(dirname -- "$1")/$link"
+    [[ "$(realpath -m -- "$link")" == "$(realpath -m -- "$dotfile_source_dir")"/* ]]
+}
+
 # Broken links under the declared directories, so links made before linked.list existed
 # are found too.
 dotfile_broken_links() {
@@ -142,8 +155,8 @@ prune_stale_dotfile_links() {
         validate_dotfile_path "$path" || continue
         target="$HOME/$path"
         [[ -L "$target" && ! -e "$target" ]] || continue
+        dotfile_link_into_source "$target" || continue
         link="$(readlink -- "$target")"
-        [[ "$link" == "$dotfile_source_dir"/* ]] || continue
         # Below a whole-directory link the path is inside the source tree itself.
         [[ "$(realpath -m -- "$(dirname -- "$target")")" == "$source_real"/* ]] && continue
         if [[ "$DRY_RUN" == "1" ]]; then

@@ -1,1 +1,0 @@
-../../../dotfiles/env/.config/eww/scripts/network-speed.sh

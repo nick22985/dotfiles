@@ -1,0 +1,253 @@
+#!/bin/bash
+# Per-monitor wallpapers. Images are drawn by hyprpaper; GIFs and videos play in mpvpaper, when it
+# is installed (GIFs fall back to a still in hyprpaper). Each monitor's pick is remembered by its
+# description, so it survives port changes, and the last pick is kept as a still for hyprlock.
+#
+#   wallpaper restore                   start hyprpaper and show each monitor's wallpaper (at login)
+#   wallpaper set FILE [MONITOR|all]    MONITOR is an output name such as DP-1; default the focused one
+#   wallpaper next|prev|random [MONITOR|all]
+#   wallpaper get [MONITOR]             print the file shown on a monitor
+#   wallpaper list                      print id, file and thumbnail path for every wallpaper, tab separated
+#   wallpaper thumbs                    make any missing thumbnails
+#
+# Wallpapers live in ~/.config/hypr/wallpapers and ~/Pictures/Wallpapers. Until a monitor has a
+# pick, it shows the one ~/.config/hypr/wallpaper.conf gives it.
+
+WALLPAPER_DIRS=("$HOME/.config/hypr/wallpapers" "$HOME/Pictures/Wallpapers")
+DEFAULTS="$HOME/.config/hypr/wallpaper.conf"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wallpaper"
+STATE="$STATE_DIR/monitors"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/wallpaper"
+LOCK_IMAGE="$CACHE/lock.jpg"
+IMAGE_TYPES="jpg|jpeg|png|webp|gif|bmp"
+VIDEO_TYPES="mp4|webm|mkv|mov"
+
+# Connected monitors as name<TAB>description<TAB>focused.
+monitors() {
+    hyprctl -j monitors 2>/dev/null | jq -r '.[] | "\(.name)\t\(.description)\t\(.focused)"'
+}
+
+# Output names for a MONITOR|all argument; the focused monitor when it is empty.
+targets() {
+    case "$1" in
+        all) monitors | cut -f1 ;;
+        "") monitors | awk -F'\t' '$3 == "true" {print $1; exit}' ;;
+        *) monitors | awk -F'\t' -v n="$1" '$1 == n {print $1}' ;;
+    esac
+}
+
+description() {
+    monitors | awk -F'\t' -v n="$1" '$1 == n {print $2}'
+}
+
+is_video() {
+    [[ "${1,,}" =~ \.($VIDEO_TYPES)$ ]]
+}
+
+# Whether mpvpaper should play the file: videos always, GIFs when mpvpaper is installed.
+plays_in_mpv() {
+    is_video "$1" || { [[ "${1,,}" == *.gif ]] && command -v mpvpaper >/dev/null; }
+}
+
+# Every wallpaper file, sorted; videos only when mpvpaper can play them.
+files() {
+    local types="$IMAGE_TYPES" dir
+    command -v mpvpaper >/dev/null && types="$types|$VIDEO_TYPES"
+    for dir in "${WALLPAPER_DIRS[@]}"; do
+        [[ -d "$dir" ]] && find -L "$dir" -maxdepth 2 -type f -regextype posix-extended -iregex ".*\.($types)$"
+    done | sort
+}
+
+# A file named in wallpaper.conf or on the command line, as an absolute path.
+resolve() {
+    local dir
+    [[ "$1" == /* ]] && { printf '%s\n' "$1"; return; }
+    [[ "$1" == \~/* ]] && { printf '%s\n' "$HOME/${1#\~/}"; return; }
+    for dir in "${WALLPAPER_DIRS[@]}"; do
+        [[ -f "$dir/$1" ]] && { printf '%s\n' "$dir/$1"; return; }
+    done
+    [[ -f "$1" ]] && realpath -- "$1"
+}
+
+# The file for a monitor: its pick, else its default, else the catch-all default, else the first wallpaper.
+current() {
+    local desc file
+    desc="$(description "$1")"
+    file="$(awk -F'\t' -v d="$desc" '$1 == d {f = $2} END {print f}' "$STATE" 2>/dev/null)"
+    [[ -n "$file" && -f "$file" ]] && { printf '%s\n' "$file"; return; }
+    if [[ -f "$DEFAULTS" ]]; then
+        file="$(awk -v d="$desc" '
+            /^[[:space:]]*(#|$)/ { next }
+            { i = index($0, " = "); if (!i) next; key = substr($0, 1, i - 1); val = substr($0, i + 3) }
+            key == d { found = val } key == "*" { fallback = val }
+            END { print (found != "" ? found : fallback) }' "$DEFAULTS")"
+        file="$(resolve "$file")"
+        [[ -n "$file" && -f "$file" ]] && { printf '%s\n' "$file"; return; }
+    fi
+    files | head -n1
+}
+
+remember() {
+    local desc="$1" file="$2"
+    mkdir -p "$STATE_DIR"
+    { awk -F'\t' -v d="$desc" '$1 != d' "$STATE" 2>/dev/null; printf '%s\t%s\n' "$desc" "$file"; } > "$STATE.part"
+    mv "$STATE.part" "$STATE"
+}
+
+ensure_daemon() {
+    hyprctl hyprpaper listactive >/dev/null 2>&1 && return 0
+    pgrep -x hyprpaper >/dev/null || setsid -f hyprpaper >/dev/null 2>&1
+    for _ in {1..50}; do
+        hyprctl hyprpaper listactive >/dev/null 2>&1 && return 0
+        sleep 0.1
+    done
+    echo "hyprpaper did not start" >&2
+    return 1
+}
+
+stop_video() {
+    local pidfile="$STATE_DIR/video-$1.pid" pid
+    pid="$(cat "$pidfile" 2>/dev/null)"
+    [[ -n "$pid" && "$(ps -o comm= -p "$pid" 2>/dev/null)" == mpvpaper ]] && kill "$pid" 2>/dev/null
+    rm -f "$pidfile"
+}
+
+show() {
+    local output="$1" file="$2"
+    stop_video "$output"
+    if plays_in_mpv "$file"; then
+        if ! command -v mpvpaper >/dev/null; then
+            notify-send -a Wallpaper "Can't play video wallpapers" "Install mpvpaper first" 2>/dev/null
+            return 1
+        fi
+        mkdir -p "$STATE_DIR"
+        nohup mpvpaper -o "no-audio loop hwdec=auto panscan=1.0" "$output" "$file" >/dev/null 2>&1 &
+        echo $! > "$STATE_DIR/video-$output.pid"
+    else
+        ensure_daemon || return 1
+        show_image "$output" "$file"
+    fi
+}
+
+# A freshly started hyprpaper may not know every output yet, so retry briefly; on failure say why,
+# since this usually runs from a click with nowhere to print.
+show_image() {
+    local output="$1" file="$2" error
+    for _ in {1..10}; do
+        error="$(hyprctl hyprpaper wallpaper "$output,$file,cover" 2>&1)" && return 0
+        sleep 0.3
+    done
+    notify-send -a Wallpaper "Couldn't set the wallpaper on $output" "$error" 2>/dev/null
+    echo "hyprpaper failed on $output: $error" >&2
+    return 1
+}
+
+# A still of the file for hyprlock, which can't draw GIFs or videos.
+update_lock_image() {
+    mkdir -p "$CACHE"
+    ffmpeg -y -loglevel error -i "$1" -frames:v 1 -vf "scale='min(3840,iw)':-2" -q:v 3 "$CACHE/lock.part.jpg" 2>/dev/null \
+        && mv "$CACHE/lock.part.jpg" "$LOCK_IMAGE"
+}
+
+set_wallpaper() {
+    local file output found="" shown=""
+    file="$(resolve "$1")"
+    if [[ -z "$file" || ! -f "$file" ]]; then
+        echo "No such wallpaper: $1" >&2
+        return 1
+    fi
+    while read -r output; do
+        [[ -n "$output" ]] || continue
+        found=1
+        show "$output" "$file" || continue
+        remember "$(description "$output")" "$file"
+        shown=1
+    done < <(targets "$2")
+    [[ -n "$found" ]] || { echo "No such monitor: ${2:-focused}" >&2; return 1; }
+    [[ -n "$shown" ]] || return 1
+    update_lock_image "$file" &
+}
+
+restore() {
+    local output
+    ensure_daemon
+    while read -r output; do
+        [[ -n "$output" ]] && show "$output" "$(current "$output")"
+    done < <(targets all)
+    [[ -f "$LOCK_IMAGE" ]] || update_lock_image "$(current "$(targets "")")"
+}
+
+# next, prev or random relative to what the focused (or named) monitor shows.
+step() {
+    local how="$1" target="$2" from list count index
+    from="$(current "$(targets "${target/#all/}" | head -n1)")"
+    mapfile -t list < <(files)
+    count="${#list[@]}"
+    (( count )) || { echo "No wallpapers found" >&2; return 1; }
+    for index in "${!list[@]}"; do
+        [[ "${list[index]}" == "$from" ]] && break
+    done
+    [[ "${list[index]}" == "$from" ]] || index=-1
+    case "$how" in
+        next) index=$(( (index + 1) % count )) ;;
+        prev) index=$(( (index - 1 + count) % count )) ;;
+        random)
+            if (( count > 1 )); then
+                local pick=$(( RANDOM % (count - 1) ))
+                (( index >= 0 && pick >= index )) && pick=$(( pick + 1 ))
+                index="$pick"
+            else
+                index=0
+            fi
+            ;;
+    esac
+    set_wallpaper "${list[index]}" "$target"
+}
+
+thumb_path() {
+    local id
+    id="$(printf '%s' "$1" | sha1sum | cut -c1-12)"
+    printf '%s\t%s\n' "$id" "$CACHE/thumbs/$id-$(stat -c %Y -- "$1" 2>/dev/null).jpg"
+}
+
+list() {
+    local file id thumb
+    while IFS= read -r file; do
+        IFS=$'\t' read -r id thumb < <(thumb_path "$file")
+        printf '%s\t%s\t%s\n' "$id" "$file" "$thumb"
+    done < <(files)
+}
+
+# 16:9 thumbnails for the picker, cropped to fill.
+make_thumb() {
+    [[ -f "$2" ]] && return
+    ffmpeg -y -loglevel error -i "$1" -frames:v 1 \
+        -vf "scale=320:180:force_original_aspect_ratio=increase,crop=320:180" -q:v 4 "$2.part.jpg" 2>/dev/null \
+        && mv "$2.part.jpg" "$2"
+}
+
+thumbs() {
+    local id file thumb
+    mkdir -p "$CACHE/thumbs"
+    while IFS=$'\t' read -r id file thumb; do
+        [[ -f "$thumb" ]] || make_thumb "$file" "$thumb" &
+        while (( $(jobs -rp | wc -l) >= 4 )); do wait -n; done
+    done < <(list)
+    wait
+}
+
+case "$1" in
+    restore) restore ;;
+    set)
+        [[ -n "$2" ]] || { echo "Usage: $0 set FILE [MONITOR|all]" >&2; exit 1; }
+        set_wallpaper "$2" "$3"
+        ;;
+    next|prev|random) step "$1" "$2" ;;
+    get) current "$(targets "$2" | head -n1)" ;;
+    list) list ;;
+    thumbs) thumbs ;;
+    *)
+        echo "Usage: $0 {restore|set FILE [MONITOR|all]|next|prev|random [MONITOR|all]|get [MONITOR]|list|thumbs}" >&2
+        exit 1
+        ;;
+esac

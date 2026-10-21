@@ -1,0 +1,105 @@
+;; Calendar dropped from the clock: a month grid with a dot per calendar on days that have
+;; events, and the selected day's events below. calendar.sh opens it on the clock's monitor
+;; and fills cal_data from calendar-data.py; it closes when the clock is clicked again or the
+;; pointer leaves it.
+
+(defwidget cal_day [day]
+  (button :class "cal-day ${day.out ? 'out' : ''} ${day.date == formattime(EWW_TIME, '%Y-%m-%d') ? 'today' : ''} ${day.date == cal_sel ? 'selected' : ''}"
+          :onclick {day.out ? "setsid -f ~/.config/eww/scripts/calendar.sh goto ${day.date}" : "eww update cal_sel=${day.date}"}
+    (box :orientation "v"
+         :space-evenly false
+      (label :class "cal-day-num" :text {day.day})
+      (box :class "cal-dots"
+           :halign "center"
+           :space-evenly false
+           :spacing 3
+        (for dot in {day.dots}
+          (box :class "cal-dot" :style "background-color: ${dot};"))))))
+
+(defwidget cal_event [event]
+  (box :class "cal-event"
+       :space-evenly false
+       :spacing 10
+    (box :class "cal-event-bar" :style "background-color: ${event.color};")
+    (box :orientation "v"
+         :space-evenly false
+         :hexpand true
+      (label :class "cal-event-title" :halign "start" :limit-width 34 :text {event.title})
+      (label :class "cal-event-when" :halign "start" :limit-width 42 :text "${event.when} · ${event.where}"))))
+
+(defwidget cal_events [events]
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 4
+    (for event in events
+      (cal_event :event event))))
+
+(defwidget calendar_popup []
+  (eventbox :onhover "eww update cal_hover=true"
+            :onhoverlost "eww update cal_hover=false; setsid -f ~/.config/eww/scripts/calendar.sh close-later"
+    (box :class "cal-popup"
+         :orientation "v"
+         :space-evenly false
+         :spacing 12
+      ;; Month and navigation
+      (box :class "cal-head"
+           :space-evenly false
+        (box :space-evenly false
+             :spacing 6
+             :hexpand true
+          (label :class "cal-month" :text {cal_data.title})
+          (label :class "cal-year" :valign "end" :text {cal_data.year}))
+        (box :space-evenly false
+             :spacing 2
+          (button :class "cc-icon-btn" :tooltip "Previous month"
+                  :onclick "setsid -f ~/.config/eww/scripts/calendar.sh month -1"
+            "󰅁")
+          (button :class "cc-icon-btn cal-today-btn" :tooltip "Today"
+                  :onclick "setsid -f ~/.config/eww/scripts/calendar.sh month today"
+            "󰃶")
+          (button :class "cc-icon-btn" :tooltip "Next month"
+                  :onclick "setsid -f ~/.config/eww/scripts/calendar.sh month +1"
+            "󰅂")))
+      ;; Month grid
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 2
+        (box :class "cal-weekdays"
+          (label :text "Mo") (label :text "Tu") (label :text "We") (label :text "Th") (label :text "Fr")
+          (label :class "cal-weekend" :text "Sa") (label :class "cal-weekend" :text "Su"))
+        (for week in {cal_data.weeks}
+          (box :spacing 2
+            (for day in week
+              (cal_day :day day)))))
+      ;; The selected day's events
+      (box :class "cal-agenda"
+           :orientation "v"
+           :space-evenly false
+           :spacing 8
+        (label :class "cal-agenda-day"
+               :halign "start"
+               :text "${cal_sel == formattime(EWW_TIME, '%Y-%m-%d') ? 'Today · ' : ''}${cal_data.days[cal_sel].label}")
+        (label :class "cal-empty"
+               :halign "start"
+               :visible {cal_data.days[cal_sel].count == 0}
+               :text "Nothing scheduled")
+        (box :visible {cal_data.days[cal_sel].count > 0 && cal_data.days[cal_sel].count <= 5}
+          (cal_events :events {cal_data.days[cal_sel].events}))
+        (scroll :class "cal-scroll"
+                :visible {cal_data.days[cal_sel].count > 5}
+                :vscroll true
+                :hscroll false
+                :height 230
+          (cal_events :events {cal_data.days[cal_sel].events})))
+      (label :class "cal-note ${cal_data.note_error ? 'error' : ''}"
+             :halign "start"
+             :wrap true
+             :visible {cal_data.note != ''}
+             :text {cal_data.note}))))
+
+(defwindow calendar-popup
+  :geometry (geometry :y "6px" :width "340px" :anchor "top center")
+  :stacking "overlay"
+  :focusable false
+  :namespace "eww-calendar"
+  (calendar_popup))

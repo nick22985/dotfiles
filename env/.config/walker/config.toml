@@ -1,0 +1,11 @@
+# Only the settings that differ from Walker's defaults; Walker merges the rest in.
+theme = "macchiato"
+
+[placeholders]
+"default" = { input = "Search", list = "No Results" }
+"windows" = { input = "Switch to a window", list = "No open windows" }
+
+# Tab steps through results too, so Alt+Tab, release, Tab Tab, Enter works in the window switcher.
+[keybinds]
+next = ["Down", "Tab"]
+previous = ["Up", "shift ISO_Left_Tab"]

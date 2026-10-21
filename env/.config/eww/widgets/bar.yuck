@@ -39,21 +39,20 @@
            :visible {window_info.title != ""}
            :text "· ${window_info.title}")))
 
-(defwidget centre_island []
+(defwidget centre_island [monitor]
   (box :class "island centre-island"
        :space-evenly false
     (window_title)
     (box :class "island-sep"
          :valign "center"
          :visible {window_info.class != ""})
-    (button :class "clock"
-            :tooltip "${date_long}
-
-${calendar}"
+    (button :class "clock ${cal_open == monitor ? 'open' : ''}"
+            :tooltip "${date_long} | Click: calendar"
+            :onclick "setsid -f ~/.config/eww/scripts/calendar.sh toggle ${monitor}"
       (label :text time))))
 
 (defwidget status_pill [monitor]
-  (eventbox :onscroll "[ '{}' == 'up' ] && pactl set-sink-volume @DEFAULT_SINK@ +5% || pactl set-sink-volume @DEFAULT_SINK@ -5%"
+  (eventbox :onscroll "setsid -f ~/.config/eww/scripts/osd.sh volume {}"
     (button :class "status-pill ${cc_open == monitor ? 'open' : ''}"
             :valign "center"
             :onclick "setsid -f ~/.config/eww/scripts/control-center.sh toggle ${monitor}"
@@ -88,12 +87,24 @@ ${calendar}"
                           bat <= 60 ? '󰪣' :
                           bat <= 80 ? '󰪤' : '󰪥'} ${bat}%"))))))
 
+;; Shown while capture is recording the screen; click to stop
+(defwidget rec_pill []
+  (button :class "rec-pill"
+          :visible {recording.active}
+          :tooltip "Recording | Click: stop"
+          :onclick "setsid -f ~/.config/eww/scripts/recording.sh stop"
+    (box :space-evenly false
+         :spacing 6
+      (box :class "rec-dot" :valign "center")
+      (label :class "rec-time" :text {recording.elapsed}))))
+
 (defwidget right_island [monitor]
   (box :class "island right-island"
        :space-evenly false
     (systray :class "tray"
              :icon-size 14
              :spacing 10)
+    (rec_pill)
     (status_pill :monitor monitor)))
 
 ;; `space-evenly` gives each group exactly a third of the bar, so the centre island
@@ -107,6 +118,6 @@ ${calendar}"
     (box :halign {uw == 'true' && uw_layout == 'thirds' ? 'center' : 'start'}
       (workspace_dots :ws ws))
     (box :halign "center"
-      (centre_island))
+      (centre_island :monitor monitor))
     (box :halign {uw == 'true' && uw_layout == 'thirds' ? 'center' : 'end'}
       (right_island :monitor monitor))))

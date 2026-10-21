@@ -4,7 +4,8 @@
 hl.config({
     general = {
         gaps_in     = 5,
-        gaps_out    = 20,
+        -- Small top gap: the eww bar already reserves its own padding above the windows
+        gaps_out    = { top = 6, right = 20, bottom = 20, left = 20 },
         border_size = 2,
 
         col = {

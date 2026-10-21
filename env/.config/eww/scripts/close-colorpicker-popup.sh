@@ -1,1 +1,0 @@
-../../../dotfiles/env/.config/eww/scripts/close-colorpicker-popup.sh

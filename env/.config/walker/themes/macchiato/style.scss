@@ -1,0 +1,193 @@
+// Launcher in the eww look. The palette is eww's, so both stay in step.
+@import "../../../eww/styles/palette";
+
+$panel: rgba(24, 25, 38, 0.94);
+$panel-border: rgba(202, 211, 245, 0.08);
+$selected: linear-gradient(135deg, rgba(51, 204, 255, 0.16), rgba(0, 255, 153, 0.10));
+
+* {
+	all: unset;
+	font-family: 'JetBrainsMono Nerd Font', 'JetBrainsMono NF';
+	font-size: 14px;
+}
+
+scrollbar {
+	opacity: 0;
+}
+
+.normal-icons {
+	-gtk-icon-size: 20px;
+}
+
+.large-icons {
+	-gtk-icon-size: 32px;
+}
+
+.box-wrapper {
+	padding: 14px;
+	border-radius: 18px;
+	border: 1px solid $panel-border;
+	background-color: $panel;
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+	color: $text;
+}
+
+.search-container {
+	margin-bottom: 8px;
+}
+
+.input {
+	padding: 10px 14px;
+	border-radius: 12px;
+	background-color: $mantle;
+	box-shadow: inset 0 0 0 1px $surface1;
+	caret-color: $text;
+	color: $text;
+}
+
+.input:focus,
+.input:focus-within {
+	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.6);
+}
+
+.input placeholder {
+	color: $overlay0;
+}
+
+.input selection {
+	background-color: $surface1;
+}
+
+.list {
+	color: $subtext0;
+}
+
+.item-box {
+	padding: 8px 10px;
+	border-radius: 10px;
+}
+
+child:hover .item-box,
+row:hover .item-box {
+	background-color: $mantle;
+	color: $text;
+}
+
+child:selected .item-box,
+row:selected .item-box {
+	background-image: $selected;
+	color: $text;
+}
+
+.item-subtext {
+	color: $overlay0;
+	font-size: 11px;
+}
+
+child:selected .item-subtext,
+row:selected .item-subtext {
+	color: $accent-b;
+}
+
+.providerlist .item-subtext {
+	font-size: unset;
+}
+
+.item-quick-activation {
+	padding: 2px 7px;
+	border-radius: 5px;
+	background-color: $surface0;
+	color: $subtext0;
+	font-size: 11px;
+}
+
+.item-image-text {
+	font-size: 28px;
+}
+
+.calc .item-text {
+	font-size: 24px;
+}
+
+.symbols .item-image {
+	font-size: 24px;
+}
+
+.todo.done .item-text-box {
+	opacity: 0.25;
+}
+
+.todo.urgent {
+	font-size: 24px;
+}
+
+.todo.active {
+	font-weight: bold;
+}
+
+.bluetooth.disconnected {
+	opacity: 0.5;
+}
+
+:not(.calc).current {
+	font-style: italic;
+}
+
+.preview-box,
+.elephant-hint,
+.placeholder {
+	color: $overlay0;
+}
+
+.preview {
+	border-radius: 12px;
+	background-color: $mantle;
+	color: $text;
+}
+
+.preview .large-icons {
+	-gtk-icon-size: 64px;
+}
+
+.preview-content.archlinuxpkgs,
+.preview-content.dnfpackages,
+.preview-content.aptpackages {
+	font-family: monospace;
+}
+
+popover {
+	padding: 10px;
+	border-radius: 14px;
+	border: 1px solid $panel-border;
+	background-color: $mantle;
+}
+
+.keybinds {
+	padding-top: 10px;
+	border-top: 1px solid $surface0;
+	color: $overlay0;
+	font-size: 12px;
+}
+
+.keybind-button:hover {
+	color: $text;
+}
+
+.keybind-bind {
+	text-transform: lowercase;
+	color: $overlay0;
+}
+
+.keybind-label {
+	padding: 1px 6px;
+	border-radius: 5px;
+	background-color: $surface0;
+	color: $subtext0;
+}
+
+.error {
+	padding: 10px;
+	border-radius: 10px;
+	background-color: rgba(237, 135, 150, 0.2);
+	color: $red;
+}

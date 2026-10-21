@@ -74,8 +74,21 @@ window {
 }
 
 .clock {
+	padding: 0 8px;
+	min-height: 26px;
+	border-radius: 13px;
 	color: $text;
 	font-weight: bold;
+	transition: background-color 150ms ease;
+}
+
+.clock:hover {
+	background-color: $surface0;
+}
+
+.clock.open {
+	background-color: $surface1;
+	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.45);
 }
 
 // Right: tray + status pill
@@ -102,6 +115,39 @@ window {
 .status-pill.open {
 	background-color: $surface1;
 	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.45);
+}
+
+.rec-pill {
+	margin-right: 8px;
+	padding: 0 10px;
+	min-height: 26px;
+	border-radius: 13px;
+	background-color: rgba(237, 135, 150, 0.16);
+	transition: background-color 150ms ease;
+}
+
+.rec-pill:hover {
+	background-color: rgba(237, 135, 150, 0.28);
+}
+
+.rec-dot {
+	min-width: 8px;
+	min-height: 8px;
+	border-radius: 4px;
+	background-color: $red;
+	animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+.rec-time {
+	color: $red;
+	font-weight: bold;
+}
+
+// One percentage per block: GTK can't parse a list like "0%, 100%", and one bad rule drops the whole stylesheet.
+@keyframes rec-pulse {
+	0% { opacity: 1; }
+	50% { opacity: 0.25; }
+	100% { opacity: 1; }
 }
 
 .pill-icon {

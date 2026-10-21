@@ -1,10 +1,12 @@
-;; Control center dropped from the status pill: toggles, sliders, stats, recent colours.
-;; The Network, Bluetooth, Clipboard and Audio tiles swap in their own page
+;; Control center dropped from the status pill: toggles, sliders, now playing, stats, recent colours.
+;; The Network, Bluetooth, Alerts, Clipboard and Audio tiles, and the wallpaper button, swap in their own page
 ;; (widgets/control-center-pages.yuck); cc_page picks which one is shown.
 
-(defwidget cc_tile [icon text active onclick]
+(defwidget cc_tile [icon text active onclick ?onrightclick ?tooltip]
   (button :class "cc-tile ${active ? 'on' : ''}"
+          :tooltip tooltip
           :onclick onclick
+          :onrightclick onrightclick
     (box :orientation "v"
          :space-evenly false
          :spacing 4
@@ -41,6 +43,48 @@
            :dynamic false
            :height 18)))
 
+;; Shown while any player is running (scripts/media.sh). The cover is shown as a thumbnail
+;; and, darkened, behind the whole card.
+(defwidget cc_media []
+  (box :class "cc-media"
+       :space-evenly false
+       :spacing 12
+       :visible {media.present}
+       :style {media.art == '' ? '' : "background-image: linear-gradient(90deg, rgba(30, 32, 48, 0.7), rgba(30, 32, 48, 0.94)), url('${media.art}');"}
+    (box :class "cc-media-art"
+         :style {media.art == '' ? '' : "background-image: url('${media.art}');"}
+         :valign "center"
+      (label :class "cc-media-art-icon"
+             :hexpand true
+             :visible {media.art == ''}
+             :text "󰎆"))
+    (box :orientation "v"
+         :space-evenly false
+         :hexpand true
+         :valign "center"
+         :spacing 2
+      (label :class "cc-media-title"
+             :halign "start"
+             :limit-width 24
+             :tooltip {media.title}
+             :text {media.title == '' ? 'Unknown track' : media.title})
+      (label :class "cc-media-artist"
+             :halign "start"
+             :limit-width 28
+             :text {media.artist == '' ? media.player : media.artist}))
+    (box :space-evenly false
+         :spacing 2
+         :valign "center"
+      (button :class "cc-icon-btn"
+              :onclick "~/.config/eww/scripts/media.sh prev"
+        (label :text "󰒮"))
+      (button :class "cc-icon-btn cc-media-play"
+              :onclick "~/.config/eww/scripts/media.sh toggle"
+        (label :text {media.status == 'Playing' ? '󰏤' : '󰐊'}))
+      (button :class "cc-icon-btn"
+              :onclick "~/.config/eww/scripts/media.sh next"
+        (label :text "󰒭")))))
+
 (defwidget cc_layout_button [layout text]
   (button :class "cc-seg ${uw_layout == layout ? 'on' : ''}"
           :onclick "setsid -f ~/.config/eww/scripts/ultrawide-layout.sh set ${layout}"
@@ -57,7 +101,9 @@
         (cc_wifi_page)
         (cc_bluetooth_page)
         (cc_clipboard_page)
-        (cc_audio_page)))))
+        (cc_audio_page)
+        (cc_wallpaper_page :monitor monitor)
+        (cc_notifications_page)))))
 
 (defwidget cc_main [uw]
     (box :orientation "v"
@@ -66,6 +112,10 @@
       (box :class "cc-head"
            :space-evenly false
         (label :class "cc-date" :halign "start" :hexpand true :text date_long)
+        (button :class "cc-icon-btn cc-head-btn"
+                :tooltip "Wallpaper"
+                :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 5"
+          (label :text "󰸉"))
         (label :class "cc-power"
                :visible {has_battery == 'true'}
                :tooltip {power_draw.tooltip}
@@ -92,10 +142,12 @@
       (box :class "cc-tiles"
            :space-evenly true
            :spacing 6
-        (cc_tile :icon "󰂜"
-                 :text "Alerts"
-                 :active false
-                 :onclick "~/.config/eww/scripts/control-center.sh close; swaync-client -t -sw")
+        (cc_tile :icon {notifications.count > 0 ? '󰂚' : '󰂜'}
+                 :text {notifications.count > 0 ? "Alerts · ${notifications.count}" : "Alerts"}
+                 :active {notifications.count > 0}
+                 :tooltip "Click: notifications · Right-click: swaync panel"
+                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 6"
+                 :onrightclick "~/.config/eww/scripts/control-center.sh close; swaync-client -t -sw")
         (cc_tile :icon ""
                  :text "Clipboard"
                  :active false
@@ -121,6 +173,7 @@
                    :value {brightness == 'disabled' ? 0 : brightness}
                    :onclick ""
                    :onchange "(brightnessctl -d intel_backlight set {}% 2>/dev/null || brightnessctl set {}%) >/dev/null; eww update brightness={}"))
+      (cc_media)
       (box :class "cc-stats"
            :space-evenly true
            :spacing 6

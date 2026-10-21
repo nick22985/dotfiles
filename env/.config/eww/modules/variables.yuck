@@ -8,8 +8,13 @@
 (defpoll date_long :interval "60s"
   "date '+%A %d %B %Y'")
 
-(defpoll calendar :interval "3600s"
-  "cal")
+(defvar cal_open "")
+(defvar cal_hover false)
+;; Calendar popup: the month shown (YYYY-MM), the selected day (YYYY-MM-DD) and the month's grid
+;; and events from calendar-data.py, all set by calendar.sh
+(defvar cal_month "")
+(defvar cal_sel "")
+(defvar cal_data '{"title":"","year":"","weeks":[],"days":{"":{"label":"","count":0,"events":[]}},"note":"","note_error":false}')
 
 ;; CPU package temperature from hwmon
 (defpoll temp :interval "5s" :initial "0"
@@ -53,6 +58,10 @@
 (deflisten notification_status :initial "{\"class\": \"none\"}"
   "~/.config/eww/scripts/notification-status.sh")
 
+;; Notification history for the control center: {count, items: [{id, app, summary, body, icon, urgency, ago}]}
+(deflisten notifications :initial '{"count":0,"items":[]}'
+  "~/.config/eww/scripts/notifications.py listen")
+
 ;; Recent picked colours; colorpicker.sh pushes updates after each pick
 (defpoll colorpicker_colors :interval "600s" :initial "[]"
   "~/.config/eww/scripts/colorpicker.sh -j")
@@ -68,7 +77,7 @@
 ;; Control center: index of the monitor it is open on, or ""
 (defvar cc_open "")
 (defvar cc_hover false)
-;; Control center page: 0 main, 1 Wi-Fi, 2 Bluetooth, 3 clipboard, 4 audio.
+;; Control center page: 0 main, 1 Wi-Fi, 2 Bluetooth, 3 clipboard, 4 audio, 5 wallpaper.
 ;; Each page polls only while shown; control-center.sh page <n> fetches on open.
 (defvar cc_page 0)
 
@@ -90,6 +99,9 @@
 (defpoll clip_entries :interval "5s" :initial "[]" :run-while {cc_page == 3}
   "~/.config/eww/scripts/clipboard.sh list")
 
+;; Wallpaper page: rows of two {id, name, thumb, kind, current}, filled by wallpaper.sh
+(defvar wp_list '[]')
+
 (defpoll audio_devices :interval "5s" :initial '{"sinks":[],"sources":[]}' :run-while {cc_page == 4}
   "~/.config/eww/scripts/audio-devices.sh list")
 
@@ -97,5 +109,13 @@
 (defvar pm_confirm "")
 (defvar pm_info '{"host":"","user":"","uptime":"","size":""}')
 
+;; Now playing for the control center's media card, from playerctl
+(deflisten media :initial '{"present":false,"player":"","status":"","title":"","artist":"","art":""}'
+  "~/.config/eww/scripts/media.sh listen")
+
 ;; Media-key popup: volume, mic or brightness, set by osd.sh
 (defvar osd '{"kind":"volume","value":0,"muted":false}')
+
+;; Screen recording from capture as {"active", "elapsed"}, for the bar's recording pill
+(deflisten recording :initial '{"active":false,"elapsed":""}'
+  "~/.config/eww/scripts/recording.sh listen")

@@ -1,8 +1,8 @@
-;; Control center pages for Wi-Fi, Bluetooth, clipboard history and audio devices,
-;; plus the Wi-Fi password prompt. Every page takes the main page's size (the stack
+;; Control center pages for Wi-Fi, Bluetooth, clipboard history, audio devices, wallpapers and
+;; notifications, plus the Wi-Fi password prompt. Every page takes the main page's size (the stack
 ;; is same-size) and the list stretches to fill it, so switching pages never resizes.
-;; Network and device names come from the air or the clipboard, so they only ever
-;; appear as label text; commands carry the BSSID, MAC or numeric id instead.
+;; Network and device names and notification text come from the air, the clipboard or other
+;; programs, so they only ever appear as label text; commands carry the BSSID, MAC or numeric id instead.
 
 ;; Back button, title, then the page's own controls on the right.
 (defwidget cc_page_head [title]
@@ -221,3 +221,111 @@ EWW_PW_END")
   :stacking "overlay"
   :focusable true
   (wifi_prompt))
+
+;; A wallpaper's thumbnail, with a badge for GIFs and videos; a placeholder until the
+;; thumbnail is made.
+(defwidget cc_wallpaper_tile [w monitor]
+  (button :class "wp-tile ${w.current ? 'on' : ''}"
+          :tooltip "${w.name} · Right-click: every screen"
+          :onclick "setsid -f ~/.config/eww/scripts/wallpaper.sh set ${monitor} ${w.id}"
+          :onrightclick "setsid -f ~/.config/eww/scripts/wallpaper.sh all ${monitor} ${w.id}"
+    (box :class "wp-thumb"
+         :style {w.thumb == '' ? '' : "background-image: url('${w.thumb}');"}
+      (label :class "wp-badge ${w.thumb == '' ? 'loading' : ''}"
+             :hexpand true
+             :halign {w.thumb == '' ? 'center' : 'end'}
+             :valign {w.thumb == '' ? 'center' : 'start'}
+             :visible {w.thumb == '' || w.kind != 'image'}
+             :text {w.thumb == '' ? '󰸉' : (w.kind == 'video' ? '󰕧' : '󰷝')}))))
+
+(defwidget cc_wallpaper_page [monitor]
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Wallpaper"
+      (button :class "cc-chip"
+              :tooltip "Pick one at random"
+              :onclick "setsid -f ~/.config/eww/scripts/wallpaper.sh random ${monitor}"
+        (label :text "󰒝 Shuffle")))
+    (cc_list
+      (box :visible {arraylength(wp_list) == 0}
+        (cc_empty :text "Add wallpapers to ~/Pictures/Wallpapers"))
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 6
+        (for row in wp_list
+          (box :space-evenly false
+               :spacing 6
+            (for w in row
+              (cc_wallpaper_tile :w w :monitor monitor))))))
+    (label :class "cc-foot" :halign "start" :text "Right-click a wallpaper to set it on every screen")))
+
+;; One notification: the sender's icon (a bell when it has none), app and age, then the text.
+;; Click focuses the app's window; the cross dismisses it.
+(defwidget cc_notification [n]
+  (box :class "cc-notif ${n.urgency}"
+       :space-evenly false
+    (button :class "cc-notif-main"
+            :hexpand true
+            :onclick "setsid -f sh -c '~/.config/eww/scripts/notifications.py open ${n.id}; ~/.config/eww/scripts/control-center.sh close'"
+      (box :space-evenly false
+           :spacing 10
+        (box :class "cc-notif-icon"
+             :valign "start"
+             :style {n.icon == '' ? '' : "background-image: url('${n.icon}');"}
+          (label :hexpand true
+                 :visible {n.icon == ''}
+                 :text {n.urgency == 'critical' ? '󰀦' : '󰂚'}))
+        (box :orientation "v"
+             :space-evenly false
+             :hexpand true
+             :spacing 2
+          (box :space-evenly false
+               :spacing 6
+            (label :class "cc-notif-app"
+                   :halign "start"
+                   :hexpand true
+                   :limit-width 26
+                   :text {n.app == '' ? 'Notification' : n.app})
+            (label :class "cc-notif-ago" :text {n.ago}))
+          (label :class "cc-notif-summary"
+                 :halign "start"
+                 :xalign 0
+                 :wrap true
+                 :visible {n.summary != ''}
+                 :text {n.summary})
+          (label :class "cc-notif-body"
+                 :halign "start"
+                 :xalign 0
+                 :wrap true
+                 :visible {n.body != ''}
+                 :text {n.body}))))
+    (button :class "cc-icon-btn cc-notif-close"
+            :valign "start"
+            :tooltip "Dismiss"
+            :onclick "setsid -f ~/.config/eww/scripts/notifications.py dismiss ${n.id}"
+      (label :text "󰅖"))))
+
+(defwidget cc_notifications_page []
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Notifications"
+      (button :class "cc-chip"
+              :visible {notifications.count > 0}
+              :onclick "setsid -f ~/.config/eww/scripts/notifications.py clear"
+        (label :text "Clear all")))
+    (cc_list
+      (box :visible {notifications.count == 0}
+        (cc_empty :text "No notifications"))
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 6
+        (for n in {notifications.items}
+          (cc_notification :n n))))
+    (box :class "cc-page-foot"
+         :space-evenly false
+         :spacing 8
+      (label :class "cc-label" :halign "start" :hexpand true :text "Do not disturb")
+      (cc_switch :on {matches(notification_status.class ?: 'none', '^dnd')}
+                 :onclick "swaync-client -d -sw"))))

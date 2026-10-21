@@ -5,7 +5,9 @@
 local vars = require("conf.env")
 
 hl.on("hyprland.start", function()
-	hl.exec_cmd("/usr/lib/pam_kwallet_init & hyprpaper & kwalletd5 & nm-applet")
+	hl.exec_cmd("/usr/lib/pam_kwallet_init & kwalletd5 & nm-applet")
+	-- Starts hyprpaper and shows each monitor's wallpaper
+	hl.exec_cmd("~/.local/bin/wallpaper restore")
 	-- Start the user services after exporting the session environment: they require WAYLAND_DISPLAY,
 	-- and outside a uwsm session graphical-session.target never starts them. Apps launched through
 	-- elephant inherit its environment; without XCURSOR_SIZE, X11 apps size the cursor from the DPI.

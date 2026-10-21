@@ -4,6 +4,8 @@ uwsm                         =
 sddm                         =
 wayland-utils                =
 hyprpaper                    =
+mpvpaper                     aur:mpvpaper
+ffmpeg                       =
 hypridle                     =
 hyprlock                     =
 brightnessctl                =
@@ -25,6 +27,8 @@ ffmpegthumbnailer            =
 gvfs                         =
 file-roller                  =
 libnotify                    =
+python-icalendar             =
+python-recurring-ical-events =
 hyprpolkitagent              =
 adw-gtk-theme                =
 qt5ct                        =

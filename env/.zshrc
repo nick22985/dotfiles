@@ -181,7 +181,6 @@ alias tmuxls="tmux-sessionizer"
 alias vi="nvim"
 
 alias nodekill="lsof -t -i:8080 | xargs -r kill"
-alias waybarrestart="killall -SIGUSR2 waybar"
 # alias tmux="~/.local/bin/tmux_startup"
 
 vv() {

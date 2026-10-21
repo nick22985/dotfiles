@@ -1,0 +1,49 @@
+;; Full-screen power menu. powermenu.sh opens it on the focused monitor and enters the
+;; Hyprland "power" submap, so the letter under each button picks it and Esc closes.
+;; Logout, restart and shut down wait for a second press (or Enter). On an ultrawide
+;; powermenu.sh sets pm_info.size to "large", which scales the panel up.
+
+(defwidget pm_button [action icon text key]
+  (button :class "pm-btn pm-${action} ${pm_confirm == action ? 'confirm' : ''}"
+          :onclick "setsid -f ~/.config/eww/scripts/powermenu.sh pick ${action}"
+    (box :orientation "v"
+         :space-evenly false
+         :spacing {pm_info.size == 'large' ? 14 : 10}
+      (label :class "pm-icon" :text icon)
+      (label :class "pm-text" :text {pm_confirm == action ? 'Press again' : text})
+      (label :class "pm-key" :halign "center" :text key))))
+
+(defwidget powermenu []
+  (overlay
+    ;; Clicking anywhere off the panel closes the menu.
+    (button :class "pm-backdrop"
+            :onclick "setsid -f ~/.config/eww/scripts/powermenu.sh close"
+      (box))
+    (eventbox :halign "center"
+              :valign "center"
+      (box :class "pm-panel ${pm_info.size}"
+           :orientation "v"
+           :space-evenly false
+           :spacing {pm_info.size == 'large' ? 36 : 24}
+        (box :orientation "v"
+             :space-evenly false
+             :spacing 4
+          (label :class "pm-host" :text "${pm_info.user}@${pm_info.host}")
+          (label :class "pm-uptime" :text "Up ${pm_info.uptime}"))
+        (box :class "pm-buttons"
+             :space-evenly true
+             :spacing {pm_info.size == 'large' ? 20 : 14}
+          (pm_button :action "lock" :icon "󰌾" :text "Lock" :key "L")
+          (pm_button :action "suspend" :icon "󰤄" :text "Suspend" :key "S")
+          (pm_button :action "logout" :icon "󰍃" :text "Log out" :key "E")
+          (pm_button :action "reboot" :icon "󰜉" :text "Restart" :key "R")
+          (pm_button :action "shutdown" :icon "󰐥" :text "Shut down" :key "P"))
+        (label :class "pm-hint"
+               :text {pm_confirm == '' ? 'Esc to cancel' : 'Press again or Enter to confirm · Esc to cancel'})))))
+
+(defwindow powermenu
+  :geometry (geometry :width "100%" :height "100%" :anchor "top left")
+  :stacking "overlay"
+  :focusable false
+  :namespace "eww-powermenu"
+  (powermenu))

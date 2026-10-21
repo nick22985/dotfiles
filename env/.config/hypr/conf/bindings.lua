@@ -28,6 +28,19 @@ hl.bind(mainMod .. " + k", hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + j", hl.dsp.focus({ direction = "down" }))
 
 hl.bind(mainMod .. " + SHIFT + l", hl.dsp.exec_cmd("hyprlock"))
+
+-- Power menu: powermenu.sh enters the "power" submap while it is open, so the letter
+-- under each button picks it; Enter confirms logout/restart/shut down and Esc closes.
+local powermenu = "~/.config/eww/scripts/powermenu.sh"
+hl.bind(mainMod .. " + Escape", hl.dsp.exec_cmd(powermenu .. " toggle"))
+hl.define_submap("power", function()
+    hl.bind("Escape", hl.dsp.exec_cmd(powermenu .. " close"))
+    hl.bind(mainMod .. " + Escape", hl.dsp.exec_cmd(powermenu .. " close"))
+    hl.bind("Return", hl.dsp.exec_cmd(powermenu .. " confirm"))
+    for key, action in pairs({ l = "lock", s = "suspend", e = "logout", r = "reboot", p = "shutdown" }) do
+        hl.bind(key, hl.dsp.exec_cmd(powermenu .. " pick " .. action))
+    end
+end)
 -- NOTE: original config also binds SUPER+SHIFT+l to resizeactive (below); the
 -- later bind wins. This conflict exists in the original conf and is preserved.
 
@@ -68,13 +81,15 @@ hl.bind(mainMod .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
--- Laptop multimedia keys for volume and LCD brightness (locked + repeating)
-hl.bind("XF86AudioRaiseVolume",  hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"),    { locked = true, repeating = true })
-hl.bind("XF86AudioLowerVolume",  hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),    { locked = true, repeating = true })
-hl.bind("XF86AudioMute",         hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),   { locked = true, repeating = true })
-hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"), { locked = true, repeating = true })
-hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("brightnessctl s 10%+"),                         { locked = true, repeating = true })
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl s 10%-"),                         { locked = true, repeating = true })
+-- Laptop multimedia keys for volume and LCD brightness (locked + repeating).
+-- osd.sh changes the level and shows it in an eww popup.
+local osd = "~/.config/eww/scripts/osd.sh"
+hl.bind("XF86AudioRaiseVolume",  hl.dsp.exec_cmd(osd .. " volume up"),       { locked = true, repeating = true })
+hl.bind("XF86AudioLowerVolume",  hl.dsp.exec_cmd(osd .. " volume down"),     { locked = true, repeating = true })
+hl.bind("XF86AudioMute",         hl.dsp.exec_cmd(osd .. " volume mute"),     { locked = true, repeating = true })
+hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd(osd .. " mic mute"),        { locked = true, repeating = true })
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd(osd .. " brightness up"),   { locked = true, repeating = true })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(osd .. " brightness down"), { locked = true, repeating = true })
 
 -- Requires playerctl (locked)
 hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true })

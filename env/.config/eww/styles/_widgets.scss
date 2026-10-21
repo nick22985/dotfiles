@@ -149,6 +149,279 @@
 	padding-top: 2px;
 }
 
+// Control center pages (Wi-Fi, Bluetooth, clipboard, audio)
+.cc-page-title {
+	font-weight: bold;
+}
+
+.cc-icon-btn {
+	min-width: 28px;
+	min-height: 28px;
+	border-radius: 14px;
+	color: $subtext0;
+}
+
+.cc-icon-btn:hover {
+	background-color: $surface0;
+	color: $text;
+}
+
+.cc-icon-btn.busy {
+	color: $accent-a;
+}
+
+.cc-switch {
+	min-width: 36px;
+	min-height: 20px;
+	padding: 0 3px;
+	border-radius: 10px;
+	background-color: $surface1;
+	transition: background-color 150ms ease;
+}
+
+.cc-switch.on {
+	background-image: $accent;
+}
+
+.cc-knob {
+	min-width: 14px;
+	min-height: 14px;
+	margin: 3px 0;
+	border-radius: 7px;
+	background-color: $text;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.cc-list scrollbar slider {
+	min-width: 4px;
+	border-radius: 2px;
+	background-color: $surface1;
+}
+
+.cc-item {
+	padding: 8px 10px;
+	border-radius: 10px;
+	color: $subtext0;
+	transition: background-color 150ms ease;
+}
+
+.cc-item:hover {
+	background-color: $mantle;
+	color: $text;
+}
+
+.cc-item.on {
+	background-image: linear-gradient(135deg, rgba(51, 204, 255, 0.16), rgba(0, 255, 153, 0.10));
+	color: $text;
+}
+
+.cc-item-icon {
+	min-width: 18px;
+	font-size: 15px;
+}
+
+.cc-item-sub {
+	color: $overlay0;
+	font-size: 11px;
+}
+
+.cc-item.on .cc-item-sub {
+	color: $accent-b;
+}
+
+.cc-empty {
+	padding: 24px 0;
+	color: $overlay0;
+	font-size: 12px;
+}
+
+// Wi-Fi password prompt
+.cc-prompt-icon {
+	min-width: 36px;
+	min-height: 36px;
+	border-radius: 18px;
+	background-color: $mantle;
+	color: $accent-a;
+	font-size: 16px;
+}
+
+.cc-input {
+	padding: 8px 10px;
+	border-radius: 10px;
+	background-color: $mantle;
+	box-shadow: inset 0 0 0 1px $surface1;
+	caret-color: $text;
+	color: $text;
+}
+
+.cc-input:focus {
+	box-shadow: inset 0 0 0 1px rgba(51, 204, 255, 0.6);
+}
+
+.cc-error {
+	color: $red;
+	font-size: 12px;
+}
+
+// Power menu
+.pm-backdrop {
+	background-color: rgba(24, 25, 38, 0.72);
+}
+
+.pm-panel {
+	padding: 28px 32px;
+	border-radius: 20px;
+	border: 1px solid rgba(202, 211, 245, 0.08);
+	background-color: rgba(30, 32, 48, 0.96);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+	color: $text;
+}
+
+.pm-host {
+	font-size: 16px;
+	font-weight: bold;
+}
+
+.pm-uptime,
+.pm-hint {
+	color: $overlay0;
+	font-size: 12px;
+}
+
+.pm-btn {
+	min-width: 112px;
+	padding: 22px 0 16px;
+	border-radius: 16px;
+	background-color: $crust;
+	color: $subtext0;
+	transition: background-color 150ms ease, color 150ms ease;
+}
+
+.pm-btn:hover {
+	background-color: $surface0;
+	color: $text;
+}
+
+.pm-btn.confirm {
+	background-image: linear-gradient(135deg, rgba(237, 135, 150, 0.28), rgba(245, 169, 127, 0.16));
+	box-shadow: inset 0 0 0 1px rgba(237, 135, 150, 0.55);
+	color: $text;
+}
+
+.pm-icon {
+	font-size: 30px;
+}
+
+.pm-lock .pm-icon,
+.pm-suspend .pm-icon {
+	color: $accent-a;
+}
+
+.pm-logout .pm-icon {
+	color: $yellow;
+}
+
+.pm-reboot .pm-icon {
+	color: $peach;
+}
+
+.pm-shutdown .pm-icon {
+	color: $red;
+}
+
+.pm-text {
+	font-size: 13px;
+}
+
+.pm-key {
+	padding: 1px 7px;
+	border-radius: 5px;
+	background-color: $surface0;
+	color: $subtext0;
+	font-size: 11px;
+}
+
+// Power menu on an ultrawide: same layout, about 1.5x larger
+.pm-panel.large {
+	padding: 42px 48px;
+	border-radius: 28px;
+
+	.pm-host {
+		font-size: 24px;
+	}
+
+	.pm-uptime,
+	.pm-hint {
+		font-size: 17px;
+	}
+
+	.pm-btn {
+		min-width: 168px;
+		padding: 33px 0 24px;
+		border-radius: 24px;
+	}
+
+	.pm-icon {
+		font-size: 45px;
+	}
+
+	.pm-text {
+		font-size: 19px;
+	}
+
+	.pm-key {
+		padding: 2px 10px;
+		border-radius: 7px;
+		font-size: 16px;
+	}
+}
+
+// Media-key popup
+.osd {
+	padding: 12px 18px;
+	border-radius: 18px;
+	border: 1px solid rgba(202, 211, 245, 0.08);
+	background-color: rgba(24, 25, 38, 0.94);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+	color: $text;
+}
+
+.osd-icon {
+	min-width: 22px;
+	font-size: 18px;
+}
+
+.osd-bar trough {
+	min-height: 6px;
+	border-radius: 3px;
+	background-color: $surface0;
+}
+
+.osd-bar progress {
+	min-height: 6px;
+	border-radius: 3px;
+	background-image: $accent;
+}
+
+.osd-value {
+	min-width: 44px;
+	color: $subtext0;
+	font-size: 12px;
+	font-feature-settings: "tnum";
+}
+
+.osd.muted {
+	.osd-icon,
+	.osd-value {
+		color: $overlay0;
+	}
+
+	.osd-bar progress {
+		background-image: none;
+		background-color: $overlay0;
+	}
+}
+
 // Systray menus (scoped to eww windows only)
 window .tray menu,
 window .tray .menu {

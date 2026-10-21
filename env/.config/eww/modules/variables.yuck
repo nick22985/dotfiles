@@ -68,3 +68,34 @@
 ;; Control center: index of the monitor it is open on, or ""
 (defvar cc_open "")
 (defvar cc_hover false)
+;; Control center page: 0 main, 1 Wi-Fi, 2 Bluetooth, 3 clipboard, 4 audio.
+;; Each page polls only while shown; control-center.sh page <n> fetches on open.
+(defvar cc_page 0)
+
+(defpoll hotspot_status :interval "5s" :initial "inactive" :run-while {cc_open != ""}
+  "hotspot status")
+
+(defvar wifi_enabled "enabled")
+(defvar wifi_scanning false)
+(defvar wifi_connecting "")
+(defvar wifi_prompt '{"bssid":"","ssid":"","state":"input"}')
+(defpoll wifi_networks :interval "10s" :initial "[]" :run-while {cc_page == 1}
+  "~/.config/eww/scripts/wifi.sh list")
+
+(defvar bt_scanning false)
+(defvar bt_busy "")
+(defpoll bt_devices :interval "4s" :initial '{"powered":false,"devices":[]}' :run-while {cc_page == 2}
+  "~/.config/eww/scripts/bluetooth.sh list")
+
+(defpoll clip_entries :interval "5s" :initial "[]" :run-while {cc_page == 3}
+  "~/.config/eww/scripts/clipboard.sh list")
+
+(defpoll audio_devices :interval "5s" :initial '{"sinks":[],"sources":[]}' :run-while {cc_page == 4}
+  "~/.config/eww/scripts/audio-devices.sh list")
+
+;; Power menu: the action waiting for a second press, and who/where/how long
+(defvar pm_confirm "")
+(defvar pm_info '{"host":"","user":"","uptime":"","size":""}')
+
+;; Media-key popup: volume, mic or brightness, set by osd.sh
+(defvar osd '{"kind":"volume","value":0,"muted":false}')

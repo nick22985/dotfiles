@@ -1,0 +1,90 @@
+;; Power Menu Popup
+;; Full-screen overlay with power options
+
+(defvar powermenu_visible false)
+
+(defwidget powermenu_popup []
+  (eventbox :onclick "~/.config/eww/scripts/close-powermenu.sh"
+    (box :class "powermenu-overlay"
+         :orientation "v"
+         :halign "center"
+         :valign "center"
+      (eventbox :onclick ""
+         (box :class "powermenu-background"
+              :orientation "v"
+              :spacing 30
+              :halign "center"
+              :valign "center"
+           (box :class "powermenu-options"
+                :orientation "v"
+                :spacing 25
+             (box :orientation "h"
+                  :spacing 30
+                  :halign "center"
+              (button :class "powermenu-option shutdown"
+                      :onclick "~/.config/eww/scripts/power-action.sh shutdown && ~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Shutdown"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "󰐦")
+                  (label :class "powermenu-label"
+                         :text "Shutdown")))
+
+              (button :class "powermenu-option restart"
+                      :onclick "~/.config/eww/scripts/power-action.sh restart && ~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Restart"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "󰑓")
+                  (label :class "powermenu-label"
+                         :text "Restart"))))
+
+             ;; Second row: Sleep, Logout
+             (box :orientation "h"
+                  :spacing 30
+                  :halign "center"
+              (button :class "powermenu-option sleep"
+                      :onclick "~/.config/eww/scripts/power-action.sh sleep && ~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Sleep"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "")
+                  (label :class "powermenu-label"
+                         :text "Sleep")))
+
+              (button :class "powermenu-option logout"
+                      :onclick "~/.config/eww/scripts/power-action.sh logout && ~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Logout"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "󰿅")
+                  (label :class "powermenu-label"
+                         :text "Logout"))))
+
+             ;; Third row: Lock, Cancel
+             (box :orientation "h"
+                  :spacing 30
+                  :halign "center"
+              (button :class "powermenu-option lock"
+                      :onclick "~/.config/eww/scripts/power-action.sh lock && ~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Lock Screen"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "")
+                  (label :class "powermenu-label"
+                         :text "Lock")))
+
+              (button :class "powermenu-option cancel"
+                      :onclick "~/.config/eww/scripts/close-powermenu.sh"
+                      :tooltip "Cancel"
+                 (box :orientation "v"
+                      :spacing 12
+                  (label :class "powermenu-icon"
+                         :text "")
+                  (label :class "powermenu-label"
+                         :text "Cancel"))))))))))

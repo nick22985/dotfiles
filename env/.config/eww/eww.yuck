@@ -6,6 +6,9 @@
 (include "./modules/variables.yuck")
 (include "./widgets/bar.yuck")
 (include "./widgets/control-center.yuck")
+(include "./widgets/control-center-pages.yuck")
+(include "./widgets/powermenu.yuck")
+(include "./widgets/osd.yuck")
 
 (include "./bars/topbar.yuck")
 

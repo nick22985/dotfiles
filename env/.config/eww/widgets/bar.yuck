@@ -56,7 +56,7 @@ ${calendar}"
   (eventbox :onscroll "[ '{}' == 'up' ] && pactl set-sink-volume @DEFAULT_SINK@ +5% || pactl set-sink-volume @DEFAULT_SINK@ -5%"
     (button :class "status-pill ${cc_open == monitor ? 'open' : ''}"
             :valign "center"
-            :onclick "~/.config/eww/scripts/control-center.sh toggle ${monitor}"
+            :onclick "setsid -f ~/.config/eww/scripts/control-center.sh toggle ${monitor}"
             :onrightclick "swaync-client -t -sw"
             :tooltip "${network_name} · ${audio_state.volume}% | Click: control center | Right: notifications | Scroll: volume"
       (box :space-evenly false

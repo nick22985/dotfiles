@@ -1,0 +1,1 @@
+../../../dotfiles/env/.config/eww/scripts/auto-close-colorpicker.sh

@@ -1,0 +1,2 @@
+# Links ~/.config/eww to this directory as a whole (see lib/dotfiles.sh), so new widgets and
+# scripts load without a deploy. eww's generated tmp/ is gitignored.

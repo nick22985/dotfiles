@@ -1,0 +1,25 @@
+;; Popup for the volume, mic and brightness keys. osd.sh sets osd, opens this on the
+;; focused monitor and closes it shortly after the last press.
+
+(defwidget osd []
+  (box :class "osd ${osd.muted ? 'muted' : ''}"
+       :space-evenly false
+       :spacing 12
+    (label :class "osd-icon"
+           :text {osd.kind == 'mic' ? (osd.muted ? '󰍭' : '󰍬') :
+                  osd.kind == 'brightness' ? (osd.value > 66 ? '󰃠' : osd.value > 33 ? '󰃟' : '󰃞') :
+                  osd.muted ? '󰝟' : osd.value > 66 ? '󰕾' : osd.value > 33 ? '󰖀' : '󰕿'})
+    (progress :class "osd-bar"
+              :hexpand true
+              :valign "center"
+              :value {osd.value})
+    (label :class "osd-value"
+           :xalign 1
+           :text {osd.muted ? 'Muted' : '${osd.value}%'})))
+
+(defwindow osd
+  :geometry (geometry :y "72px" :width "300px" :anchor "bottom center")
+  :stacking "overlay"
+  :focusable false
+  :namespace "eww-osd"
+  (osd))

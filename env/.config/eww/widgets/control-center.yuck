@@ -1,5 +1,6 @@
 ;; Control center dropped from the status pill: toggles, sliders, stats, recent colours.
-;; Commands that open another menu close the panel first.
+;; The Network, Bluetooth, Clipboard and Audio tiles swap in their own page
+;; (widgets/control-center-pages.yuck); cc_page picks which one is shown.
 
 (defwidget cc_tile [icon text active onclick]
   (button :class "cc-tile ${active ? 'on' : ''}"
@@ -42,14 +43,24 @@
 
 (defwidget cc_layout_button [layout text]
   (button :class "cc-seg ${uw_layout == layout ? 'on' : ''}"
-          :onclick "~/.config/eww/scripts/ultrawide-layout.sh set ${layout}"
+          :onclick "setsid -f ~/.config/eww/scripts/ultrawide-layout.sh set ${layout}"
     (label :text text)))
 
 (defwidget control_center [monitor uw]
   (eventbox :onhover "eww update cc_hover=true"
             :onhoverlost "eww update cc_hover=false; setsid -f ~/.config/eww/scripts/control-center.sh close-later"
     (box :class "control-center"
-         :orientation "v"
+      (stack :selected cc_page
+             :transition "crossfade"
+             :same-size true
+        (cc_main :uw uw)
+        (cc_wifi_page)
+        (cc_bluetooth_page)
+        (cc_clipboard_page)
+        (cc_audio_page)))))
+
+(defwidget cc_main [uw]
+    (box :orientation "v"
          :space-evenly false
          :spacing 12
       (box :class "cc-head"
@@ -65,15 +76,15 @@
         (cc_tile :icon "${network_status == 'connected' ? '󰖩' : '󱐅'}"
                  :text "Network"
                  :active {network_status == 'connected'}
-                 :onclick "~/.config/eww/scripts/control-center.sh close; networkmanager_dmenu &")
+                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 1")
         (cc_tile :icon "${bluetooth_status == 'on' ? '󰂯' : '󰂲'}"
                  :text "Bluetooth"
                  :active {bluetooth_status == 'on'}
-                 :onclick "~/.config/eww/scripts/control-center.sh close; rofi-bluetooth &")
+                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 2")
         (cc_tile :icon "󱜠"
                  :text "Hotspot"
-                 :active false
-                 :onclick "hotspot toggle")
+                 :active {hotspot_status == 'active'}
+                 :onclick "setsid -f sh -c 'hotspot toggle >/dev/null; eww update hotspot_status=$(hotspot status)'")
         (cc_tile :icon "󰪑"
                  :text "DND"
                  :active {matches(notification_status.class ?: 'none', '^dnd')}
@@ -88,15 +99,15 @@
         (cc_tile :icon ""
                  :text "Clipboard"
                  :active false
-                 :onclick "~/.config/eww/scripts/control-center.sh close; cliphist list | rofi -dmenu | cliphist decode | wl-copy")
+                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 3")
         (cc_tile :icon "󰕾"
-                 :text "Mixer"
+                 :text "Audio"
                  :active false
-                 :onclick "~/.config/eww/scripts/control-center.sh close; pavucontrol &")
+                 :onclick "setsid -f ~/.config/eww/scripts/control-center.sh page 4")
         (cc_tile :icon "󰐥"
                  :text "Power"
                  :active false
-                 :onclick "~/.config/eww/scripts/control-center.sh close; ~/.config/rofi/scripts/powermenu.sh"))
+                 :onclick "setsid -f ~/.config/eww/scripts/powermenu.sh toggle"))
       (cc_slider :icon "${audio_state.muted == 'true' ? '󰝟' : '󰖀'}"
                  :value {audio_state.volume}
                  :onclick "pactl set-sink-mute @DEFAULT_SINK@ toggle"
@@ -144,4 +155,4 @@
       (box :class "cc-foot"
            :space-evenly false
         (label :halign "start" :hexpand true :text "disk / ${round(EWW_DISK['/'].used_perc, 0)}%")
-        (label :halign "end" :text "${network_name}")))))
+        (label :halign "end" :text "${network_name}"))))

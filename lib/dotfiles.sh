@@ -2,6 +2,8 @@
 
 dotfile_profile_dir="${DOTFILES_DIR:?DOTFILES_DIR must be set}/profiles"
 dotfile_source_dir="${DOTFILES_ENV_DIR:-$DOTFILES_DIR/env}"
+dotfile_link_whole_marker=".dotfiles-link-whole"
+dotfile_linked_list="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/linked.list"
 
 dotfile_bundle_names() {
     local profile
@@ -46,8 +48,12 @@ dotfile_deploy_paths() {
         # relative gitdir paths that only resolve from inside the repository.
         # Docker build contexts are linked whole too: BuildKit refuses symlinks
         # that point outside the context, so a per-file link to the Dockerfile fails.
+        # A directory holding a .dotfiles-link-whole marker is linked whole too, so files
+        # added to it in the repo appear without a deploy; its generated files then live in
+        # the source tree and need a .gitignore entry.
         # This covers a declared path that is itself one (e.g. .config/nvim).
-        if [[ ! -d "$source" || -e "$source/.git" || -e "$source/Dockerfile" ]]; then
+        if [[ ! -d "$source" || -e "$source/.git" || -e "$source/Dockerfile" \
+            || -e "$source/$dotfile_link_whole_marker" ]]; then
             printf '%s\n' "$path"
             continue
         fi
@@ -56,7 +62,8 @@ dotfile_deploy_paths() {
             [[ "$relative" == .git || "$relative" == .git/* ]] && continue
             printf '%s/%s\n' "$path" "$relative"
         done < <(find "$source" -mindepth 1 \
-            \( -type d \( -exec test -e '{}/.git' \; -o -exec test -e '{}/Dockerfile' \; \) -prune -print0 \) \
+            \( -type d \( -exec test -e '{}/.git' \; -o -exec test -e '{}/Dockerfile' \; \
+                -o -exec test -e "{}/$dotfile_link_whole_marker" \; \) -prune -print0 \) \
             -o \( -type f -o -type l \) -print0)
     done < <(dotfile_manifest_paths)
 }
@@ -89,6 +96,9 @@ merge_untracked_dotfile_entries() {
                 return 1
             fi
             dotfile_merged_entries+=("$name")
+        elif [[ "$entry" -ef "$source/$name" ]]; then
+            # A per-file link from an earlier deploy already matches the source.
+            continue
         elif [[ -d "$entry" && ! -L "$entry" && -d "$source/$name" && ! -L "$source/$name" ]]; then
             merge_untracked_dotfile_entries "$target" "$source" "$name/" || return 1
         elif [[ ! -f "$entry" || -L "$entry" ]] || ! cmp -s -- "$entry" "$source/$name"; then
@@ -107,8 +117,58 @@ unmerge_untracked_dotfile_entries() {
     done
 }
 
+# Broken links under the declared directories, so links made before linked.list existed
+# are found too.
+dotfile_broken_links() {
+    local path target relative
+
+    while IFS= read -r path; do
+        target="$HOME/$path"
+        [[ -d "$target" && ! -L "$target" ]] || continue
+        while IFS= read -r -d '' relative; do
+            printf '%s/%s\n' "$path" "$relative"
+        done < <(find "$target" -mindepth 1 -xtype l -printf '%P\0' 2>/dev/null)
+    done < <(dotfile_manifest_paths)
+}
+
+# Removes links into the source that no longer resolve: files deleted from the repo, or
+# bundles dropped from a manifest. Empty directories left behind go too.
+prune_stale_dotfile_links() {
+    local path target link dir source_real removed=0
+
+    source_real="$(realpath -m -- "$dotfile_source_dir")"
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        validate_dotfile_path "$path" || continue
+        target="$HOME/$path"
+        [[ -L "$target" && ! -e "$target" ]] || continue
+        link="$(readlink -- "$target")"
+        [[ "$link" == "$dotfile_source_dir"/* ]] || continue
+        # Below a whole-directory link the path is inside the source tree itself.
+        [[ "$(realpath -m -- "$(dirname -- "$target")")" == "$source_real"/* ]] && continue
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Would remove stale link $target"
+            continue
+        fi
+        if ! rm -f -- "$target"; then
+            log_error "Failed to remove stale link $target"
+            continue
+        fi
+        receipt_add_restore user "$(printf 'mkdir -p %q\nln -sfn -- %q %q' "$(dirname -- "$target")" "$link" "$target")"
+        removed=$((removed + 1))
+        dir="$(dirname -- "$target")"
+        while [[ "$dir" == "$HOME"/* ]] && rmdir -- "$dir" 2>/dev/null; do
+            dir="$(dirname -- "$dir")"
+        done
+    done < <({ cat -- "$dotfile_linked_list" 2>/dev/null; dotfile_broken_links; } | sort -u)
+
+    if (( removed > 0 )); then
+        log_info "Removed $removed stale dotfile links"
+    fi
+}
+
 deploy_dotfile_bundles() {
-    local path source target source_real target_real backup backup_parent restore name
+    local path source target source_real target_real backup backup_parent restore name deploy_paths
     local receipt_dir="${DOTFILES_RECEIPT_DIR:-}"
     local status=0 current_count=0
 
@@ -117,7 +177,11 @@ deploy_dotfile_bundles() {
         return 1
     fi
 
+    # Before linking, so a directory about to be linked whole has no broken links to merge.
+    prune_stale_dotfile_links
+    deploy_paths="$(dotfile_deploy_paths | sort -u)"
     while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
         backup=""
         if ! validate_dotfile_path "$path"; then
             log_error "Invalid dotfile path: $path"
@@ -205,7 +269,12 @@ deploy_dotfile_bundles() {
         else
             receipt_add_restore user "$(printf 'rm -f -- %q' "$target")"
         fi
-    done < <(dotfile_deploy_paths | sort -u)
+    done <<< "$deploy_paths"
+
+    if [[ "$DRY_RUN" != "1" ]]; then
+        mkdir -p "$(dirname -- "$dotfile_linked_list")"
+        printf '%s\n' "$deploy_paths" > "$dotfile_linked_list"
+    fi
 
     log_success "$current_count dotfiles already linked"
     return "$status"

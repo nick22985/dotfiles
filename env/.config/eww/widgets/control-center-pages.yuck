@@ -1,0 +1,223 @@
+;; Control center pages for Wi-Fi, Bluetooth, clipboard history and audio devices,
+;; plus the Wi-Fi password prompt. Every page takes the main page's size (the stack
+;; is same-size) and the list stretches to fill it, so switching pages never resizes.
+;; Network and device names come from the air or the clipboard, so they only ever
+;; appear as label text; commands carry the BSSID, MAC or numeric id instead.
+
+;; Back button, title, then the page's own controls on the right.
+(defwidget cc_page_head [title]
+  (box :class "cc-page-head"
+       :space-evenly false
+       :spacing 8
+    (button :class "cc-icon-btn"
+            :tooltip "Back"
+            :onclick "eww update cc_page=0"
+      (label :text "󰁍"))
+    (label :class "cc-page-title" :halign "start" :hexpand true :text title)
+    (children)))
+
+(defwidget cc_switch [on onclick]
+  (button :class "cc-switch ${on ? 'on' : ''}"
+          :valign "center"
+          :onclick onclick
+    (box :class "cc-knob" :halign {on ? "end" : "start"})))
+
+(defwidget cc_item [icon text sub active onclick ?onrightclick ?tooltip]
+  (button :class "cc-item ${active ? 'on' : ''}"
+          :tooltip tooltip
+          :onclick onclick
+          :onrightclick onrightclick
+    (box :space-evenly false
+         :spacing 10
+      (label :class "cc-item-icon" :text icon)
+      (label :class "cc-item-text"
+             :halign "start"
+             :hexpand true
+             :limit-width 30
+             :text text)
+      (label :class "cc-item-sub" :text sub))))
+
+(defwidget cc_list [?height]
+  (scroll :class "cc-list"
+          :vscroll true
+          :hscroll false
+          :vexpand true
+          :height {height ?: 300}
+    (box :orientation "v"
+         :space-evenly false
+         :spacing 2
+      (children))))
+
+(defwidget cc_empty [text]
+  (label :class "cc-empty" :text text))
+
+(defwidget cc_wifi_page []
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Wi-Fi"
+      (button :class "cc-icon-btn ${wifi_scanning ? 'busy' : ''}"
+              :tooltip "Scan again"
+              :visible {wifi_enabled == 'enabled'}
+              :onclick "setsid -f ~/.config/eww/scripts/wifi.sh rescan"
+        (label :text "󰑐"))
+      (cc_switch :on {wifi_enabled == 'enabled'}
+                 :onclick "setsid -f ~/.config/eww/scripts/wifi.sh toggle"))
+    (cc_list
+      (box :visible {arraylength(wifi_networks) == 0}
+        (cc_empty :text {wifi_enabled != 'enabled' ? 'Wi-Fi is off' : wifi_scanning ? 'Scanning…' : 'No networks found'}))
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 2
+        (for n in wifi_networks
+          (cc_item :icon {n.signal > 75 ? '󰤨' : n.signal > 50 ? '󰤥' : n.signal > 25 ? '󰤢' : '󰤟'}
+                   :text {n.ssid}
+                   :sub {wifi_connecting == n.bssid ? 'Connecting…' : n.active ? 'Connected' : n.known ? 'Saved' : n.secure ? '󰌾' : ''}
+                   :active {n.active}
+                   :tooltip "${n.signal}% · ${n.bssid}"
+                   :onclick "setsid -f ~/.config/eww/scripts/wifi.sh connect ${n.bssid}"))))
+    (box :class "cc-page-foot"
+         :space-evenly false
+         :spacing 6
+      (button :class "cc-chip"
+              :visible {network_status == 'connected'}
+              :onclick "setsid -f ~/.config/eww/scripts/wifi.sh disconnect"
+        (label :text "Disconnect"))
+      (box :hexpand true)
+      (button :class "cc-chip"
+              :onclick "~/.config/eww/scripts/control-center.sh close; setsid -f nm-connection-editor"
+        (label :text "Settings")))))
+
+(defwidget cc_bluetooth_page []
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Bluetooth"
+      (button :class "cc-icon-btn ${bt_scanning ? 'busy' : ''}"
+              :tooltip "Find new devices"
+              :visible {bt_devices.powered}
+              :onclick "setsid -f ~/.config/eww/scripts/bluetooth.sh scan"
+        (label :text "󰑐"))
+      (cc_switch :on {bt_devices.powered}
+                 :onclick "setsid -f ~/.config/eww/scripts/bluetooth.sh toggle"))
+    (cc_list
+      (box :visible {arraylength(bt_devices.devices) == 0}
+        (cc_empty :text {!bt_devices.powered ? 'Bluetooth is off' : bt_scanning ? 'Searching…' : 'No devices yet. Scan to find one.'}))
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 2
+        (for d in {bt_devices.devices}
+          (cc_item :icon {matches(d.icon, 'audio-head') ? '󰋋' :
+                          d.icon == 'input-mouse' ? '󰍽' :
+                          d.icon == 'input-keyboard' ? '󰌌' :
+                          d.icon == 'input-gaming' ? '󰊴' :
+                          d.icon == 'phone' ? '󰏲' :
+                          matches(d.icon, '^audio') ? '󰓃' : '󰂯'}
+                   :text {d.name}
+                   :sub {bt_busy == d.mac ? 'Working…' :
+                         d.connected ? (d.battery != '' ? '󰥉 ${d.battery}%' : 'Connected') :
+                         d.paired ? 'Paired' : 'Pair'}
+                   :active {d.connected}
+                   :tooltip {d.paired ? 'Click: connect or disconnect · Right-click: forget' : 'Click: pair'}
+                   :onclick "setsid -f ~/.config/eww/scripts/bluetooth.sh click ${d.mac}"
+                   :onrightclick {d.paired ? "setsid -f ~/.config/eww/scripts/bluetooth.sh forget ${d.mac}" : ""}))))))
+
+(defwidget cc_clipboard_page []
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Clipboard"
+      (button :class "cc-chip"
+              :visible {arraylength(clip_entries) > 0}
+              :onclick "setsid -f ~/.config/eww/scripts/clipboard.sh wipe"
+        (label :text "Clear all")))
+    (cc_list
+      (box :visible {arraylength(clip_entries) == 0}
+        (cc_empty :text "Nothing copied yet"))
+      (box :orientation "v"
+           :space-evenly false
+           :spacing 2
+        (for c in clip_entries
+          (cc_item :icon {matches(c.text, '^.. binary data') ? '󰋩' : '󰅍'}
+                   :text {c.text}
+                   :sub ""
+                   :active false
+                   :tooltip "Click: copy · Right-click: delete"
+                   :onclick "setsid -f sh -c '~/.config/eww/scripts/clipboard.sh copy ${c.id} && ~/.config/eww/scripts/control-center.sh close'"
+                   :onrightclick "setsid -f ~/.config/eww/scripts/clipboard.sh delete ${c.id}"))))))
+
+(defwidget cc_device_list [title devices command]
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 2
+    (label :class "cc-label" :halign "start" :text title)
+    (for d in devices
+      (cc_item :icon {d.default ? '󰄬' : ''}
+               :text {d.name}
+               :sub ""
+               :active {d.default}
+               :onclick "setsid -f ~/.config/eww/scripts/audio-devices.sh ${command} ${d.id}"))))
+
+(defwidget cc_audio_page []
+  (box :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (cc_page_head :title "Audio")
+    (cc_slider :icon "${audio_state.muted == 'true' ? '󰝟' : '󰖀'}"
+               :value {audio_state.volume}
+               :onclick "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+               :onchange "pactl set-sink-volume @DEFAULT_SINK@ {}%")
+    (cc_slider :icon "${audio_state.mic_muted == 'true' ? '󰍭' : '󰍬'}"
+               :value {audio_state.mic_volume}
+               :onclick "pactl set-source-mute @DEFAULT_SOURCE@ toggle"
+               :onchange "pactl set-source-volume @DEFAULT_SOURCE@ {}%")
+    (cc_list :height 260
+      (cc_device_list :title "Output" :devices {audio_devices.sinks} :command "set-sink")
+      (cc_device_list :title "Input" :devices {audio_devices.sources} :command "set-source"))
+    (box :class "cc-page-foot"
+         :space-evenly false
+      (box :hexpand true)
+      (button :class "cc-chip"
+              :onclick "~/.config/eww/scripts/control-center.sh close; setsid -f pavucontrol"
+        (label :text "Mixer")))))
+
+;; The password goes through a quoted heredoc so the shell never interprets it.
+(defwidget wifi_prompt []
+  (box :class "control-center wifi-prompt"
+       :orientation "v"
+       :space-evenly false
+       :spacing 10
+    (box :space-evenly false
+         :spacing 10
+      (label :class "cc-prompt-icon" :text "󰌾")
+      (box :orientation "v"
+           :space-evenly false
+        (label :class "cc-page-title" :halign "start" :text "Join network")
+        (label :class "cc-label"
+               :halign "start"
+               :limit-width 34
+               :text {wifi_prompt.ssid})))
+    (input :class "cc-input"
+           :password true
+           :onaccept "setsid -f ~/.config/eww/scripts/wifi.sh join ${wifi_prompt.bssid} <<'EWW_PW_END'
+{}
+EWW_PW_END")
+    (label :class "cc-error"
+           :halign "start"
+           :visible {wifi_prompt.state == 'error'}
+           :text "Wrong password, or the network did not answer.")
+    (box :space-evenly false
+      (label :class "cc-label"
+             :halign "start"
+             :hexpand true
+             :text {wifi_prompt.state == 'connecting' ? 'Connecting…' : 'Press Enter to join'})
+      (button :class "cc-chip"
+              :onclick "setsid -f ~/.config/eww/scripts/wifi.sh cancel"
+        (label :text "Cancel")))))
+
+;; Opened by wifi.sh on the monitor the control center was on.
+(defwindow wifi-prompt
+  :geometry (geometry :x "20px" :y "6px" :width "330px" :anchor "top right")
+  :stacking "overlay"
+  :focusable true
+  (wifi_prompt))

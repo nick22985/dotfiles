@@ -229,6 +229,13 @@ receipt_add_restore() {
 install_cargo_binary() {
     local name="$1" src="$2"
     local dest="$HOME/.local/bin/$name"
+    local branch
+
+    # A repository in the flat bare layout keeps its checked-out branch in <dir>/<branch>.
+    if [[ ! -f "$src/Cargo.toml" && "$(git -C "$src" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]] \
+        && branch="$(git -C "$src" symbolic-ref -q --short HEAD)"; then
+        src="$src/$branch"
+    fi
 
     if [[ ! -f "$src/Cargo.toml" ]]; then
         log_warn "$name source not found at $src, skipping"

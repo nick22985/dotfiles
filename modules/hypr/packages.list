@@ -2,9 +2,7 @@ package                      arch
 hyprland                     =
 uwsm                         =
 sddm                         =
-waybar                       =
 wayland-utils                =
-rofi                         =
 hyprpaper                    =
 hypridle                     =
 hyprlock                     =
@@ -39,7 +37,6 @@ hyprpicker                   aur:hyprpicker
 grimblast-git                aur:grimblast-git
 swaync                       aur:swaync
 eww                          aur:eww
-wofi                         aur:wofi
 qr-rs-bin                    aur:qr-rs-bin
 wayfreeze-git                aur:wayfreeze-git
 wayvnc                       =

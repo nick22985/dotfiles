@@ -199,6 +199,50 @@ if [[ -d /dev/shm && -w /dev/shm && "$(stat -c %d /dev/shm)" != "$(stat -c %d "$
         || fail "merge across filesystems replaced the target"
 fi
 
+# A marked directory is linked whole, even over per-file links from an earlier deploy, and a
+# link whose source file was deleted is pruned on the next deploy.
+whole_root="$test_dir/whole"
+whole_home="$whole_root/home"
+whole_receipt="$whole_root/receipt"
+mkdir -p "$whole_root/profiles/whole" "$whole_root/env/.config/app/widgets" "$whole_root/env/.config/tool" \
+    "$whole_home/.config/app/widgets" "$whole_receipt"
+printf '.config/app\n.config/tool\n' > "$whole_root/profiles/whole/dotfiles.list"
+touch "$whole_root/env/.config/app/.dotfiles-link-whole"
+printf 'managed\n' > "$whole_root/env/.config/app/widgets/bar.yuck"
+printf 'keep\n' > "$whole_root/env/.config/tool/keep.conf"
+printf 'gone\n' > "$whole_root/env/.config/tool/gone.conf"
+ln -s "$whole_root/env/.config/app/widgets/bar.yuck" "$whole_home/.config/app/widgets/bar.yuck"
+ln -s "$whole_root/env/.config/app/widgets/deleted.yuck" "$whole_home/.config/app/widgets/deleted.yuck"
+cp -- "$deploy_receipt/restore-user.sh" "$whole_receipt/"
+whole_deploy() {
+    (
+        set +eu
+        export DOTFILES_DIR="$repo_dir" DOTFILES_RECEIPT_DIR="$whole_receipt" HOME="$whole_home"
+        export DOTFILES_ACTIVE_PROFILES=whole DOTFILES_TEMP_DIR="$whole_root/tracking"
+        export XDG_STATE_HOME="$whole_root/state"
+        source "$repo_dir/lib/utils.sh"
+        source "$repo_dir/lib/dotfiles.sh"
+        dotfile_profile_dir="$whole_root/profiles"
+        dotfile_source_dir="$whole_root/env"
+        deploy_dotfile_bundles
+    )
+}
+whole_output="$(whole_deploy 2>&1)" || fail "deploy with a marked directory failed"
+[[ "$(readlink "$whole_home/.config/app")" == "$whole_root/env/.config/app" ]] \
+    || fail "marked directory was not linked whole"
+[[ ! -e "$whole_root/env/.config/app/widgets/deleted.yuck" && ! -L "$whole_root/env/.config/app/widgets/deleted.yuck" ]] \
+    || fail "a broken per-file link was merged into the source"
+! grep -q 'differ from' <<< "$whole_output" || fail "per-file links to the source were reported as local changes"
+[[ -L "$whole_home/.config/tool/gone.conf" ]] || fail "unmarked directory was not linked per file"
+rm -- "$whole_root/env/.config/tool/gone.conf"
+whole_deploy >/dev/null || fail "deploy after deleting a source file failed"
+[[ ! -L "$whole_home/.config/tool/gone.conf" ]] || fail "stale link was not pruned"
+[[ -L "$whole_home/.config/tool/keep.conf" ]] || fail "pruning removed a live link"
+printf '.config/app\n' > "$whole_root/profiles/whole/dotfiles.list"
+rm -- "$whole_root/env/.config/tool/keep.conf"
+whole_deploy >/dev/null || fail "deploy after dropping a bundle failed"
+[[ ! -e "$whole_home/.config/tool" ]] || fail "links of a dropped bundle were not pruned"
+
 set +e
 "$repo_dir/run" --dry --profile core >/dev/null 2>&1
 status=$?

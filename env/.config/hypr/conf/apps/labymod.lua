@@ -2,9 +2,10 @@
 
 hl.window_rule({
     name             = "labymodfreezefix",
-    -- LabyMod titles read "Minecraft 26.3 | Laby Client v47.2"; older builds said "| LabyMod".
+    -- Any Minecraft game window: LabyMod maps as "Minecraft 1.21.10 | Laby Client v47.4", vanilla as
+    -- "Minecraft* 1.21.11". The Laby Launcher window ("Laby Launcher") stays out.
     -- No class match: the class is not always com.mojang.minecraft (some builds set it to the title).
-    match            = { title = [[^Minecraft .* \| Laby.*$]] },
+    match            = { title = [[^Minecraft\*? [0-9].*$]] },
     render_unfocused = true,
     workspace        = "special:game silent",
     no_initial_focus = true,

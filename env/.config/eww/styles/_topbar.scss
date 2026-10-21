@@ -37,8 +37,8 @@ window {
 	min-height: 6px;
 }
 
-.ws-dot.filled:hover,
-.ws-dot.empty:hover {
+.ws-btn:hover .ws-dot.filled,
+.ws-btn:hover .ws-dot.empty {
 	background-color: $overlay2;
 }
 

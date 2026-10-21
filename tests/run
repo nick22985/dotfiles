@@ -7,6 +7,8 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-run-test.XXXXXX")"
 trap 'rm -rf -- "$test_dir"' EXIT
 mkdir -p "$test_dir/bin" "$test_dir/state"
 export XDG_STATE_HOME="$test_dir/xdg-state"
+# Keeps this machine's saved host preset out of the default-plan checks.
+export XDG_CONFIG_HOME="$test_dir/xdg-config"
 
 printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/pacman"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$test_dir/bin/flatpak"
@@ -221,6 +223,28 @@ core_plan="$("$repo_dir"/run plan --profile core)"
 if grep -Eq '^  (hypr|kde-plasma) ' <<< "$core_plan"; then
     fail "explicit core profile did not override the configured default"
 fi
+
+set +e
+"$repo_dir/run" host not-a-host >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" != 0 ]] || fail "an unknown machine host was accepted"
+[[ ! -e "$XDG_CONFIG_HOME/dotfiles/host" ]] || fail "an unknown machine host was saved"
+
+"$repo_dir/run" host overlord >/dev/null || fail "saving the machine host failed"
+grep -q '^overlord' <<< "$("$repo_dir"/run host)" || fail "./run host did not show the saved host"
+machine_plan="$("$repo_dir"/run plan)"
+grep -q '^Host preset: overlord (machine default)$' <<< "$machine_plan" \
+    || fail "default plan did not load the machine host"
+[[ "$(grep -v '^Host preset' <<< "$machine_plan")" == "$("$repo_dir"/run plan --host overlord | grep -v '^Host preset')" ]] \
+    || fail "machine default plan differs from --host overlord"
+core_plan="$("$repo_dir"/run plan --profile core)"
+if grep -q '^Host preset' <<< "$core_plan" || grep -Eq '^  (hypr|kde-plasma) ' <<< "$core_plan"; then
+    fail "explicit core profile did not override the machine host"
+fi
+"$repo_dir/run" host --clear >/dev/null || fail "clearing the machine host failed"
+grep -q '^Profiles: core desktop$' <<< "$("$repo_dir"/run plan)" \
+    || fail "cleared machine host still changed the default plan"
 
 (
     export DOTFILES_DIR="$repo_dir"

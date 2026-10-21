@@ -7,6 +7,9 @@ source "${DOTFILES_DIR:?DOTFILES_DIR must be set}/lib/platforms.sh"
 profile_dir="${DOTFILES_DIR:?DOTFILES_DIR must be set}/profiles"
 host_profile_dir="$DOTFILES_DIR/hosts"
 default_profile_file="$host_profile_dir/default.conf"
+# The preset this machine uses when no selection is given; kept outside the repository so synced checkouts can differ.
+machine_host_file="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/host"
+machine_host_name=""
 profile_mode=0
 desktop_profile="hyprland"
 desktop_profile_explicit=0
@@ -166,8 +169,19 @@ profile_load_host() {
     profile_load_selection_manifest "$manifest" "host preset"
 }
 
+# Prints the host preset saved for this machine, or nothing.
+profile_machine_host() {
+    local host=""
+    [[ -f "$machine_host_file" ]] || return 0
+    read -r host < "$machine_host_file" || true
+    printf '%s\n' "$host"
+}
+
 profile_load_default() {
-    if [[ -f "$default_profile_file" ]]; then
+    machine_host_name="$(profile_machine_host)"
+    if [[ -n "$machine_host_name" ]]; then
+        profile_load_host "$machine_host_name"
+    elif [[ -f "$default_profile_file" ]]; then
         profile_load_selection_manifest "$default_profile_file" "default selection"
     else
         profile_add_request core
@@ -208,13 +222,14 @@ platform_resolve() {
 }
 
 profile_set_desktop() {
-    local profile selection
+    local profile selection found=""
 
     if [[ "$1" != "both" ]]; then
+        # Read every line: breaking early closes the pipe while the producer is still printing.
         while read -r profile selection; do
-            [[ "$selection" == "$1" ]] && break
+            [[ "$selection" == "$1" ]] && found=1
         done < <(profile_desktop_variants)
-        if [[ "${selection:-}" != "$1" ]]; then
+        if [[ -z "$found" ]]; then
             printf 'Unknown desktop: %s\n' "$1" >&2
             profile_usage >&2
             return 2

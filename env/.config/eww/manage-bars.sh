@@ -21,7 +21,7 @@ case "$1" in
         echo "Resetting eww completely..."
         pkill -f monitor-watcher.sh 2>/dev/null || true
         eww kill 2>/dev/null || true
-        pkill -f "eww" 2>/dev/null || true
+        pkill -x eww 2>/dev/null || true
         sleep 0.3
         echo "Clearing generated configs and cache..."
         rm -rf ~/.config/eww/tmp/{bars,widgets,modules} 2>/dev/null || true

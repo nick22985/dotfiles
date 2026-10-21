@@ -110,7 +110,7 @@ unmerge_untracked_dotfile_entries() {
 deploy_dotfile_bundles() {
     local path source target source_real target_real backup backup_parent restore name
     local receipt_dir="${DOTFILES_RECEIPT_DIR:-}"
-    local status=0
+    local status=0 current_count=0
 
     if [[ "$DRY_RUN" != "1" && -z "$receipt_dir" ]]; then
         log_error "Dotfile deployment requires the top-level runner and its recovery receipt"
@@ -131,10 +131,15 @@ deploy_dotfile_bundles() {
             status=1
             continue
         fi
+        # -ef is a builtin, so the thousands of already-linked files cost no subprocesses.
+        if [[ "$target" -ef "$source" ]]; then
+            current_count=$((current_count + 1))
+            continue
+        fi
         source_real="$(realpath -m -- "$source")"
         target_real="$(realpath -m -- "$target")"
         if [[ "$source_real" == "$target_real" ]]; then
-            log_success "$target is current"
+            current_count=$((current_count + 1))
             continue
         fi
 
@@ -202,5 +207,6 @@ deploy_dotfile_bundles() {
         fi
     done < <(dotfile_deploy_paths | sort -u)
 
+    log_success "$current_count dotfiles already linked"
     return "$status"
 }

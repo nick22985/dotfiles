@@ -62,6 +62,17 @@ for an explicitly selected desktop profile.
 `desktop` profile with both desktops. Explicit selection options bypass it, so
 `./run plan --profile core` remains a core-only plan.
 
+To give one machine its own default, save a host preset for it:
+
+```bash
+./run host overlord   # plan, apply and audit now load hosts/overlord.conf
+./run host            # show the machine default
+./run host --clear    # go back to hosts/default.conf
+```
+
+The name is kept in `~/.config/dotfiles/host`, outside the repository, so synced
+checkouts on other machines are unaffected. `run.ps1` does not read it.
+
 Host presets in `hosts/*.conf` save selections without embedding
 secrets or hardware identifiers:
 
@@ -205,7 +216,7 @@ collisions, and clones through a temporary directory before the final rename.
 
 ## Audit
 
-`audit` uses `hosts/default.conf` when no selection option is supplied and is
+`audit` uses the machine default (or `hosts/default.conf`) when no selection option is supplied and is
 read-only. It checks selected
 packages and package groups, user Flatpaks, exact managed-file links and modes,
 privileged file contents and modes, enabled and active services, required group

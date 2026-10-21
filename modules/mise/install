@@ -43,5 +43,10 @@ for manifest in "${manifests[@]}"; do
     done < "$manifest"
 done
 
+# Rebuild the shims so a tool removed since the last run (go from an old config) stops shadowing the system one.
+if [[ "$DRY_RUN" != "1" ]]; then
+    mise reshim || status=1
+fi
+
 ((status == 0)) && log_success "Pinned mise tools are installed"
 exit "$status"

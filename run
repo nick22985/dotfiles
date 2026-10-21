@@ -36,6 +36,8 @@ Usage:
   ./run self-update
   ./run list [profiles|modules]
   ./run show NAME      Describe a profile or module
+  ./run host [NAME|--clear]
+                       Show, set or clear this machine's default host preset
 
 Options:
   --profile NAME       Add an installer profile
@@ -51,6 +53,40 @@ Options:
 Mutating the machine always requires the explicit apply command.
 EOF
     profile_usage
+}
+
+# ./run host: the preset plan, apply and audit load when given no selection options.
+machine_host_command() {
+    local current
+    case "$#:${1:-}" in
+        0:)
+            current="$(profile_machine_host)"
+            if [[ -n "$current" ]]; then
+                printf '%s (saved in %s)\n' "$current" "$machine_host_file"
+            else
+                printf 'No machine default; plan and apply use %s\n' "$default_profile_file"
+            fi
+            ;;
+        1:--clear)
+            rm -f -- "$machine_host_file"
+            printf 'Cleared the machine default; plan and apply use %s\n' "$default_profile_file"
+            ;;
+        1:-*)
+            printf 'Usage: ./run host [NAME|--clear]\n' >&2
+            return 2
+            ;;
+        1:*)
+            # Load it in a subshell so a broken preset is reported before it is saved.
+            ( profile_load_host "$1" ) || return $?
+            mkdir -p -- "$(dirname "$machine_host_file")" || return 1
+            printf '%s\n' "$1" > "$machine_host_file" || return 1
+            printf 'Saved %s as the default for this machine; ./run plan and ./run apply now load it.\n' "$1"
+            ;;
+        *)
+            printf 'Usage: ./run host [NAME|--clear]\n' >&2
+            return 2
+            ;;
+    esac
 }
 
 validate_flatpak_manifest() {
@@ -285,7 +321,11 @@ print_modules() {
 print_plan() {
     local module marker risk
     printf 'Platform: %s\n' "$DOTFILES_PLATFORM"
-    [[ -n "$host_name" ]] && printf 'Host preset: %s\n' "$host_name"
+    if [[ -n "$host_name" ]]; then
+        printf 'Host preset: %s\n' "$host_name"
+    elif [[ -n "$machine_host_name" ]]; then
+        printf 'Host preset: %s (machine default)\n' "$machine_host_name"
+    fi
     printf 'Profiles: %s\n' "${resolved_profiles[*]}"
     if profile_has_request desktop; then
         printf 'Desktop: %s\n' "$desktop_profile"
@@ -353,6 +393,11 @@ case "$1" in
             *) printf 'Usage: ./run list [profiles|modules]\n' >&2; exit 2 ;;
         esac
         exit 0
+        ;;
+    host)
+        shift
+        machine_host_command "$@"
+        exit $?
         ;;
     show)
         (($# == 2)) || { printf 'Usage: ./run show NAME\n' >&2; exit 2; }
@@ -629,7 +674,7 @@ if [[ -t 0 ]]; then
     tty_state="$(stty -g 2>/dev/null)" || tty_state=""
 fi
 trap cleanup_run EXIT
-trap 'exit 130' INT TERM
+trap 'printf "\nInterrupted; stopping the run.\n" >&2; exit 130' INT TERM
 init_error_tracking
 export DOTFILES_RUNNER_ACTIVE=1
 export DOTFILES_RUNNER_PID="$$"

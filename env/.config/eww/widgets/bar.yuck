@@ -10,11 +10,13 @@
          :spacing 6
          :valign "center"
       (for w in {ws.list}
-        (button :class "ws-dot ${w.id == ws.active ? 'active' : w.filled ? 'filled' : 'empty'}"
+        (button :class "ws-btn"
                 :valign "center"
                 :tooltip "Workspace ${w.id}"
                 :onclick "hyprctl dispatch 'hl.dsp.focus({ workspace = ${w.id} })'"
-          (label :text ""))))
+          ;; An empty box, not a label: a label's line height would stretch the dot.
+          (box :class "ws-dot ${w.id == ws.active ? 'active' : w.filled ? 'filled' : 'empty'}"
+               :valign "center"))))
     (label :class "ws-number" :text "${ws.active}")))
 
 (defwidget window_title []

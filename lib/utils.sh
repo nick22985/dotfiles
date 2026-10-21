@@ -11,6 +11,9 @@ if [[ "$caller_script" == "${DOTFILES_DIR:?DOTFILES_DIR must be set}"/modules/*/
         printf 'Internal module scripts must be executed through ./run apply.\n' >&2
         exit 2
     fi
+    # flatpak, paru and others catch Ctrl-C and exit normally, which bash takes to mean
+    # the interrupt was handled; without this the module would run its remaining steps.
+    trap 'exit 130' INT TERM
 fi
 
 # Global dry run flag (can be overridden by individual scripts)
@@ -913,6 +916,36 @@ setup_timeshift_btrfs() {
     log_success "Configured Timeshift btrfs snapshots on $device"
 }
 
+# Timeshift removes an interrupted btrfs snapshot (no info.json) file by file, which on a root
+# snapshot takes long enough to look like a hang; delete those as whole subvolumes first.
+remove_incomplete_timeshift_snapshots() {
+    local config="/etc/timeshift/timeshift.json"
+    local uuid mount_dir snapshot subvolume status=0
+
+    command_exists jq || return 0
+    [[ "$(jq -r '.btrfs_mode // ""' "$config" 2>/dev/null)" == "true" ]] || return 0
+    uuid="$(jq -r '.backup_device_uuid // ""' "$config" 2>/dev/null)"
+    [[ -n "$uuid" && -e "/dev/disk/by-uuid/$uuid" ]] || return 0
+    # A running Timeshift's snapshot has no info.json until it finishes.
+    pgrep -x timeshift >/dev/null && return 0
+
+    mount_dir="$(mktemp -d)" || return 1
+    if ! sudo mount -o subvolid=5 "/dev/disk/by-uuid/$uuid" "$mount_dir"; then
+        rmdir "$mount_dir"
+        return 1
+    fi
+    while IFS= read -r -d '' snapshot; do
+        sudo test -f "$snapshot/info.json" && continue
+        log_info "Deleting incomplete Timeshift snapshot ${snapshot##*/}"
+        while IFS= read -r -d '' subvolume; do
+            sudo btrfs subvolume delete "$subvolume" >/dev/null || status=1
+        done < <(sudo find "$snapshot" -mindepth 1 -maxdepth 1 -type d -print0)
+        sudo rmdir "$snapshot" || status=1
+    done < <(sudo find "$mount_dir/timeshift-btrfs/snapshots" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    sudo umount "$mount_dir" && rmdir "$mount_dir"
+    return "$status"
+}
+
 # Create a Timeshift backup before making system changes
 create_dotfiles_backup() {
     local script_name="${1:-dotfiles}"
@@ -971,17 +1004,20 @@ create_dotfiles_backup() {
         local backup_comment="Pre-$script_name-$(date +%Y%m%d-%H%M%S)"
         log_info "Creating backup: $backup_comment"
 
-        # Capture both stdout and stderr to see what's failing
-        local timeshift_output
-        if timeshift_output=$(sudo timeshift --create --comments "$backup_comment" --scripted 2>&1); then
+        # Stream timeshift's output: a snapshot waiting on another timeshift's lock or
+        # copying a large rsync delta otherwise looks like a hang.
+        local timeshift_status
+        remove_incomplete_timeshift_snapshots || log_warn "Could not delete every incomplete Timeshift snapshot; Timeshift will retry"
+        sudo timeshift --create --comments "$backup_comment" --scripted 2>&1 | sed -u 's/^/    /'
+        timeshift_status=${PIPESTATUS[0]}
+        if ((timeshift_status == 0)); then
             log_success "Timeshift backup created successfully"
             # Mark that backup was created in this session and track who created it
             touch "$DOTFILES_BACKUP_CREATED"
             echo "$script_name" > "$DOTFILES_BACKUP_CREATOR"
             printf '%s\n' "$backup_comment" > "$DOTFILES_BACKUP_ID_FILE"
         else
-            log_error "Failed to create Timeshift backup"
-            log_error "Timeshift error: $timeshift_output"
+            log_error "Failed to create Timeshift backup (exit $timeshift_status; output above)"
             if [[ "${REQUIRE_BACKUP:-0}" == "1" ]]; then
                 pop_context
                 return 1
@@ -1026,6 +1062,6 @@ cleanup_backup_tracking_if_owner() {
 # Export functions for use in other scripts
 export -f log log_error log_warn log_success log_info parse_args command_exists is_installed_pacman ensure_sudo
 export -f init_error_tracking cleanup_error_tracking set_context push_context pop_context get_context show_summary clear_tracking get_error_count get_warning_count
-export -f check_timeshift_available setup_timeshift_btrfs create_dotfiles_backup cleanup_backup_tracking cleanup_backup_tracking_if_owner
+export -f check_timeshift_available setup_timeshift_btrfs remove_incomplete_timeshift_snapshots create_dotfiles_backup cleanup_backup_tracking cleanup_backup_tracking_if_owner
 export -f check_ssh_keys check_gpg_keys reload_hyprland reload_tmux
 export -f install_packages_pacman install_packages_aur install_packages_flatpak install_packages_snap install_module_packages apply_module_services apply_module_groups apply_module_system_files

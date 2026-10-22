@@ -11,10 +11,8 @@ if ! flock -w 30 9; then
     exit 1
 fi
 
-gdk_monitor_names() {
-    wayland-info 2>/dev/null \
-        | awk '/interface:.*wl_output/{found=1} found && /^\tname:/{print $2; found=0}'
-}
+# shellcheck source=scripts/lib/monitors.sh
+source "$(dirname "$0")/scripts/lib/monitors.sh"
 
 hypr_monitor_names() {
     hyprctl -j monitors 2>/dev/null | jq -r 'sort_by(.id) | .[].name'

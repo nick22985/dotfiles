@@ -55,6 +55,8 @@ if [[ -d "$dir/.git" && ! -L "$dir/.git" ]]; then
     printf 'gitdir: ./.bare\n' > "$dir/.git"
     git -C "$dir" config --bool core.bare true
     git -C "$dir" config --unset core.worktree 2>/dev/null || true
+    # Without a format version git ignores core.bare and treats $dir as a checkout of HEAD.
+    git -C "$dir" config core.repositoryformatversion >/dev/null || git -C "$dir" config core.repositoryformatversion 0
 
     # git worktree add needs an empty target, so it runs elsewhere and its .git file is moved in.
     staging="$(mktemp -d)"
@@ -86,6 +88,7 @@ done < <(git -C "$dir" worktree list --porcelain | sed -n 's/^worktree //p')
 mkdir -- "$dir/.bare"
 find "$dir" -mindepth 1 -maxdepth 1 \( ! -name '.*' -o -name .remotes-backup \) "${tops[@]}" -exec mv -n -t "$dir/.bare/" -- {} +
 printf 'gitdir: ./.bare\n' > "$dir/.git"
+git --git-dir="$dir/.bare" config core.repositoryformatversion >/dev/null || git --git-dir="$dir/.bare" config core.repositoryformatversion 0
 
 for work in "${worktrees[@]}"; do
     [[ -f "$work/.git" ]] && sed -i "s|^gitdir: $dir/worktrees/|gitdir: $dir/.bare/worktrees/|" "$work/.git"

@@ -20,6 +20,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
     log_info "Would back up /etc/default/grub and /boot/grub/grub.cfg to the run receipt"
     log_info "Would enable os-prober, use a 10-second timeout, and regenerate GRUB atomically"
     command_exists apparmor_parser && log_info "Would add AppArmor to the lsm= kernel parameter"
+    command_exists apparmor_parser && grep -qs '^[^#]*_uki=' /etc/mkinitcpio.d/*.preset \
+        && log_info "Would add it to /etc/kernel/cmdline too and rebuild the unified kernel images"
     exit 0
 fi
 if [[ -z "${DOTFILES_RECEIPT_DIR:-}" || -z "${DOTFILES_RUN_DIR:-}" ]]; then
@@ -36,6 +38,18 @@ backup_system_file() {
     else
         receipt_add_restore system "$(printf 'sudo rm -f -- %q' "$target")"
     fi
+}
+
+# Prints the arguments in $1 with any lsm= replaced by $2.
+with_lsm_arg() {
+    local arg
+    local -a args new_args=()
+    read -r -a args <<< "$1"
+    for arg in "${args[@]}"; do
+        [[ "$arg" == lsm=* ]] || new_args+=("$arg")
+    done
+    new_args+=("$2")
+    printf '%s\n' "${new_args[*]}"
 }
 
 set_grub_value() {
@@ -64,6 +78,7 @@ set_grub_value "$defaults_tmp" GRUB_TIMEOUT 10
 set_grub_value "$defaults_tmp" GRUB_SAVEDEFAULT true
 set_grub_value "$defaults_tmp" GRUB_DEFAULT saved
 # The kernel only runs AppArmor when lsm= lists it; the rest of the list keeps the running kernel's.
+lsm_param=""
 if command_exists apparmor_parser && [[ -r /sys/kernel/security/lsm ]] && ! grep -qw apparmor /sys/kernel/security/lsm; then
     IFS=, read -r -a lsms < /sys/kernel/security/lsm
     lsm_list=""
@@ -73,16 +88,11 @@ if command_exists apparmor_parser && [[ -r /sys/kernel/security/lsm ]] && ! grep
         lsm_list+="$lsm,"
     done
     [[ "$lsm_list" == *apparmor,* ]] || lsm_list+="apparmor,"
+    lsm_param="lsm=${lsm_list%,}"
     cmdline="$(sed -n 's/^GRUB_CMDLINE_LINUX_DEFAULT=//p' "$defaults_tmp" | tail -n 1)"
     cmdline="${cmdline#[\"\']}"
-    read -r -a kernel_args <<< "${cmdline%[\"\']}"
-    new_args=()
-    for arg in "${kernel_args[@]}"; do
-        [[ "$arg" == lsm=* ]] || new_args+=("$arg")
-    done
-    new_args+=("lsm=${lsm_list%,}")
-    set_grub_value "$defaults_tmp" GRUB_CMDLINE_LINUX_DEFAULT "\"${new_args[*]}\""
-    log_info "Kernel parameter lsm=${lsm_list%,} takes effect after a reboot"
+    set_grub_value "$defaults_tmp" GRUB_CMDLINE_LINUX_DEFAULT "\"$(with_lsm_arg "${cmdline%[\"\']}" "$lsm_param")\""
+    log_info "Kernel parameter $lsm_param takes effect after a reboot"
 fi
 if ! sudo install -o root -g root -m "$(sudo stat -c %a "$grub_defaults")" \
     "$defaults_tmp" "$grub_defaults"; then
@@ -114,5 +124,29 @@ if ! sudo install -o root -g root -m 600 "$grub_output_tmp" "$grub_output"; then
     exit 1
 fi
 sudo rm -f -- "$grub_output_tmp"
+
+# A unified kernel image carries its own command line from /etc/kernel/cmdline and ignores GRUB's,
+# so the GRUB entry that boots it needs lsm= there too.
+kernel_cmdline=/etc/kernel/cmdline
+if [[ -n "$lsm_param" && -f "$kernel_cmdline" ]] && grep -qs '^[^#]*_uki=' /etc/mkinitcpio.d/*.preset; then
+    current_cmdline="$(< "$kernel_cmdline")"
+    new_cmdline="$(with_lsm_arg "$current_cmdline" "$lsm_param")"
+    if [[ "$new_cmdline" != "$current_cmdline" ]]; then
+        # Restores run newest first: put the old command line back, then rebuild the images from it.
+        receipt_add_restore system "sudo mkinitcpio -P"
+        backup_system_file "$kernel_cmdline" || {
+            log_error "Failed to back up $kernel_cmdline"
+            exit 1
+        }
+        printf '%s\n' "$new_cmdline" | sudo tee "$kernel_cmdline" >/dev/null || exit 1
+        if ! sudo mkinitcpio -P; then
+            sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$kernel_cmdline" "$kernel_cmdline"
+            sudo mkinitcpio -P
+            log_error "Rebuilding the unified kernel images with $lsm_param failed; put $kernel_cmdline back and rebuilt them"
+            exit 1
+        fi
+        log_info "Unified kernel images rebuilt with $lsm_param; it takes effect after a reboot"
+    fi
+fi
 
 log_success "GRUB multiboot configuration is installed; no remote theme code was executed"

@@ -16,8 +16,19 @@ fi
 # modules/grub-multiboot adds once the package is installed.
 apply_module_services apparmor || exit 1
 
+# A unified kernel image boots with /etc/kernel/cmdline, anything else with GRUB's. grub-multiboot runs
+# first and may rewrite either, so judge this boot by the copy it backed up.
+boot_config=/boot/grub/grub.cfg
+grep -qs '^[^#]*_uki=' /etc/mkinitcpio.d/*.preset && boot_config=/etc/kernel/cmdline
+boot_config_at_boot="${DOTFILES_RECEIPT_DIR:-}/backups/system$boot_config"
+sudo test -f "$boot_config_at_boot" 2>/dev/null || boot_config_at_boot="$boot_config"
+
 if grep -qw apparmor /sys/kernel/security/lsm 2>/dev/null; then
     log_success "AppArmor is active"
+elif grep -qE '(^| )lsm=[^ ]*apparmor' /proc/cmdline; then
+    log_warn "This boot has lsm=…apparmor but the kernel didn't start AppArmor; check 'journalctl -k -b | grep -i apparmor'"
+elif sudo grep -qE 'lsm=[^ ]*apparmor' "$boot_config_at_boot" 2>/dev/null; then
+    log_warn "$boot_config had lsm=…apparmor before this run but this boot didn't use it; 'cat /proc/cmdline' shows what booted"
 else
     log_warn "AppArmor starts after a reboot with the lsm= kernel parameter (modules/grub-multiboot adds it)"
 fi

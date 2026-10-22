@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Measure how fast the GitHub API quota is being used: wait for the current hour's limit to reset,
+# then sample how many requests were used over the next $1 minutes (default 10) and send a
+# notification with the rate. Checking the limit doesn't count against it.
+#
+#   gh-rate-watch [minutes]
+#   systemd-run --user --unit gh-rate-watch gh-rate-watch   keep it running after the terminal closes
+
+set -u -o pipefail
+
+minutes="${1:-10}"
+log="${XDG_STATE_HOME:-$HOME/.local/state}/gh-rate-watch.log"
+mkdir -p -- "$(dirname -- "$log")"
+
+core() {
+    gh api rate_limit --jq ".resources.core.$1"
+}
+
+report() {
+    echo "$(date '+%F %T') $1" | tee -a "$log"
+    notify-send -a gh-rate-watch "GitHub API usage" "$1" 2>/dev/null || true
+}
+
+reset="$(core reset)" || { report "Could not read the rate limit (gh auth status?)"; exit 1; }
+if (( $(core remaining) < $(core limit) / 2 )); then
+    echo "Waiting for the limit to reset at $(date -d "@$reset" '+%T')"
+    sleep $((reset - $(date +%s) + 60))
+fi
+
+start="$(core used)" || exit 1
+echo "Used $start at $(date '+%T'); sampling again in $minutes minutes"
+sleep $((minutes * 60))
+end="$(core used)" || exit 1
+if (( end < start )); then
+    report "The limit reset during the sample; run gh-rate-watch again"
+    exit 1
+fi
+used=$((end - start))
+report "$used requests in $minutes minutes (about $((used * 60 / minutes)) an hour of $(core limit))"

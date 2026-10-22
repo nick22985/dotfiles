@@ -74,6 +74,7 @@ catalog_show_profile() {
     printf 'Modules: %s\n' "${modules:-none}"
     catalog_print_manifest Packages "$dir/packages.list"
     catalog_print_manifest Tools "$dir/tools.list"
+    catalog_print_manifest Flatpaks "$dir/flatpaks.list"
     catalog_print_manifest Dotfiles "$dir/dotfiles.list"
 }
 

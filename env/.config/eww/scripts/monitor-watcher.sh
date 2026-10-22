@@ -16,6 +16,9 @@ RECONCILE_MAX_RESTARTS=3
 SIGNATURE_FILE=~/.cache/eww/monitors.signature
 MONITORS_FILE=~/.cache/eww/monitors.list
 
+# shellcheck source=lib/monitors.sh
+source "$(dirname "$0")/lib/monitors.sh"
+
 get_monitor_signature() {
     hyprctl -j monitors 2>/dev/null | jq -r 'sort_by(.name) | map(.name) | join(",")'
 }
@@ -29,6 +32,14 @@ expected_bar_count() {
 open_bar_count() {
     eww active-windows 2>/dev/null \
         | awk -F': ' 'NF>=2 && $2 ~ /^topbar[0-9]+$/ {c++} END {print c+0}'
+}
+
+# True when GDK now numbers the monitors differently from when the bars were made, so every
+# :monitor and --screen index points at the wrong output and popups open on the wrong screen.
+order_drifted() {
+    local order
+    order=$(gdk_monitor_names)
+    [[ -n "$order" && "$order" != "$(cat "$MONITORS_FILE" 2>/dev/null)" ]]
 }
 
 restart_eww() {
@@ -65,6 +76,8 @@ handle_event_burst() {
         # its name, but its bar and wallpaper went with the old output.
         restart_eww "Monitor removed and re-added ($current_signature), restarting eww..."
         restore_wallpapers
+    elif order_drifted; then
+        restart_eww "Monitor order changed ($current_signature), restarting eww..."
     else
         echo "$(date): Monitor event burst settled with no change ($current_signature)"
     fi
@@ -91,6 +104,8 @@ reconcile_loop() {
         reason=""
         if [[ "$signature" != "$(cat "$SIGNATURE_FILE" 2>/dev/null)" ]]; then
             reason="layout drifted from launched signature ($signature)"
+        elif order_drifted; then
+            reason="monitor order no longer matches the bars ($(gdk_monitor_names | paste -sd,))"
         else
             expected=$(expected_bar_count)
             open=$(open_bar_count)

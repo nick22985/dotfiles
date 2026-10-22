@@ -16,10 +16,15 @@ if ! command_exists flatpak; then
 fi
 
 log "→ Installing Flatpak applications..."
-flatpak_manifest="$DOTFILES_DIR/modules/flatpak/apps.list"
+# Selected profiles can add their own apps in profiles/<profile>/flatpaks.list.
+flatpak_manifests=("$DOTFILES_DIR/modules/flatpak/apps.list")
+read -r -a flatpak_profiles <<< "${DOTFILES_ACTIVE_PROFILES:-}"
+for profile in "${flatpak_profiles[@]}"; do
+    [[ -f "$DOTFILES_DIR/profiles/$profile/flatpaks.list" ]] && flatpak_manifests+=("$DOTFILES_DIR/profiles/$profile/flatpaks.list")
+done
 mapfile -t flatpak_packages < <(
     sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' \
-        -e 's/[[:space:]]*$//' -e '/^$/d' "$flatpak_manifest"
+        -e 's/[[:space:]]*$//' -e '/^$/d' "${flatpak_manifests[@]}" | awk '!seen[$0]++'
 )
 
 # Configure the user-level Flathub repository.

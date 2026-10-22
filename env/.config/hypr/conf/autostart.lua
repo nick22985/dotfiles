@@ -35,7 +35,8 @@ hl.on("hyprland.start", function()
 	-- hl.exec_cmd("discord")
 	hl.exec_cmd("~/.config/hypr/scripts/after-tray.sh flatpak run com.discordapp.Discord")
 	hl.exec_cmd("~/.config/hypr/scripts/after-tray.sh flatpak run com.slack.Slack")
-	hl.exec_cmd("~/.config/hypr/scripts/after-tray.sh flatpak run me.amankhanna.opendeck --hide")
+	-- only machines with the streamdeck profile install OpenDeck
+	hl.exec_cmd("flatpak info --user me.amankhanna.opendeck >/dev/null 2>&1 && ~/.config/hypr/scripts/after-tray.sh flatpak run me.amankhanna.opendeck --hide")
 	hl.exec_cmd([[~/.config/hypr/scripts/after-tray.sh "$(ls -t ~/projects/personal/Meetily-Local/main/target/release/bundle/appimage/meetily_*.AppImage | head -n1)" --hide]])
 
 	-- From conf/env.conf

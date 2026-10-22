@@ -160,6 +160,13 @@ while read -r repo_spec target option extra; do
                 log_error "Could not convert $destination to the bare layout"
                 status=1
             fi
+        # Without a format version git ignores core.bare and treats the container as a checkout of HEAD.
+        elif ((bare == 1)) && [[ -d "$destination/.bare" ]] && ! git --git-dir="$destination/.bare" config core.repositoryformatversion >/dev/null; then
+            if [[ "$DRY_RUN" == "1" ]]; then
+                log_info "Would repair $destination/.bare/config (no repositoryformatversion)"
+            elif git --git-dir="$destination/.bare" config core.repositoryformatversion 0; then
+                log "Repaired $destination/.bare/config (no repositoryformatversion, so core.bare was ignored)"
+            fi
         fi
         skipped=$((skipped + 1))
         continue

@@ -276,8 +276,13 @@ audit_flatpaks() {
         checks_incomplete=1
         return
     fi
-    sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' \
-        "$dotfiles_dir/modules/flatpak/apps.list" | sort -u > "$audit_tmp/declared-flatpaks"
+    local profile
+    local -a manifests=("$dotfiles_dir/modules/flatpak/apps.list")
+    for profile in "${resolved_profiles[@]}"; do
+        [[ -f "$dotfiles_dir/profiles/$profile/flatpaks.list" ]] && manifests+=("$dotfiles_dir/profiles/$profile/flatpaks.list")
+    done
+    sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' \
+        "${manifests[@]}" | sort -u > "$audit_tmp/declared-flatpaks"
     flatpak list --user --app --columns=application | sort -u > "$audit_tmp/installed-flatpaks"
     comm -23 "$audit_tmp/installed-flatpaks" "$audit_tmp/declared-flatpaks" > "$audit_tmp/flatpak-extra.raw"
     comm -23 "$audit_tmp/declared-flatpaks" "$audit_tmp/installed-flatpaks" > "$audit_tmp/flatpak-missing.raw"

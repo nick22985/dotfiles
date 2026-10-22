@@ -45,14 +45,15 @@ Profiles are additive. `core` is always included.
 - `system`: GRUB, multiboot, Timeshift snapshot boot entries, weekly mirror refresh, and system monitors
 - `virtualization`: QEMU, libvirt, and VM tools
 - `hardware`: device, SDR, firmware update checks, and printing tools
-- `security`: network and host security packages, Tailscale, the ufw firewall, and AppArmor (GRUB gets the `lsm=` kernel parameter it needs; active after a reboot)
+- `security`: network and host security packages, Tailscale, the ufw firewall, and AppArmor (GRUB gets the `lsm=` kernel parameter it needs; active after a reboot, see [modules/apparmor](modules/apparmor/README.md))
 - `media`: audio, recording, and media packages
 - `ssh-server`: opt-in key-only SSH daemon configuration
 - `gpu-amd`, `gpu-intel`, `gpu-nvidia`: graphics drivers for the machine's GPUs (NVIDIA also enables its suspend handling)
 - `laptop`: power profiles, thermal management, and fingerprint sudo
+- `streamdeck`: OpenDeck for a Stream Deck (Flatpak; pulls in `desktop`)
 - `kube`: Ubuntu Kubernetes nodes; mise with pinned kubectl, helm, neovim, starship and fd, and on k3s servers the admin kubeconfig copied to `~/.kube/config`
 - `full`: all general workstation profiles, excluding `ssh-server`, the GPU
-  profiles, and `laptop`
+  profiles, `laptop`, and `streamdeck`
 
 Desktop selections are `hyprland`, `plasma`, and `both`. Hyprland is the default
 for an explicitly selected desktop profile.
@@ -110,6 +111,7 @@ Each profile is a directory:
 - `profiles/<name>/packages.list`: profile packages
 - `profiles/<name>/dotfiles.list`: profile-scoped paths below `env/`
 - `profiles/<name>/tools.list`: exact versions installed through mise
+- `profiles/<name>/flatpaks.list`: Flatpak apps installed on top of `modules/flatpak/apps.list`
 
 `desktop-hyprland` and `desktop-plasma` are not selected directly; `desktop`
 pulls them in according to the desktop selection. `full` includes every general

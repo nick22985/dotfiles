@@ -97,16 +97,19 @@ validate_flatpak_manifest() {
         printf 'Flatpak manifest not found: %s\n' "$manifest" >&2
         return 1
     fi
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%%#*}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        [[ -n "$line" ]] || continue
-        if [[ ! "$line" =~ ^[[:alnum:]][[:alnum:]._-]+$ ]]; then
-            printf 'Invalid Flatpak ID in %s: %s\n' "$manifest" "$line" >&2
-            invalid=1
-        fi
-    done < "$manifest"
+    for manifest in "$manifest" "$script_dir"/profiles/*/flatpaks.list; do
+        [[ -f "$manifest" ]] || continue
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%%#*}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -n "$line" ]] || continue
+            if [[ ! "$line" =~ ^[[:alnum:]][[:alnum:]._-]+$ ]]; then
+                printf 'Invalid Flatpak ID in %s: %s\n' "$manifest" "$line" >&2
+                invalid=1
+            fi
+        done < "$manifest"
+    done
     ((invalid == 0))
 }
 

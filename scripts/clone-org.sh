@@ -81,6 +81,11 @@ correct_bare_repo() {
     local d="$1"
     git --git-dir="$d" config core.bare true
     git --git-dir="$d" config --unset core.worktree 2>/dev/null || true
+    # Without a format version git ignores core.bare and treats the container as a checkout of HEAD.
+    if ! git --git-dir="$d" config core.repositoryformatversion >/dev/null; then
+        git --git-dir="$d" config core.repositoryformatversion 0
+        echo "Repaired $d/config (no repositoryformatversion, so core.bare was ignored)"
+    fi
     rm -f "$d/index"
 }
 
@@ -204,9 +209,11 @@ clone_or_update_bare() {
         local before_refs
         before_refs=$(git -C "$container" for-each-ref --format='%(refname) %(objectname)' refs/remotes/ 2>/dev/null || true)
 
-        if ! git -C "$container" fetch origin 2>/dev/null; then
-            echo "Failed to fetch: $name"
-            echo "failed $name $url" >> "$STATS_FILE"
+        local fetch_error reason
+        if ! fetch_error=$(git -C "$container" fetch origin 2>&1 >/dev/null); then
+            reason=$(grep -m1 -E '^(ERROR|fatal|error):' <<< "$fetch_error" || true)
+            echo "Failed to fetch: $name${reason:+ ($reason)}"
+            echo "failed $name $url $reason" >> "$STATS_FILE"
             return
         fi
 
@@ -352,8 +359,8 @@ failed=$(grep -c "^failed "      "$STATS_FILE" || true)
 
 print_repos() {
     local status="$1"
-    grep "^${status} " "$STATS_FILE" 2>/dev/null | while read -r _ name url; do
-        echo "    $name  $url"
+    grep "^${status} " "$STATS_FILE" 2>/dev/null | while read -r _ name url reason; do
+        echo "    $name  $url${reason:+  ($reason)}"
     done
 }
 

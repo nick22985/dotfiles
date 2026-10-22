@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_DIR="$(dirname "$SCRIPT_DIR")"
 
 SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
+# A .bare clone keeps its checkout in <dir>/<branch>.
+if [[ ! -d "$SBX_SRC/examples" ]] && branch="$(git -C "$SBX_SRC" symbolic-ref -q --short HEAD 2>/dev/null)"; then
+    SBX_SRC="$SBX_SRC/$branch"
+fi
 SRC="$SBX_SRC/examples/config/flavors"
 # Older sbx checkouts kept the flavors directly under examples/.
 [[ -d "$SRC" ]] || SRC="$SBX_SRC/examples/flavors"

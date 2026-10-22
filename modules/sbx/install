@@ -11,7 +11,7 @@ set_context "sbx"
 
 log "Setting up sbx (sandboxed Docker dev environments)..."
 
-SBX_SRC="${SBX_SRC:-$HOME/projects/personal/sbx}"
+SBX_SRC="$(checkout_dir "${SBX_SRC:-$HOME/projects/personal/sbx}")"
 
 if [[ ! -f "$SBX_SRC/Cargo.toml" ]]; then
     log_warn "sbx source not found at $SBX_SRC, skipping"

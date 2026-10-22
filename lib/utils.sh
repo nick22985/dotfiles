@@ -212,6 +212,18 @@ command_exists() {
 
 # Build a Rust binary from a local checkout and install it to ~/.local/bin,
 # recording a restore step in the run receipt when it replaces a file.
+# A bare repository (.bare or flat layout) keeps its checked-out branch in <dir>/<branch>; any
+# other directory is printed as given.
+checkout_dir() {
+    local branch
+    if [[ "$(git -C "$1" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]] \
+        && branch="$(git -C "$1" symbolic-ref -q --short HEAD)" && [[ -d "$1/$branch" ]]; then
+        printf '%s\n' "$1/$branch"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
 # Usage: install_cargo_binary <name> <source dir>
 # Records the commands that undo one change, for restore-user.sh or restore-system.sh in the run
 # receipt. The restore scripts run records newest first, so a path changed twice in one run is
@@ -229,13 +241,8 @@ receipt_add_restore() {
 install_cargo_binary() {
     local name="$1" src="$2"
     local dest="$HOME/.local/bin/$name"
-    local branch
 
-    # A repository in the flat bare layout keeps its checked-out branch in <dir>/<branch>.
-    if [[ ! -f "$src/Cargo.toml" && "$(git -C "$src" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]] \
-        && branch="$(git -C "$src" symbolic-ref -q --short HEAD)"; then
-        src="$src/$branch"
-    fi
+    [[ -f "$src/Cargo.toml" ]] || src="$(checkout_dir "$src")"
 
     if [[ ! -f "$src/Cargo.toml" ]]; then
         log_warn "$name source not found at $src, skipping"

@@ -31,4 +31,27 @@ fi
 # Install Flatpak packages using utility function
 install_packages_flatpak "${flatpak_packages[@]}" || exit 1
 
+# Lutris only loads MangoHud and gamescope from Vulkan layers built for its runtime's version.
+if flatpak info --user net.lutris.Lutris >/dev/null 2>&1; then
+    runtime="$(flatpak info --user --show-runtime net.lutris.Lutris)"
+    layer_branch="$(flatpak info --show-metadata "${runtime%%/*}//${runtime##*/}" 2>/dev/null | awk -F= '
+        /^\[/ { section = ($0 == "[Extension org.freedesktop.Platform.VulkanLayer]") }
+        section && $1 == "version" { print $2; exit }')"
+    if [[ -z "$layer_branch" ]]; then
+        log_error "Could not find the Vulkan layer version of Lutris's runtime $runtime"
+        exit 1
+    fi
+    for layer in MangoHud gamescope; do
+        ref="org.freedesktop.Platform.VulkanLayer.$layer//$layer_branch"
+        if flatpak info --user "$ref" >/dev/null 2>&1; then
+            log_success "$ref (Flatpak) already installed"
+        elif [[ $DRY_RUN == "1" ]]; then
+            log_info "Would install $ref for Lutris"
+        elif ! flatpak install -y --user flathub "$ref"; then
+            log_error "Failed to install $ref"
+            exit 1
+        fi
+    done
+fi
+
 log_success "Flatpak setup complete"

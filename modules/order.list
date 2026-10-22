@@ -10,6 +10,7 @@ tmux
 kubeconfig
 hypr
 walker
+share-picker
 docker
 ssh
 sync-repos
@@ -32,6 +33,7 @@ clipboard
 printer
 maintenance
 firewall
+apparmor
 laptop
 tailscale
 firmware

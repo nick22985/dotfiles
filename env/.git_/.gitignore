@@ -19,3 +19,6 @@ graphify-out/
 
 # Syncthing partial downloads
 .syncthing.*.tmp
+
+# Desktop trash on removable/other filesystems
+.Trash-*/

@@ -124,6 +124,8 @@ ZSH_AUTOSUGGEST_MANUAL_REBIND=1Copied!
 
 # NVM configuration removed - handled by installer
 eval "$(starship init zsh)"
+# No right_format in starship.toml; an unexpanded RPROMPT shows up as literal text on redraws.
+unset RPROMPT
 
 GPG_TTY=$(tty)
 export GPG_TTY

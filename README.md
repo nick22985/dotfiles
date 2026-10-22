@@ -45,7 +45,7 @@ Profiles are additive. `core` is always included.
 - `system`: GRUB, multiboot, Timeshift snapshot boot entries, weekly mirror refresh, and system monitors
 - `virtualization`: QEMU, libvirt, and VM tools
 - `hardware`: device, SDR, firmware update checks, and printing tools
-- `security`: network and host security packages, Tailscale, and the ufw firewall
+- `security`: network and host security packages, Tailscale, the ufw firewall, and AppArmor (GRUB gets the `lsm=` kernel parameter it needs; active after a reboot)
 - `media`: audio, recording, and media packages
 - `ssh-server`: opt-in key-only SSH daemon configuration
 - `gpu-amd`, `gpu-intel`, `gpu-nvidia`: graphics drivers for the machine's GPUs (NVIDIA also enables its suspend handling)

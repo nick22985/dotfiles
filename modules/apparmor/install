@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "AppArmor"
+
+if ! command_exists apparmor_parser; then
+    log_error "apparmor is unavailable after package installation"
+    exit 1
+fi
+
+# apparmor.service is skipped until the kernel runs AppArmor, which needs the lsm= parameter that
+# modules/grub-multiboot adds once the package is installed.
+apply_module_services apparmor || exit 1
+
+if grep -qw apparmor /sys/kernel/security/lsm 2>/dev/null; then
+    log_success "AppArmor is active"
+else
+    log_warn "AppArmor starts after a reboot with the lsm= kernel parameter (modules/grub-multiboot adds it)"
+fi

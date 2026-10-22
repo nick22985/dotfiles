@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/share-picker"
+keep=20
+
+mkdir -p -m 700 "$state_dir"
+run_dir="$(mktemp -d "$state_dir/$(date +%Y%m%d-%H%M%S)-XXXX")" || exec hyprland-preview-share-picker "$@"
+hyprctl -j clients > "$run_dir/clients.json" 2>&1
+hyprctl -j monitors > "$run_dir/monitors.json" 2>&1
+
+hyprland-preview-share-picker --debug --logs "$run_dir/picker.log" "$@"
+status=$?
+
+if grep -qE 'unsupported buffer size|Protocol error' "$run_dir/picker.log"; then
+    touch "$run_dir/failed"
+    notify-send -a "Share picker" "A preview failed to capture" "Log and window snapshot: $run_dir" || true
+fi
+
+runs=("$state_dir"/*/)
+for ((i = 0; i < ${#runs[@]} - keep; i++)); do
+    [[ -e "${runs[i]}failed" ]] || rm -rf -- "${runs[i]}"
+done
+exit "$status"

@@ -1,7 +1,7 @@
 pkgname=hyprland-preview-share-picker-patched
 _pkgname=hyprland-preview-share-picker
 pkgver=0.3.0
-pkgrel=2
+pkgrel=4
 pkgdesc="Hyprland share picker with window and monitor previews, with fixed window captures"
 arch=('x86_64')
 url="https://github.com/nick22985/hyprland-preview-share-picker"
@@ -10,13 +10,17 @@ depends=('gtk4' 'gtk4-layer-shell' 'xdg-desktop-portal-hyprland' 'hyprland')
 makedepends=('cargo' 'git')
 provides=("$_pkgname")
 conflicts=("$_pkgname" "$_pkgname-git")
-source=("$_pkgname::git+ssh://git@github.com/nick22985/$_pkgname.git#commit=bf167fc99c842368170e9cc6a95f2096cc07f107"
-        "hyprland-protocols::git+https://github.com/hyprwm/hyprland-protocols")
+source=("$_pkgname::git+ssh://git@github.com/nick22985/$_pkgname.git#commit=c7e5cb79666935b8099849d9c14372bd36f0bd79"
+        "hyprland-protocols::git+https://github.com/hyprwm/hyprland-protocols"
+        "$_pkgname-traced")
 sha256sums=('SKIP'
+            'SKIP'
             'SKIP')
 
 prepare() {
     cd "$_pkgname"
+    # build.rs needs a tag for git describe, and the fork has none
+    git tag -f "v$pkgver"
     git submodule init
     git config submodule.lib/hyprland-protocols.url "$srcdir/hyprland-protocols"
     git -c protocol.file.allow=always submodule update
@@ -35,5 +39,6 @@ build() {
 package() {
     cd "$_pkgname"
     install -Dm0755 -T target/release/$_pkgname "$pkgdir/usr/bin/$_pkgname"
+    install -Dm0755 -T "$srcdir/$_pkgname-traced" "$pkgdir/usr/bin/$_pkgname-traced"
     install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -29,7 +29,7 @@ fi
 
 build_dir="$(mktemp -d)" || exit 1
 trap 'rm -rf -- "$build_dir"' EXIT
-cp -- "$module_dir/PKGBUILD" "$build_dir/" || exit 1
+cp -- "$module_dir/PKGBUILD" "$module_dir/hyprland-preview-share-picker-traced" "$build_dir/" || exit 1
 if ! paru -Bi --noconfirm --removemake "$build_dir"; then
     log_error "Failed to build and install $package $version"
     exit 1

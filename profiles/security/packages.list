@@ -1,4 +1,5 @@
 package                 arch
+apparmor                =
 clamav                  =
 cryfs                   =
 mkcert                  =

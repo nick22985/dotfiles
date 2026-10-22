@@ -38,13 +38,20 @@ restart_eww() {
     ~/.config/eww/launch.sh >> ~/.cache/eww/monitor-watcher.log 2>&1 &
 }
 
-# Called from inside the `while read` loop over the event pipe. Consumes any
-# further events from stdin until the stream has been quiet for DEBOUNCE_SECS,
-# then decides whether to restart eww.
+# hyprpaper forgets an output's wallpaper when it goes away, and a monitor that
+# comes up after login missed `wallpaper restore` in autostart.
+restore_wallpapers() {
+    ~/.local/bin/wallpaper restore &
+}
+
+# Called from inside the `while read` loop over the event pipe with the event
+# that started the burst. Consumes any further events from stdin until the
+# stream has been quiet for DEBOUNCE_SECS, then decides whether to restart eww.
 handle_event_burst() {
-    local extra
-    while read -r -t "$DEBOUNCE_SECS" extra; do
-        :  # drop the event; we only care that activity is still happening
+    local event="$1" removed=""
+    while true; do
+        [[ "$event" == monitorremoved* ]] && removed=1
+        read -r -t "$DEBOUNCE_SECS" event || break
     done
 
     local new_signature
@@ -52,6 +59,12 @@ handle_event_burst() {
     if [[ "$new_signature" != "$current_signature" ]]; then
         restart_eww "Monitor configuration changed: $current_signature -> $new_signature, restarting eww..."
         current_signature="$new_signature"
+        restore_wallpapers
+    elif [[ -n "$removed" ]]; then
+        # A monitor that drops out and comes back (DPMS, link retraining) keeps
+        # its name, but its bar and wallpaper went with the old output.
+        restart_eww "Monitor removed and re-added ($current_signature), restarting eww..."
+        restore_wallpapers
     else
         echo "$(date): Monitor event burst settled with no change ($current_signature)"
     fi
@@ -125,6 +138,7 @@ startup_signature=$(get_monitor_signature)
 if [[ -n "$startup_signature" && "$startup_signature" != "$current_signature" ]]; then
     current_signature="$startup_signature"
     restart_eww "Monitors changed before watcher started, restarting eww..."
+    restore_wallpapers
 fi
 
 reconcile_loop &
@@ -136,7 +150,7 @@ if [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]]; then
         socat -u "UNIX-CONNECT:$SOCKET_PATH" - | while read -r line; do
             case "$line" in
                 monitoradded\>\>*|monitorremoved\>\>*)
-                    handle_event_burst
+                    handle_event_burst "$line"
                     ;;
             esac
         done

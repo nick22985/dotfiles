@@ -35,15 +35,15 @@ if [[ "$(readlink /etc/resolv.conf)" != "$stub" && "$(readlink /etc/resolv.conf)
 fi
 
 # Laptops accept subnet routes so the home network (and the split DNS names that resolve into
-# it) is reachable away from home. Machines that never leave home don't: on Linux an accepted
-# route for the LAN they sit on sends their LAN traffic through the subnet router.
-accept_routes=false
-[[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" laptop "* ]] && accept_routes=true
+# it) is reachable away from home. Other machines keep whatever each account has: prefs are per
+# account, and another tailnet's routes may be needed where the home LAN's are not.
+set_flags=(--operator="$USER")
+[[ " ${DOTFILES_ACTIVE_PROFILES:-} " == *" laptop "* ]] && set_flags+=(--accept-routes=true)
 if [[ "$DRY_RUN" == "1" ]]; then
-    log_info "Would make $USER the Tailscale operator (accept subnet routes: $accept_routes)"
+    log_info "Would run: sudo tailscale set ${set_flags[*]}"
 else
     # The operator can run tailscale commands without sudo once the node is logged in.
-    if ! sudo tailscale set --operator="$USER" --accept-routes="$accept_routes"; then
+    if ! sudo tailscale set "${set_flags[@]}"; then
         log_error "Failed to make $USER the Tailscale operator"
         exit 1
     fi

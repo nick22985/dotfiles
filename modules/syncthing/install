@@ -96,6 +96,10 @@ if ((${#relay_peers[@]} > 0)); then
     fi
 fi
 
+rescan_interval=86400
+if [[ "$(syncthing cli config defaults folder rescan-intervals get)" != "$rescan_interval" ]]; then
+    syncthing cli config defaults folder rescan-intervals set "$rescan_interval" || status=1
+fi
 folder_defaults="$(syncthing cli config defaults folder dump-json)" || exit 1
 default_settings=(fswatcher-enabled rescan-intervals max-conflicts auto-normalize puller-delays block-indexing
     "min-disk-free value" "min-disk-free unit" "xattr-filter max-single-entry-size" "xattr-filter max-total-size")

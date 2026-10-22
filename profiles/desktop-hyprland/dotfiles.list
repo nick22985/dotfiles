@@ -5,6 +5,7 @@
 .config/swaync
 .config/systemd/user/swaync.service.d/monitor.conf
 .config/systemd/user/game-presence.service
+.config/systemd/user/now-playing.service
 .config/systemd/user/walker.service
 .config/user-tmpfiles.d/discord-rpc.conf
 .config/walker

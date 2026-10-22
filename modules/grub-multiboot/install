@@ -19,6 +19,7 @@ fi
 if [[ "$DRY_RUN" == "1" ]]; then
     log_info "Would back up /etc/default/grub and /boot/grub/grub.cfg to the run receipt"
     log_info "Would enable os-prober, use a 10-second timeout, and regenerate GRUB atomically"
+    command_exists apparmor_parser && log_info "Would add AppArmor to the lsm= kernel parameter"
     exit 0
 fi
 if [[ -z "${DOTFILES_RECEIPT_DIR:-}" || -z "${DOTFILES_RUN_DIR:-}" ]]; then
@@ -62,6 +63,27 @@ set_grub_value "$defaults_tmp" GRUB_DISABLE_OS_PROBER false
 set_grub_value "$defaults_tmp" GRUB_TIMEOUT 10
 set_grub_value "$defaults_tmp" GRUB_SAVEDEFAULT true
 set_grub_value "$defaults_tmp" GRUB_DEFAULT saved
+# The kernel only runs AppArmor when lsm= lists it; the rest of the list keeps the running kernel's.
+if command_exists apparmor_parser && [[ -r /sys/kernel/security/lsm ]] && ! grep -qw apparmor /sys/kernel/security/lsm; then
+    IFS=, read -r -a lsms < /sys/kernel/security/lsm
+    lsm_list=""
+    for lsm in "${lsms[@]}"; do
+        [[ "$lsm" == capability ]] && continue
+        [[ "$lsm" == bpf ]] && lsm_list+="apparmor,"
+        lsm_list+="$lsm,"
+    done
+    [[ "$lsm_list" == *apparmor,* ]] || lsm_list+="apparmor,"
+    cmdline="$(sed -n 's/^GRUB_CMDLINE_LINUX_DEFAULT=//p' "$defaults_tmp" | tail -n 1)"
+    cmdline="${cmdline#[\"\']}"
+    read -r -a kernel_args <<< "${cmdline%[\"\']}"
+    new_args=()
+    for arg in "${kernel_args[@]}"; do
+        [[ "$arg" == lsm=* ]] || new_args+=("$arg")
+    done
+    new_args+=("lsm=${lsm_list%,}")
+    set_grub_value "$defaults_tmp" GRUB_CMDLINE_LINUX_DEFAULT "\"${new_args[*]}\""
+    log_info "Kernel parameter lsm=${lsm_list%,} takes effect after a reboot"
+fi
 if ! sudo install -o root -g root -m "$(sudo stat -c %a "$grub_defaults")" \
     "$defaults_tmp" "$grub_defaults"; then
     sudo cp -a -- "$DOTFILES_RECEIPT_DIR/backups/system$grub_defaults" "$grub_defaults"

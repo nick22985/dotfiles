@@ -31,14 +31,14 @@ fi
 # Install Flatpak packages using utility function
 install_packages_flatpak "${flatpak_packages[@]}" || exit 1
 
-# Lutris only loads MangoHud and gamescope from Vulkan layers built for its runtime's version.
+# Lutris only loads MangoHud and gamescope from Vulkan layers built for its freedesktop base
+# version, which its metadata pins for the i386 compat extension.
 if flatpak info --user net.lutris.Lutris >/dev/null 2>&1; then
-    runtime="$(flatpak info --user --show-runtime net.lutris.Lutris)"
-    layer_branch="$(flatpak info --show-metadata "${runtime%%/*}//${runtime##*/}" 2>/dev/null | awk -F= '
-        /^\[/ { section = ($0 == "[Extension org.freedesktop.Platform.VulkanLayer]") }
+    layer_branch="$(flatpak info --user --show-metadata net.lutris.Lutris | awk -F= '
+        /^\[/ { section = ($0 == "[Extension org.freedesktop.Platform.Compat.i386]") }
         section && $1 == "version" { print $2; exit }')"
     if [[ -z "$layer_branch" ]]; then
-        log_error "Could not find the Vulkan layer version of Lutris's runtime $runtime"
+        log_error "Could not find Lutris's freedesktop runtime version in its metadata (flatpak info --show-metadata net.lutris.Lutris)"
         exit 1
     fi
     for layer in MangoHud gamescope; do

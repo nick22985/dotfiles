@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Build ~/projects/.stignore from modules/syncthing/projects.stignore plus patterns for the
-# bare-layout repositories, which keep git internals beside their worktrees where the .git pattern
-# doesn't reach. Organizations cloned with --bare and repos.txt entries marked --bare
-# (modules/sync-repos) have that layout on every machine, so only their internals are ignored and the
-# worktrees sync; the repos.txt ones are known up front and get their patterns before they exist.
-# A repository converted to that layout by hand (sbx does this) is a normal checkout elsewhere; the
-# two layouts can't be merged, so it is skipped entirely and its committed work moves through
+# bare-layout repositories. Organizations cloned with --bare and repos.txt entries marked --bare
+# (modules/sync-repos) have that layout on every machine, so their worktrees sync; in the .bare
+# layout the base .git and .bare patterns already cover the internals, and the older flat layout
+# (internals at the root, where those patterns don't reach) gets them ignored by name until it is
+# converted. The repos.txt ones are known up front and get their patterns before they exist.
+# A repository converted to a bare layout by hand (sbx does this) is a normal checkout elsewhere;
+# the layouts can't be merged, so it is skipped entirely and its committed work moves through
 # git-peer-sync.
 # Build output and temporary directories (dist, build, out, tmp, ...) are ignored where git ignores
 # them; a committed dist still syncs, and so do the data directories and files like .env that git
@@ -100,17 +101,18 @@ generate() {
     for root in "${declared_bare[@]}"; do
         bare_internals "${root#"$path"}"
     done
-    while IFS= read -r -d '' objects_dir; do
-        root="${objects_dir%/objects}"
+    while IFS= read -r -d '' internals; do
+        root="${internals%/*}"
         relative="${root#"$path"}"
         if [[ " ${declared_bare[*]} " == *" $root "* || " ${declared_bare[*]/%//modules/} " == *" ${root%%/modules/*}/modules/ "* ]]; then
             continue
         elif [[ " ${bare_roots[*]} " == *" ${root%/*} "* ]]; then
-            bare_internals "$relative"
+            [[ "$internals" == */.bare ]] || bare_internals "$relative"
         else
             printf '\n// Repository converted to bare layout on this machine only\n%s\n' "$relative"
         fi
-    done < <(find "$path" \( -name node_modules -o -name target -o -name .git -o -name .bare -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
+    done < <(find "$path" \( -name node_modules -o -name target -o -name .git -o -name .stversions -o -path '*/.docker/db' \) -prune -o \
+        \( -name .bare -type d -execdir test -f .git \; -print0 -prune \) -o \
         \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \) 2>/dev/null | sort -z)
 }
 

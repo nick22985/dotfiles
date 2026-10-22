@@ -150,8 +150,8 @@ while read -r repo_spec target option extra; do
     fi
 
     if git -C "$destination" rev-parse --git-dir >/dev/null 2>&1; then
-        # A normal checkout declared --bare moves to the flat bare layout; its files are kept.
-        if ((bare == 1)) && [[ -d "$destination/.git" && ! -L "$destination/.git" ]]; then
+        # A normal checkout or flat bare repo declared --bare moves to the .bare layout; its files are kept.
+        if ((bare == 1)) && { [[ -d "$destination/.git" && ! -L "$destination/.git" ]] || [[ ! -e "$destination/.git" && -f "$destination/HEAD" && -d "$destination/objects" ]]; }; then
             if [[ "$DRY_RUN" == "1" ]]; then
                 log_info "Would convert $destination to the bare layout"
             elif pause_syncthing; "$DOTFILES_DIR/scripts/convert-to-bare.sh" "$destination"; then
@@ -261,16 +261,29 @@ else
 fi
 
 clone_repo() {
-    local repo_spec="$1" destination="$2" bare="$3" parent clone_tmp
+    local repo_spec="$1" destination="$2" bare="$3" parent clone_tmp branch
     parent="$(dirname "$destination")"
     mkdir -p "$parent" || return 1
     clone_tmp="$(mktemp -d "$parent/.dotfiles-clone.XXXXXX")" || {
         log_error "Could not create a clone directory below $parent"
         return 1
     }
-    local clone_args=(git clone --quiet)
-    ((bare == 0)) || clone_args+=(--bare)
-    if ((bare == 0)) && [[ -d "$destination" ]]; then
+    if ((bare == 1)); then
+        # A normal clone keeps the origin fetch refspec that a --bare clone leaves out.
+        if git clone --quiet --no-checkout "git@github.com:$repo_spec.git" "$clone_tmp" \
+            && mv -T -- "$clone_tmp" "$destination" && mv -- "$destination/.git" "$destination/.bare" \
+            && printf 'gitdir: ./.bare\n' > "$destination/.git" && git -C "$destination" config --bool core.bare true \
+            && rm -f -- "$destination/.bare/index"; then
+            log "Cloned $repo_spec to $destination"
+            branch="$(git -C "$destination" symbolic-ref --short HEAD)" || return 1
+            git -C "$destination" rev-parse -q --verify "refs/heads/$branch" >/dev/null || return 0
+            git -C "$destination" worktree add --quiet "$destination/$branch" "$branch" || return 1
+            if [[ -f "$destination/$branch/.gitmodules" ]]; then
+                git -C "$destination/$branch" submodule update --quiet --init --recursive || return 1
+            fi
+            return 0
+        fi
+    elif [[ -d "$destination" ]]; then
         # Keep the synced files: take only .git from the clone and reset the index to HEAD.
         if git clone --quiet --no-checkout "git@github.com:$repo_spec.git" "$clone_tmp" \
             && mv -- "$clone_tmp/.git" "$destination/.git" && rmdir -- "$clone_tmp" \
@@ -278,10 +291,10 @@ clone_repo() {
             log "Adopted $destination as a checkout of $repo_spec"
             return 0
         fi
-    elif "${clone_args[@]}" "git@github.com:$repo_spec.git" "$clone_tmp" \
+    elif git clone --quiet "git@github.com:$repo_spec.git" "$clone_tmp" \
         && mv -T -- "$clone_tmp" "$destination"; then
         log "Cloned $repo_spec to $destination"
-        if ((bare == 0)) && [[ -f "$destination/.gitmodules" ]]; then
+        if [[ -f "$destination/.gitmodules" ]]; then
             git -C "$destination" submodule update --quiet --init --recursive || return 1
         fi
         return 0

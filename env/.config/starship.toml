@@ -73,12 +73,12 @@ $crystal\
 $custom\
 $sudo\
 $cmd_duration\
+$status\
 $shell\
 $line_break\
 $jobs\
 $battery\
 $time\
-$status\
 $os\
 $container\
 $character"""
@@ -87,17 +87,17 @@ command_timeout = 1000
 ## FIRST LINE/ROW: Info & Status
 # First param ─┌
 [username]
-format = " [╭─$user]($style)@"
+format = " [╭─$user]($style)"
 style_user = "bold red"
 style_root = "bold red"
 show_always = true
 
-# Second param
+# Second param, only over SSH
 [hostname]
-format = "[$hostname]($style) in "
+format = "@[$hostname]($style)"
 style = "bold dimmed red"
 trim_at = "-"
-ssh_only = false
+ssh_only = true
 disabled = false
 
 # Third param
@@ -111,7 +111,7 @@ common=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
 gitdir=$(cd "$(git rev-parse --git-dir 2>/dev/null)" 2>/dev/null && pwd)
 if [ -n "$common" ] && [ "$common" != "$gitdir" ]; then
   case "$common" in
-    */.git) repo=$(basename "$(dirname "$common")") ;;
+    */.git|*/.bare) repo=$(basename "$(dirname "$common")") ;;
     *)      repo=$(basename "$common") ;;
   esac
   toplevel=$(git rev-parse --show-toplevel)
@@ -132,7 +132,7 @@ fi
 '''
 when = "true"
 style = "purple"
-format = "[$output]($style) "
+format = " in [$output]($style) "
 
 [git_branch]
 disabled = true
@@ -159,8 +159,14 @@ behind = "⇣${count}"
 
 # Last param in the first line/row
 [cmd_duration]
-min_time = 100
+min_time = 2000
 format = "took [$duration]($style) "
+disabled = false
+
+# Exit code of a failed command
+[status]
+format = "[✗ $status]($style) "
+style = "bold red"
 disabled = false
 
 ## SECOND LINE/ROW: Prompt

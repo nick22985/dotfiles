@@ -90,14 +90,15 @@ skipped() {
 }
 
 # Set repositories to those under ~/projects. Normal checkouts have a .git directory; bare clones
-# (sync-repos --bare) keep HEAD, objects and refs at their root.
+# (sync-repos --bare) keep their internals in .bare, or HEAD, objects and refs at their root in the
+# older flat layout.
 find_repositories() {
     local git_dir
     repositories=()
     while IFS= read -r -d '' git_dir; do
         repositories+=("$(dirname "$git_dir")")
     done < <(find "$projects_dir" \( "${prune[@]}" \) -prune -o \
-        \( -name .git -type d -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
+        \( -name .git -type d -print0 -prune \) -o \( -name .bare -type d -execdir test -f .git \; -print0 -prune \) -o \( -name objects -type d -execdir test -f HEAD -a -d refs \; -print0 -prune \))
 }
 
 # Add ~/dotfiles to repositories. Submodules come before the superproject: its branch only moves

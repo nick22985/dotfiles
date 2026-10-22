@@ -13,7 +13,7 @@ usage() {
     echo "  -d backup_dir    Optional: directory to store backups (default: current directory)"
     echo "  -e exclude_repos Optional: comma-separated list of repos to exclude"
     echo "  -j jobs          Optional: number of parallel jobs (default: 1)"
-    echo "  --bare, -b       Optional: clone each repo as a flat bare repo with the default branch"
+    echo "  --bare, -b       Optional: clone each repo as a bare repo in .bare with the default branch"
     echo "                   checked out as a worktree subdir. Without this, repos are normal clones."
     exit 1
 }
@@ -76,12 +76,17 @@ resolve_default_branch() {
     echo "$b"
 }
 
-# Make a directory a proper bare repo (idempotent).
+# Make a .bare directory a proper bare repo (idempotent).
 correct_bare_repo() {
     local d="$1"
-    git -C "$d" config core.bare true
-    git -C "$d" config --unset core.worktree 2>/dev/null || true
+    git --git-dir="$d" config core.bare true
+    git --git-dir="$d" config --unset core.worktree 2>/dev/null || true
     rm -f "$d/index"
+}
+
+is_dotbare() {
+    local d="$1"
+    [ -d "$d/.bare" ] && [ -f "$d/.git" ]
 }
 
 is_flat_bare() {
@@ -174,33 +179,25 @@ clone_or_update_normal() {
     fi
 }
 
-# ─── --bare mode: flat bare repo with worktrees as siblings ───────────────
-migrate_dotbare_to_flat() {
-    local container="$1"
-    [ -d "$container/.bare" ] || return 0
-    find "$container/.bare" -mindepth 1 -maxdepth 1 -exec mv {} "$container/" \; 2>/dev/null || true
-    rmdir "$container/.bare" 2>/dev/null || true
-    local wt_dir
-    for wt_dir in "$container"/*/; do
-        wt_dir="${wt_dir%/}"
-        [ -f "$wt_dir/.git" ] || continue
-        if grep -q "/\.bare/worktrees/" "$wt_dir/.git" 2>/dev/null; then
-            sed -i "s|/\.bare/worktrees/|/worktrees/|g" "$wt_dir/.git"
-        fi
-    done
-}
-
+# ─── --bare mode: internals in .bare, worktrees as siblings ───────────────
 clone_or_update_bare() {
     local repo="$1" name="$2" url="$3"
     local container="$BACKUP_DIR/${name}"
 
-    if [ -d "$container/.bare" ]; then
-        echo "Migrating $name from .bare/ layout to flat"
-        migrate_dotbare_to_flat "$container"
+    if is_flat_bare "$container" || { [ -d "$container/.git" ] && [ ! -L "$container/.git" ]; }; then
+        # Existing checkouts convert on their current branch and keep every file, including local changes.
+        normalize_remote_to_ssh "$container"
+        if "$CONVERT_TO_BARE" "$container"; then
+            echo "converted $name $url" >> "$STATS_FILE"
+        else
+            echo "Conversion failed for $name"
+            echo "failed $name $url" >> "$STATS_FILE"
+        fi
+        return
     fi
 
-    if is_flat_bare "$container"; then
-        correct_bare_repo "$container"
+    if is_dotbare "$container"; then
+        correct_bare_repo "$container/.bare"
         normalize_remote_to_ssh "$container"
         git -C "$container" worktree prune 2>/dev/null || true
 
@@ -250,68 +247,35 @@ clone_or_update_bare() {
         return
     fi
 
-    local is_fresh=0
-    if [ ! -e "$container" ]; then
-        echo "Cloning: $repo"
-        if ! git clone --quiet "git@github.com:${repo}.git" "$container"; then
-            echo "Failed to clone: $repo"
-            echo "failed $name $url" >> "$STATS_FILE"
-            return
-        fi
-        is_fresh=1
-    fi
-
-    if [ -d "$container/.git" ]; then
-        # An existing checkout converts on its current branch and keeps every file, including local changes.
-        if [ "$is_fresh" -ne 1 ]; then
-            normalize_remote_to_ssh "$container"
-            if "$CONVERT_TO_BARE" "$container"; then
-                echo "converted $name $url" >> "$STATS_FILE"
-            else
-                echo "Conversion failed for $name"
-                echo "failed $name $url" >> "$STATS_FILE"
-            fi
-            return
-        fi
-
-        normalize_remote_to_ssh "$container"
-
-        local default_branch
-        default_branch=$(git -C "$container" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-        if [ -z "$default_branch" ]; then
-            default_branch=$(git -C "$container" symbolic-ref --short HEAD 2>/dev/null || echo "main")
-        fi
-        local work_dir="$container/$default_branch"
-
-        local stage="$BACKUP_DIR/.${name}_stage_$$"
-        rm -rf "$stage"
-        mkdir -p "$stage"
-        find "$container" -mindepth 1 -maxdepth 1 ! -name ".git" -exec mv {} "$stage/" \; 2>/dev/null || true
-
-        find "$container/.git" -mindepth 1 -maxdepth 1 -exec mv {} "$container/" \; 2>/dev/null || true
-        rmdir "$container/.git" 2>/dev/null || true
-        correct_bare_repo "$container"
-
-        if ! git -C "$container" worktree add "$work_dir" "$default_branch" >/dev/null 2>&1; then
-            echo "Conversion failed for $name (worktree add)"
-            echo "failed $name $url" >> "$STATS_FILE"
-            return
-        fi
-
-        find "$stage" -mindepth 1 -maxdepth 1 -exec mv -n -t "$work_dir/" {} + 2>/dev/null || true
-        rm -rf "$stage"
-
-        if [ "$is_fresh" -eq 1 ]; then
-            echo "cloned $name $url" >> "$STATS_FILE"
-        else
-            echo "Converted $name to flat bare + worktree on $default_branch"
-            echo "converted $name $url" >> "$STATS_FILE"
-        fi
+    if [ -e "$container" ]; then
+        echo "Failed (unrecognized state): $name"
+        echo "failed $name $url" >> "$STATS_FILE"
         return
     fi
 
-    echo "Failed (unrecognized state): $name"
-    echo "failed $name $url" >> "$STATS_FILE"
+    echo "Cloning: $repo"
+    # A normal clone keeps the origin fetch refspec that a --bare clone leaves out.
+    if ! git clone --quiet --no-checkout "git@github.com:${repo}.git" "$container"; then
+        echo "Failed to clone: $repo"
+        echo "failed $name $url" >> "$STATS_FILE"
+        return
+    fi
+    normalize_remote_to_ssh "$container"
+    local default_branch
+    default_branch=$(git -C "$container" symbolic-ref --short HEAD 2>/dev/null || echo "main")
+    mv "$container/.git" "$container/.bare"
+    printf 'gitdir: ./.bare\n' > "$container/.git"
+    correct_bare_repo "$container/.bare"
+    if ! git -C "$container" rev-parse -q --verify "refs/heads/$default_branch" >/dev/null; then
+        echo "cloned $name $url" >> "$STATS_FILE"
+        return
+    fi
+    if git -C "$container" worktree add "$container/$default_branch" "$default_branch" >/dev/null 2>&1; then
+        echo "cloned $name $url" >> "$STATS_FILE"
+    else
+        echo "Failed to add the $default_branch worktree for $name"
+        echo "failed $name $url" >> "$STATS_FILE"
+    fi
 }
 
 clone_or_update_repo() {
@@ -371,7 +335,7 @@ export -f normalize_remote_to_ssh
 export -f resolve_default_branch
 export -f correct_bare_repo
 export -f is_flat_bare
-export -f migrate_dotbare_to_flat
+export -f is_dotbare
 export BACKUP_DIR
 export STATS_FILE
 export CONVERT_TO_BARE

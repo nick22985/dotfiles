@@ -1,25 +1,5 @@
-:: Replace ttf-font-awesome with extra/woff2-font-awesome? [Y/n] y
-
-Lutris (install mango hud setup env)
- 1. [✓] org.freedesktop.Platform.VulkanLayer.MangoHud 23.08  i  flathub 10.6 MB / 10.9 MB
-Lutris (installe gamescope)
- 1. [✓] org.freedesktop.Platform.VulkanLayer.gamescope             23.08              i              flathub            42.5 MB / 43.1 MB
-
-
-
-
-clamav
-apparmor
-
-
-Steam Discord Rich Presence (rpc-bridge, works with the 1.4.1.2 bridge.exe)
- - rpc-bridge-bin 1.4.1.3 quits on Proton (wine 11.0 has no AF_UNIX and it now insists on Staging); 1.4.1.2 falls back to syscalls.
-   1.4.1.2 is hand-copied over /opt/rpc-bridge/bridge.exe for now, so a package update undoes it. Pin it in the dotfiles.
- - Steam started from a terminal (tmux) lacks the variables; start it from walker or after login
- - Flatpak Discord cannot see host processes, so game-presence (.local/bin, user service) starts a stand-in process named after the game
-   inside Discord's sandbox (flatpak run --parent-share-pids). Works for Overwatch (Registered Games shows it); check it counts for the badges
-   Games Discord lists without executables (MECCHA CHAMELEON) get a stand-in named after the game from its Steam app id; Discord detects that by name
- - ultrawide notification popups sit at 75% of the width (notification-position.sh); check they move back on the other monitors
+Steam Discord Rich Presence (checks left)
+ - game-presence stand-ins: check they count for the badges
  - launch a Proton game with Discord open and check it shows in Discord
  - log: tail ~/.local/share/Steam/steamapps/compatdata/*/pfx/drive_c/windows/logs/bridge.log
  - turn off per game: PROTON_REMOTE_DEBUG_CMD= %command%

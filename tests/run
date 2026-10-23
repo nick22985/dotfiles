@@ -153,6 +153,32 @@ grep -q "$bare_repo stray-entry README.md" <<< "$bare_audit" \
     || fail "audit did not report a stray file at a .bare root"
 grep -q "stray-entry master" <<< "$bare_audit" \
     && fail "audit reported a worktree as a stray entry"
+grep -q "detached-head" <<< "$bare_audit" \
+    && fail "audit reported a worktree on its branch as detached"
+
+git -C "$bare_repo/master" checkout -q --detach
+test_git -C "$bare_repo/master" commit -q --no-verify --allow-empty -m detached
+set +e
+bare_audit="$(HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check 2>&1)"
+set -e
+grep -q "$bare_repo detached-head master" <<< "$bare_audit" \
+    || fail "audit did not report a detached .bare worktree"
+detached_head="$(git -C "$bare_repo/master" rev-parse HEAD)"
+"$repo_dir/env/.local/bin/git-reattach" "$bare_repo/master" >/dev/null \
+    || fail "git-reattach failed on a detached .bare worktree"
+[[ "$(git -C "$bare_repo/master" symbolic-ref -q HEAD)" == refs/heads/master ]] \
+    || fail "git-reattach did not put the worktree back on its branch"
+[[ "$(git -C "$bare_repo/master" rev-parse master)" == "$detached_head" ]] \
+    || fail "git-reattach dropped the commit made while detached"
+
+git -C "$bare_repo/master" checkout -q --detach HEAD~1
+"$repo_dir/env/.local/bin/git-reattach" --auto "$bare_repo/master" >/dev/null \
+    || fail "git-reattach --auto failed when it had nothing to do"
+git -C "$bare_repo/master" symbolic-ref -q HEAD >/dev/null \
+    && fail "git-reattach --auto switched to a branch ahead of HEAD"
+[[ "$(git -C "$bare_repo/master" rev-parse master)" == "$detached_head" ]] \
+    || fail "git-reattach --auto moved the branch"
 rm -rf -- "$audit_home/projects"
 
 "$repo_dir/run" doctor >/dev/null

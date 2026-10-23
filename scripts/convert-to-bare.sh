@@ -76,18 +76,22 @@ fi
 [[ ! -e "$dir/.git" && -f "$dir/HEAD" && -d "$dir/objects" && -d "$dir/refs" ]] \
     || die "$dir is neither a normal checkout nor a flat bare repo"
 
+# Only git's own entries move into .bare; anything else at the root (a nested repo, notes) is the
+# user's and stops the conversion rather than being buried in .bare.
+internals='^(HEAD|config|description|hooks|info|objects|refs|packed-refs|logs|worktrees|modules|index|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|AUTO_MERGE|shallow|lfs|branches|rr-cache|MERGE_RR|peer-sync|\.remotes-backup)$'
+
 # Worktrees stay put; every other non-dot entry at the root is a git internal.
 worktrees=()
 tops=()
 while IFS= read -r path; do
     [[ "$path" == "$dir/"* ]] || continue
+    top="$(cut -d/ -f1 <<< "${path#"$dir/"}")"
+    ! grep -qE "$internals" <<< "$top" \
+        || die "worktree $path is inside git's own $top directory, mixed with git's files; separate its checkout from them by hand before converting"
     worktrees+=("$path")
-    tops+=(! -name "$(cut -d/ -f1 <<< "${path#"$dir/"}")")
+    tops+=(! -name "$top")
 done < <(git -C "$dir" worktree list --porcelain | sed -n 's/^worktree //p')
 
-# Only git's own entries move into .bare; anything else at the root (a nested repo, notes) is the
-# user's and stops the conversion rather than being buried in .bare.
-internals='^(HEAD|config|description|hooks|info|objects|refs|packed-refs|logs|worktrees|modules|index|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|AUTO_MERGE|shallow|lfs|branches|rr-cache|MERGE_RR|peer-sync|\.remotes-backup)$'
 unknown="$(find "$dir" -mindepth 1 -maxdepth 1 ! -name '.*' "${tops[@]}" -printf '%f\n' | grep -vE "$internals" || true)"
 [[ -z "$unknown" ]] || die "$dir has entries that aren't git internals or worktrees, so it wasn't converted: $(tr '\n' ' ' <<< "$unknown")"
 

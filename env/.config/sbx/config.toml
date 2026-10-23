@@ -17,6 +17,7 @@ report-usage = true
 remote-control = false
 
 [agents]
+build-slots = 2
 accepts-work = true
 priority = 1
 cpu-pressure = 80

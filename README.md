@@ -104,6 +104,7 @@ The installer and auditor consume the same manifests. Each step of a run is a mo
 - `modules/<name>/groups.<platform>.list`: required user groups
 - `modules/<name>/files.<platform>.list`: privileged files, modes, and sources relative to the module (`system/etc/...`)
 - `modules/flatpak/apps.list`: user-level Flatpak IDs
+- `modules/flatpak/overrides.list`: `flatpak override` flags per installed app (`<id> <flags...>`)
 - `modules/defaults/defaults.list`: user desktop properties applied through xdg-settings
 
 Each profile is a directory:
@@ -224,7 +225,15 @@ read-only. It checks selected
 packages and package groups, user Flatpaks, exact managed-file links and modes,
 privileged file contents and modes, enabled and active services, required group
 membership, unmanaged config or executable candidates, and `.bare`-layout repositories
-under `~/projects` that git won't treat as bare or that have stray files at the root.
+under `~/projects` that git won't treat as bare, that have stray files at the root, or whose
+worktrees are left on a detached HEAD outside a rebase or bisect.
+
+`git reattach [<worktree>]` puts a detached HEAD back on its branch: the one its `.bare` folder
+names, else the branch the reflog shows it left, else the only local or remote branch at HEAD.
+Commits made while detached move that branch forward; a diverged branch is left alone. The global
+post-checkout hook and nvim's worktree switch run `git reattach --auto`, which only attaches a
+branch already at HEAD (or only on a remote at HEAD), so `git worktree add <dir>/feat origin/feat`
+comes out on `feat`. `:GitReattach` in nvim runs the full version.
 
 `--check` exits 0 when selected state matches, 1 for visible drift, and 2 when a
 required check cannot run. `.audit-install-ignore` supports scoped exceptions;

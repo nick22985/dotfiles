@@ -59,4 +59,15 @@ if flatpak info --user net.lutris.Lutris >/dev/null 2>&1; then
     done
 fi
 
+while read -r app override_flags; do
+    flatpak info --user "$app" >/dev/null 2>&1 || continue
+    read -r -a override_flags <<< "$override_flags"
+    if [[ $DRY_RUN == "1" ]]; then
+        log_info "Would override $app: ${override_flags[*]}"
+    elif ! flatpak override --user "${override_flags[@]}" "$app"; then
+        log_error "Failed to override $app: ${override_flags[*]}"
+        exit 1
+    fi
+done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$DOTFILES_DIR/modules/flatpak/overrides.list")
+
 log_success "Flatpak setup complete"

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Put a worktree with a detached HEAD back on its branch. --auto (the post-checkout hook, nvim) only
+# attaches a branch already at HEAD and is quiet when it does nothing.
+#
+#   git reattach [--auto] [<worktree>]
+set -euo pipefail
+
+die() { echo "git-reattach: $*" >&2; exit 1; }
+
+auto=0
+if [[ "${1:-}" == --auto ]]; then
+    auto=1
+    shift
+fi
+[[ $# -le 1 ]] || die "usage: git reattach [--auto] [<worktree>]"
+
+quit() {
+    ((auto)) && exit 0
+    die "$@"
+}
+
+cd -- "${1:-.}"
+work="$(git rev-parse --show-toplevel)" || exit 1
+cd -- "$work"
+
+if branch="$(git symbolic-ref -q --short HEAD)"; then
+    ((auto)) || echo "$work is already on $branch"
+    exit 0
+fi
+for state in rebase-merge rebase-apply BISECT_LOG MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    [[ ! -e "$(git rev-parse --git-path "$state")" ]] || quit "$work has a $state in progress; finish or abort it first"
+done
+head="$(git rev-parse -q --verify 'HEAD^{commit}')" || quit "$work has no commits"
+
+checked_out() { git worktree list --porcelain | grep -Fxq -- "branch refs/heads/$1"; }
+
+remote_branch() {
+    git rev-parse -q --verify "refs/remotes/origin/$1^{commit}" >/dev/null && { echo "origin/$1"; return; }
+    git for-each-ref --format='%(refname:short)' "refs/remotes/*/$1" | head -n1
+}
+
+pick() {
+    local common name
+    local -a names
+    common="$(git rev-parse --path-format=absolute --git-common-dir)"
+    if [[ "${common##*/}" == .bare && "$work" == "${common%/.bare}/"* ]]; then
+        name="${work#"${common%/.bare}/"}"
+        if git check-ref-format --branch "$name" >/dev/null 2>&1; then
+            echo "$name"
+            return
+        fi
+    fi
+    ((auto)) && return 1
+    while IFS= read -r name; do
+        if git show-ref -q --verify "refs/heads/$name"; then
+            echo "$name"
+            return
+        fi
+    done < <(git log -g -n 100 --format=%gs HEAD 2>/dev/null | sed -n 's/^checkout: moving from \(.*\) to [^ ]*$/\1/p')
+    names=()
+    while IFS= read -r name; do
+        checked_out "$name" || names+=("$name")
+    done < <(git for-each-ref --points-at HEAD --format='%(refname:short)' refs/heads/)
+    if ((${#names[@]} == 1)); then
+        echo "${names[0]}"
+        return
+    fi
+    mapfile -t names < <(git for-each-ref --points-at HEAD --format='%(if)%(symref)%(then)%(else)%(refname:lstrip=3)%(end)' refs/remotes/ | sed '/^$/d' | sort -u)
+    if ((${#names[@]} == 1)); then
+        echo "${names[0]}"
+        return
+    fi
+    return 1
+}
+
+name="$(pick)" || quit "no branch for $work's detached HEAD; attach one yourself with git switch <branch> or git switch -c <new-branch>"
+! checked_out "$name" || quit "$name is checked out in another worktree; leaving $work detached"
+upstream="$(remote_branch "$name")"
+tip="$(git rev-parse -q --verify "refs/heads/$name^{commit}")" || tip=""
+
+if [[ -z "$tip" ]]; then
+    if ((auto)) && [[ -z "$upstream" || "$(git rev-parse "$upstream^{commit}")" != "$head" ]]; then
+        exit 0
+    fi
+    # Otherwise a folder named FEAT gets a second branch beside feat.
+    other="$({
+        git for-each-ref --format='%(refname:lstrip=2) %(refname:short)' refs/heads/
+        git for-each-ref --format='%(refname:lstrip=3) %(refname:short)' refs/remotes/
+    } | awk -v name="$name" '$1 != name && tolower($1) == tolower(name) { print $2; exit }')"
+    [[ -z "$other" ]] || quit "no branch $name, but there is $other; switch to it with git switch, or rename the worktree folder to match its case"
+    git branch --quiet --no-track "$name" "$head"
+    how="created at HEAD"
+elif [[ "$tip" == "$head" ]]; then
+    how="already at HEAD"
+elif ((auto)); then
+    exit 0
+elif git merge-base --is-ancestor "$tip" "$head"; then
+    git update-ref -m "git-reattach: commits made while detached" "refs/heads/$name" "$head" "$tip"
+    how="moved forward $(git rev-list --count "$tip..$head") commit(s) made while detached"
+elif git merge-base --is-ancestor "$head" "$tip"; then
+    git switch --quiet "$name"
+    how="switched to, $(git rev-list --count "$head..$tip") commit(s) ahead of the detached HEAD"
+else
+    die "HEAD and $name have diverged; keep HEAD on a new branch with git switch -c <new-branch>, or rebase it onto $name"
+fi
+
+[[ "$(git symbolic-ref -q HEAD)" == "refs/heads/$name" ]] || git symbolic-ref -m "git-reattach: attached to $name" HEAD "refs/heads/$name"
+if [[ -n "$upstream" ]] && ! git rev-parse -q --verify "$name@{upstream}" >/dev/null 2>&1; then
+    git branch --quiet --set-upstream-to="$upstream" "$name"
+fi
+echo "git-reattach: $work is on $name ($how)"

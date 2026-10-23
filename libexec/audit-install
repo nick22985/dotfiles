@@ -477,7 +477,7 @@ audit_user_and_system_files() {
 # worktrees are usually what was left behind when that happened. Dot entries are left out
 # because tools keep their own state there (.sbx, .claude).
 check_bare_repositories() {
-    local projects_root="${REPOS_PROJECTS_DIR:-$HOME/projects}" internals root entry
+    local projects_root="${REPOS_PROJECTS_DIR:-$HOME/projects}" internals root entry state
     local -A worktree_tops
     [[ -d "$projects_root" ]] || return 0
     while IFS= read -r -d '' internals; do
@@ -497,6 +497,13 @@ check_bare_repositories() {
             entry="${entry##*/}"
             [[ -n "${worktree_tops[$entry]:-}" ]] || printf '%s stray-entry %s\n' "$root" "$entry"
         done < <(find "$root" -mindepth 1 -maxdepth 1 ! -name '.*' -print0)
+        while IFS= read -r entry; do
+            [[ -d "$entry" ]] || continue
+            for state in rebase-merge rebase-apply BISECT_LOG; do
+                [[ ! -e "$(git -C "$entry" rev-parse --path-format=absolute --git-path "$state" 2>/dev/null)" ]] || continue 2
+            done
+            printf '%s detached-head %s (git reattach)\n' "$root" "${entry#"$root/"}"
+        done < <(git --git-dir="$internals" worktree list --porcelain 2>/dev/null | awk '/^worktree / { worktree = substr($0, 10) } /^detached$/ { print worktree }')
     done < <(find "$projects_root" -maxdepth 5 \( -name node_modules -o -name target -o -name .git -o -name .stversions \) -prune -o \
         \( -name .bare -type d -execdir test -f .git \; -print0 -prune \) 2>/dev/null | sort -z)
 }

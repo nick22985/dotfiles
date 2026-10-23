@@ -1,0 +1,4 @@
+# The launchers keep the Microsoft login in the Secret Service keyring; without D-Bus access to it the
+# token is never saved and every launch asks to log in again.
+com.mojang.Minecraft --talk-name=org.freedesktop.secrets
+net.labymod.LabyMod --talk-name=org.freedesktop.secrets

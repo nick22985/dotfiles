@@ -2,6 +2,10 @@
 
 # Only for branch checkouts (flag = 1)
 if [ "$3" = "1" ]; then
+  # No previous HEAD: a new worktree or clone
+  if [[ "$1" =~ ^0+$ ]] && command -v git-reattach >/dev/null; then
+    git-reattach --auto
+  fi
   branch=$(git branch --show-current)
   if [ -n "$branch" ]; then
     if ! git rev-parse --abbrev-ref @{u} >/dev/null 2>&1; then

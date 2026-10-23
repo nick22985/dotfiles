@@ -494,11 +494,22 @@ else
     cache=$(mktemp)
     trap 'rm -f "$cache" "$cache.done" "$cache.claude"' EXIT
     rank_cmd="$(printf '%q' "$(readlink -f "$0")") --rank $(printf '%q' "$cache") {q}"
+    header='ctrl-x: kill session · alt-enter: open typed user@host[:dir], ssh <host>[:dir] or path'
+    # The current session is left out of the list so the previous one stays on top; name it here.
+    if [[ -n $TMUX ]]; then
+        IFS=$'\t' read -r current_name current_path current_host current_dir < <(tmux display-message -p "#{session_name}"$'\t'"#{session_path}"$'\t'"#{TMUX_SSH_HOST}"$'\t'"#{TMUX_SSH_DIR}")
+        if [[ -n $current_host ]]; then
+            current_path="ssh/$current_host${current_dir:+:$current_dir}"
+        elif [[ $current_path == "$HOME" || $current_path == "$HOME"/* ]]; then
+            current_path="~${current_path#"$HOME"}"
+        fi
+        header=$'\e[33m▶\e[0m '"$current_name"$' \e[2m'"$current_path"$' (current)\e[0m\n'"$header"
+    fi
     output=$({ list_sessions "$cache.claude"; list_ssh_hosts; list_dirs; } |
         { tee -p "$cache"; touch "$cache.done"; } |
         fzf --ansi --no-sort --delimiter=$'\t' --with-nth=3 --color=gutter:-1 \
             --print-query --expect=alt-enter \
-            --header 'ctrl-x: kill session · alt-enter: open typed user@host[:dir], ssh <host>[:dir] or path' \
+            --header "$header" \
             --bind "change:reload($rank_cmd)" \
             --bind "ctrl-x:execute-silent([ {1} = session ] && tmux kill-session -t ={2})+reload($rank_cmd)" \
             --bind "load:reload($rank_cmd)+unbind(load)")

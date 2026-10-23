@@ -20,7 +20,10 @@ caches = [
     # the wrapper re-downloads Gradle, and paperweight decompiles each Paper
     # target again (about 8 minutes) from downloads that turn a network blip
     # into a red batch.
-    "@sbx-gradle-rust:.gradle",
+    # `*` gives each running container a copy of its own: Gradle cannot
+    # share a home between builds in two containers, and the second fails on
+    # "Timeout waiting to lock journal cache" after a minute.
+    "@sbx-gradle-rust*:.gradle",
 ]
 
 # This flavor's containers get the node's credentials for the fleet's shared

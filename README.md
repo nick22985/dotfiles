@@ -51,9 +51,10 @@ Profiles are additive. `core` is always included.
 - `gpu-amd`, `gpu-intel`, `gpu-nvidia`: graphics drivers for the machine's GPUs (NVIDIA also enables its suspend handling)
 - `laptop`: power profiles, thermal management, and fingerprint sudo
 - `streamdeck`: OpenDeck for a Stream Deck (Flatpak; pulls in `desktop`)
+- `rgb`: OpenRGB, which turns the case lighting off while hypridle has the display dimmed (see [modules/openrgb](modules/openrgb/README.md))
 - `kube`: Ubuntu Kubernetes nodes; mise with pinned kubectl, helm, neovim, starship and fd, and on k3s servers the admin kubeconfig copied to `~/.kube/config`
 - `full`: all general workstation profiles, excluding `ssh-server`, the GPU
-  profiles, `laptop`, and `streamdeck`
+  profiles, `laptop`, `streamdeck`, and `rgb`
 
 Desktop selections are `hyprland`, `plasma`, and `both`. Hyprland is the default
 for an explicitly selected desktop profile.
@@ -222,7 +223,8 @@ collisions, and clones through a temporary directory before the final rename.
 read-only. It checks selected
 packages and package groups, user Flatpaks, exact managed-file links and modes,
 privileged file contents and modes, enabled and active services, required group
-membership, and unmanaged config or executable candidates.
+membership, unmanaged config or executable candidates, and `.bare`-layout repositories
+under `~/projects` that git won't treat as bare or that have stray files at the root.
 
 `--check` exits 0 when selected state matches, 1 for visible drift, and 2 when a
 required check cannot run. `.audit-install-ignore` supports scoped exceptions;

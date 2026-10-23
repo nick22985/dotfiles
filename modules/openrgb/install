@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -u -o pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export DOTFILES_DIR="${DOTFILES_DIR:-$script_dir}"
+source "$DOTFILES_DIR/lib/utils.sh"
+parse_args "$@"
+set_context "OpenRGB"
+
+install_module_packages openrgb || exit 1
+apply_module_system_files openrgb || exit 1
+# modules-load.d only applies at boot; load it now so the server finds the RAM on its first start.
+if [[ "$DRY_RUN" == "1" ]]; then
+    log_info "Would load the i2c-dev kernel module"
+elif ! sudo modprobe i2c-dev; then
+    log_error "Failed to load the i2c-dev kernel module"
+    exit 1
+fi
+apply_module_services openrgb || exit 1
+# rgb-lights setup saves on as rainbow and off as black; a profile saved in the GUI is left alone.
+if [[ ! -f "$HOME/.config/OpenRGB/profiles/on.json" || ! -f "$HOME/.config/OpenRGB/profiles/off.json" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would save the OpenRGB on and off profiles"
+    elif ! "$DOTFILES_DIR/env/.local/bin/rgb-lights" setup; then
+        log_warn "Failed to save the OpenRGB on and off profiles; run 'rgb-lights setup' once the server finds the devices"
+    fi
+fi
+log_success "OpenRGB is running"

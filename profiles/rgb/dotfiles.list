@@ -1,0 +1,2 @@
+# The OpenRGB server; hypridle turns the lighting off through it (rgb-lights).
+.config/systemd/user/openrgb.service

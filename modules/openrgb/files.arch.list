@@ -1,0 +1,2 @@
+# mode source target
+0644 system/etc/modules-load.d/i2c-dev.conf /etc/modules-load.d/i2c-dev.conf

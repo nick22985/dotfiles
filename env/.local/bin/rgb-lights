@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# rgb-lights on|off: load that OpenRGB profile through the running server; hypridle calls this when it dims the display.
+# rgb-lights setup: save the profiles, on as each device's rainbow mode and off as every device black.
+# Machines without the rgb profile have no server, so on and off do nothing there.
+
+set -u
+
+case "${1:-}" in
+    on|off)
+        systemctl --user -q is-active openrgb.service || exit 0
+        # With the server running, the CLI connects to it instead of opening the devices itself.
+        exec openrgb --profile "$1"
+        ;;
+    setup)
+        exec python3 - <<'EOF'
+import colorsys, re, subprocess, sys, time
+
+RAINBOW = ["Rainbow Wave", "Spectrum Cycle", "Rainbow", "Color Wave", "Color Shift", "Rainbow Circle"]
+
+def devices():
+    # The server may still be detecting hardware just after it starts.
+    for _ in range(15):
+        out = subprocess.run(["openrgb", "--list-detailed"], capture_output=True, text=True).stdout
+        found = []
+        for line in out.splitlines():
+            if m := re.match(r"^(\d+): (.*)", line):
+                found.append({"index": m[1], "name": m[2], "modes": [], "leds": 0})
+            elif found and (m := re.match(r"\s*(Modes|LEDs):(.*)", line)):
+                # Modes: [Direct] Static 'Rainbow Wave' (the active mode is bracketed, names with spaces quoted)
+                names = [a or b for a, b in re.findall(r"'([^']*)'|(\S+)", m[2].replace("[", "").replace("]", ""))]
+                if m[1] == "Modes":
+                    found[-1]["modes"] = names
+                else:
+                    found[-1]["leds"] = len(names)
+        if found:
+            return found
+        time.sleep(2)
+    sys.exit(f"rgb-lights: no devices in 'openrgb --list-detailed' output:\n{out}")
+
+def black(device):
+    modes = device["modes"]
+    # Static black before Off: the Sapphire GPU ignores its Off mode.
+    for mode in ("Static", "Direct"):
+        if mode in modes:
+            return ["-m", mode, "-c", "000000"]
+    if "Off" in modes:
+        return ["-m", "Off"]
+    return None
+
+def rainbow(device):
+    modes, leds = device["modes"], device["leds"]
+    # Vendors differ in case ("Rainbow wave" on MSI); OpenRGB matches mode names case-insensitively too.
+    mode = next((m for w in RAINBOW for m in modes if m.lower() == w.lower()), None)
+    mode = mode or next((m for m in modes if "rainbow" in m.lower() or "spectrum" in m.lower()), None)
+    if mode:
+        return ["-m", mode]
+    # Without a rainbow effect (Commander Core, K100, MX Master), paint a static rainbow across the LEDs in Direct mode.
+    if "Direct" in modes and leds:
+        hues = (colorsys.hsv_to_rgb(i / leds, 1, 1) for i in range(leds))
+        return ["-m", "Direct", "-c", ",".join("%02X%02X%02X" % tuple(round(c * 255) for c in rgb) for rgb in hues)]
+    return None
+
+found = devices()
+for profile, choose in (("off", black), ("on", rainbow)):
+    args = []
+    for device in found:
+        chosen = choose(device)
+        if chosen:
+            shown = " ".join(a if "," not in a else f"<rainbow over {device['leds']} LEDs>" for a in chosen)
+        else:
+            shown = "left as is, no suitable mode in " + ", ".join(device["modes"])
+        print(f"{profile}: {device['name']}: {shown}")
+        if chosen:
+            args += ["-d", device["index"], *chosen]
+    subprocess.run(["openrgb", *args, "--save-profile", profile], check=True, stdout=subprocess.DEVNULL)
+EOF
+        ;;
+    *)
+        echo "Usage: rgb-lights on|off|setup" >&2
+        exit 2
+        ;;
+esac

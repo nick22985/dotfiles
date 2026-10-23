@@ -24,7 +24,7 @@ orgs_file="$private_dir/orgs.txt"
 repos_file="$private_dir/repos.txt"
 base_file="$dotfiles_dir/modules/syncthing/projects.stignore"
 path="$HOME/projects"
-build_names=(dist build out bin .pnpm-store tmp temp .tmp)
+build_names=(dist build out bin tmp temp .tmp)
 
 [[ -f "$base_file" ]] || { echo "projects-stignore: missing $base_file" >&2; exit 1; }
 

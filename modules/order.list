@@ -37,6 +37,7 @@ apparmor
 laptop
 tailscale
 firmware
+openrgb
 nvidia
 snapshots
 mirrors

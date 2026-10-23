@@ -90,6 +90,71 @@ set -e
 unlink "$audit_home/.bashrc"
 ln -s "$repo_dir/env/.bashrc" "$audit_home/.bashrc"
 
+# Commits in throwaway repos: a fixed identity, and no host or sandbox hooks.
+test_git() {
+    GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com \
+        GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com git "$@"
+}
+
+convert_root="$test_dir/convert"
+mkdir -p "$convert_root"
+git init -q -b master "$convert_root/normal"
+printf 'one\n' > "$convert_root/normal/tracked"
+test_git -C "$convert_root/normal" add tracked
+test_git -C "$convert_root/normal" commit -q --no-verify -m one
+printf 'two\n' > "$convert_root/normal/tracked"
+test_git -C "$convert_root/normal" add tracked
+printf 'loose\n' > "$convert_root/normal/untracked"
+"$repo_dir/scripts/convert-to-bare.sh" "$convert_root/normal" >/dev/null 2>&1 \
+    || fail "convert-to-bare failed on a normal checkout"
+[[ "$(git -C "$convert_root/normal" rev-parse --is-bare-repository)" == true ]] \
+    || fail "a converted checkout is not bare at its root"
+[[ -f "$convert_root/normal/master/untracked" ]] \
+    || fail "convert-to-bare did not carry an untracked file into the worktree"
+[[ "$(git -C "$convert_root/normal/master" diff --cached --name-only)" == tracked ]] \
+    || fail "convert-to-bare lost a staged change"
+
+# Old conversions left .bare configs without a format version, and git then ignores core.bare.
+git init -q --bare -b master "$convert_root/flat"
+git --git-dir="$convert_root/flat" config --unset core.repositoryformatversion
+"$repo_dir/scripts/convert-to-bare.sh" "$convert_root/flat" >/dev/null 2>&1 \
+    || fail "convert-to-bare failed on a flat bare repo"
+[[ "$(git -C "$convert_root/flat" rev-parse --is-bare-repository)" == true ]] \
+    || fail "a converted flat repo without a format version is not bare"
+
+# A nested repo or loose file at a flat bare root is the user's, not a git internal to bury in .bare.
+git init -q --bare -b master "$convert_root/flat-nested"
+git init -q -b master "$convert_root/flat-nested/nested"
+if "$repo_dir/scripts/convert-to-bare.sh" "$convert_root/flat-nested" >/dev/null 2>&1; then
+    fail "convert-to-bare converted a flat bare repo with a nested repo at its root"
+fi
+[[ -d "$convert_root/flat-nested/nested/.git" && ! -e "$convert_root/flat-nested/.bare" ]] \
+    || fail "a refused conversion moved the nested repo or created .bare"
+
+bare_repo="$audit_home/projects/broken"
+mkdir -p "$audit_home/projects"
+git init -q -b master "$bare_repo"
+test_git -C "$bare_repo" commit -q --no-verify --allow-empty -m init
+"$repo_dir/scripts/convert-to-bare.sh" "$bare_repo" >/dev/null 2>&1
+HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check >/dev/null \
+    || fail "audit reported a healthy .bare repository"
+git --git-dir="$bare_repo/.bare" config --unset core.repositoryformatversion
+printf 'left behind\n' > "$bare_repo/README.md"
+set +e
+bare_audit="$(HOME="$audit_home" XDG_CONFIG_HOME="$audit_home/.config" \
+    "$repo_dir/run" audit --profile core --config --check 2>&1)"
+status=$?
+set -e
+[[ "$status" == 1 ]] || fail "audit of a broken .bare repository returned $status instead of 1"
+grep -q "$bare_repo no-repositoryformatversion" <<< "$bare_audit" \
+    || fail "audit did not report a .bare config without a format version"
+grep -q "$bare_repo stray-entry README.md" <<< "$bare_audit" \
+    || fail "audit did not report a stray file at a .bare root"
+grep -q "stray-entry master" <<< "$bare_audit" \
+    && fail "audit reported a worktree as a stray entry"
+rm -rf -- "$audit_home/projects"
+
 "$repo_dir/run" doctor >/dev/null
 
 set +e

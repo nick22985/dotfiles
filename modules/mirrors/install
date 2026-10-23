@@ -8,6 +8,18 @@ parse_args "$@"
 set_context "Mirrors"
 
 install_module_packages mirrors || exit 1
+reflector_conf=/etc/xdg/reflector/reflector.conf
+cmp -s "$DOTFILES_DIR/modules/mirrors/system$reflector_conf" "$reflector_conf"
+conf_changed=$?
 apply_module_system_files mirrors || exit 1
 apply_module_services mirrors || exit 1
+# The timer only runs weekly; a changed config rebuilds the mirror list now.
+if ((conf_changed != 0)); then
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Would refresh the mirror list with the new reflector options"
+    elif ! sudo systemctl start reflector.service; then
+        log_error "Failed to refresh the mirror list; see 'journalctl -u reflector'"
+        exit 1
+    fi
+fi
 log_success "The mirror list refreshes weekly"

@@ -15,6 +15,7 @@
 (?d)target
 (?d).gradle
 (?d).venv
+(?d).pnpm-store
 (?d)__pycache__
 (?d).next
 (?d).turbo

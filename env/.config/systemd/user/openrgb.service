@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenRGB server, which holds the lighting controllers so rgb-lights can switch profiles
+
+[Service]
+# The Commander Core drops back to its own rainbow effect when nothing drives it, so the server stays up.
+ExecStart=/usr/bin/openrgb --server --profile on
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

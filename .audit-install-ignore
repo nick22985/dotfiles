@@ -1,7 +1,7 @@
 # Audit entries intentionally kept outside this dotfiles install.
 # Values are shell globs. Supported scopes:
 #   package, package-group, flatpak, config, bin, system-unit, user-unit,
-#   service, group, managed-file, system-file, tool, default
+#   service, group, managed-file, system-file, tool, default, bare-repo
 
 # The base Arch installation is outside the scope of this post-install setup.
 package:base

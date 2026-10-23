@@ -465,6 +465,40 @@ audit_user_and_system_files() {
     done < <(selected_system_file_manifests)
     filter_ignored system-file "$audit_tmp/system-file-drift.raw" "$audit_tmp/system-file-drift"
     print_file "Managed system files with drift" "$audit_tmp/system-file-drift"
+
+    check_bare_repositories > "$audit_tmp/bare-repos.raw"
+    filter_ignored bare-repo "$audit_tmp/bare-repos.raw" "$audit_tmp/bare-repos"
+    print_file "Bare-layout repositories to repair" "$audit_tmp/bare-repos"
+}
+
+# A .bare-layout repository (<dir>/.bare internals, <dir>/.git pointing at them, worktrees as
+# <dir>/<branch>) that git doesn't see as bare treats <dir> as a checkout of HEAD, so prompts,
+# status and commits made from <dir> act on the wrong tree. Files at the root outside the
+# worktrees are usually what was left behind when that happened. Dot entries are left out
+# because tools keep their own state there (.sbx, .claude).
+check_bare_repositories() {
+    local projects_root="${REPOS_PROJECTS_DIR:-$HOME/projects}" internals root entry
+    local -A worktree_tops
+    [[ -d "$projects_root" ]] || return 0
+    while IFS= read -r -d '' internals; do
+        root="${internals%/.bare}"
+        if ! git --git-dir="$internals" config core.repositoryformatversion >/dev/null; then
+            printf '%s no-repositoryformatversion (git ignores core.bare)\n' "$root"
+        elif [[ "$(git -C "$root" rev-parse --is-bare-repository 2>/dev/null)" != true ]]; then
+            printf '%s not-bare\n' "$root"
+        fi
+        worktree_tops=()
+        while IFS= read -r entry; do
+            [[ "$entry" == "$root/"* ]] || continue
+            entry="${entry#"$root/"}"
+            worktree_tops["${entry%%/*}"]=1
+        done < <(git --git-dir="$internals" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+        while IFS= read -r -d '' entry; do
+            entry="${entry##*/}"
+            [[ -n "${worktree_tops[$entry]:-}" ]] || printf '%s stray-entry %s\n' "$root" "$entry"
+        done < <(find "$root" -mindepth 1 -maxdepth 1 ! -name '.*' -print0)
+    done < <(find "$projects_root" -maxdepth 5 \( -name node_modules -o -name target -o -name .git -o -name .stversions \) -prune -o \
+        \( -name .bare -type d -execdir test -f .git \; -print0 -prune \) 2>/dev/null | sort -z)
 }
 
 audit_defaults() {

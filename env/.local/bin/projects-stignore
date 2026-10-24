@@ -10,7 +10,7 @@
 # git-peer-sync.
 # Build output and temporary directories (dist, build, out, tmp, ...) are ignored where git ignores
 # them; a committed dist still syncs, and so do the data directories and files like .env that git
-# ignores.
+# ignores. A tree with .gitignore files but no repository on this machine is read the same way.
 #
 #   projects-stignore           rewrite ~/projects/.stignore when it changed (run by git-peer-sync
 #                               and modules/sync-repos so new repositories are covered quickly)
@@ -69,8 +69,25 @@ ignored_build_directories() {
     while IFS= read -r pattern; do
         names+=("$pattern")
     done < <(sed -n 's#^(?d)\([^/]*\)$#\1#p' "$base_file")
+    local -a git_args
+    local empty_repo="" ancestor covered
     while IFS= read -r -d '' git_path; do
-        root="${git_path%/.git}"
+        root="${git_path%/*}"
+        git_args=(-C "$root")
+        if [[ "${git_path##*/}" == .gitignore ]]; then
+            [[ -e "$root/.git" ]] && continue
+            covered=""
+            ancestor="${root%/*}"
+            while [[ "$ancestor" == "$path"/* ]]; do
+                [[ -e "$ancestor/.git" || -f "$ancestor/.gitignore" ]] && { covered=1; break; }
+                ancestor="${ancestor%/*}"
+            done
+            [[ -n "$covered" ]] && continue
+            if [[ -z "$empty_repo" ]]; then
+                empty_repo="$(mktemp -d)" && git init -q "$empty_repo" || return 1
+            fi
+            git_args+=(--git-dir="$empty_repo/.git" --work-tree=.)
+        fi
         patterns=""
         added=""
         while IFS= read -r -d '' directory; do
@@ -87,10 +104,11 @@ ignored_build_directories() {
             done
             patterns+="(?d)${root#"$path"}/$(sed 's/[][*?{}\\]/\\&/g' <<< "$directory")"$'\n'
             added="$directory"
-        done < <(git -C "$root" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null | LC_ALL=C sort -z)
+        done < <(git "${git_args[@]}" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null | LC_ALL=C sort -z)
         [[ -n "$patterns" ]] && printf '\n// Build output git ignores in %s\n%s' "${root#"$path"}" "$patterns"
     done < <(find "$path" \( -name node_modules -o -name target -o -name .bare -o -name .stversions -o -name '.Trash-*' -o -path '*/.docker/db' \) -prune -o \
-        -name .git -print0 -prune 2>/dev/null | sort -z)
+        \( -name .git -o -name .gitignore \) -print0 -prune 2>/dev/null | sort -z)
+    [[ -z "$empty_repo" ]] || rm -rf -- "$empty_repo"
 }
 
 generate() {
